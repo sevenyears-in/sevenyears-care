@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
+import { publicOrigin } from "@/lib/origin";
 import { zohoConfig, ZOHO_SCOPES } from "@/lib/zoho";
 
 // GET /api/staff/zoho/connect — sends the admin to Zoho's consent screen.
 
 export async function GET(request: Request) {
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const back = (query: string) => NextResponse.redirect(`${origin}/staff/admin/zoho?${query}`);
 
   const staff = await getCurrentStaff();

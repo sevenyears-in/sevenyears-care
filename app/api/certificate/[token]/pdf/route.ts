@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { publicOrigin } from "@/lib/origin";
 import { buildCertificatePdf, type CertificateData } from "@/lib/certificate-pdf";
 
 // GET /api/certificate/<token>/pdf          → downloads the PDF
@@ -30,7 +31,7 @@ export async function GET(
   if (!data) return new Response("Certificate not found.", { status: 404 });
 
   const url = new URL(request.url);
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || url.origin;
+  const siteUrl = publicOrigin(request);
 
   try {
     const bytes = await buildCertificatePdf(data as CertificateData, siteUrl);

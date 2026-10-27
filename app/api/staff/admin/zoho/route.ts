@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
+import { publicOrigin } from "@/lib/origin";
 import { loadZohoSettings, saveZohoSettings, zohoConfig } from "@/lib/zoho";
 
 // Admin: Zoho POS connection settings (stored server-side in Supabase).
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
 
   const saved = await loadZohoSettings();
   const config = await zohoConfig();
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
 
   return NextResponse.json({
     usingEnvFile: Boolean(process.env.ZOHO_REFRESH_TOKEN),

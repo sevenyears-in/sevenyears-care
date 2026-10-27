@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getCurrentStaff } from "@/lib/auth";
+import { publicOrigin } from "@/lib/origin";
 import { loadZohoSettings, saveZohoSettings, zohoConfig } from "@/lib/zoho";
 
 // GET /api/staff/zoho/callback — Zoho sends the admin back here after "Accept".
@@ -8,7 +9,7 @@ import { loadZohoSettings, saveZohoSettings, zohoConfig } from "@/lib/zoho";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const origin = url.origin;
+  const origin = publicOrigin(request);
   const back = (query: string) => {
     const response = NextResponse.redirect(`${origin}/staff/admin/zoho?${query}`);
     response.cookies.set("sy_zoho_state", "", { path: "/", maxAge: 0 });
