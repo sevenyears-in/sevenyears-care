@@ -1,63 +1,42 @@
-import Image from "next/image";
 import Link from "next/link";
+import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
+import { whatsappLink } from "@/lib/site-config";
 
 const actions = [
   {
-    title: "Register Warranty",
-    description: "Register and protect your Seven Years purchase.",
-    href: "/register-warranty",
-    icon: "🛡️",
-  },
-  {
     title: "My Warranties",
-    description: "View registered products and warranty details.",
-    href: "#",
-    icon: "📄",
+    description: "View your registered products and download warranty certificates.",
+    href: "/my-warranties",
+    icon: "🛡️",
   },
   {
     title: "Request Service",
     description: "Raise a service request for a registered product.",
-    href: "#",
+    href: "/request-service",
     icon: "🛠️",
   },
   {
     title: "Register Complaint",
-    description: "Report an issue and track resolution.",
-    href: "#",
+    description: "Report an issue and we'll work to resolve it.",
+    href: "/register-complaint",
     icon: "💬",
   },
   {
     title: "Track Request",
     description: "Check the status of your service or complaint.",
-    href: "#",
+    href: "/track-request",
     icon: "📍",
   },
 ];
 
 export default function HomePage() {
+  const whatsapp = whatsappLink();
+
   return (
-    <main className="min-h-screen bg-[#f7f9fb] text-[#161616]">
-      <header className="border-b border-black/5 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-          <Image
-            src="/seven-years-logo.png"
-            alt="Seven Years"
-            width={180}
-            height={70}
-            className="h-auto w-[150px] sm:w-[180px]"
-            priority
-          />
+    <div className="flex min-h-screen flex-col bg-[#f7f9fb] text-[#161616]">
+      <SiteHeader />
 
-          <button
-            type="button"
-            className="rounded-2xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-black hover:text-white"
-          >
-            Sign in
-          </button>
-        </div>
-      </header>
-
-      <section className="mx-auto grid max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:py-16">
+      <main className="mx-auto grid w-full max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:py-16">
         <div className="flex flex-col justify-center">
           <div className="inline-flex w-fit rounded-full bg-[#ff5e79]/10 px-4 py-2 text-sm font-bold text-[#ff5e79]">
             Seven Years Care
@@ -68,8 +47,8 @@ export default function HomePage() {
           </h1>
 
           <p className="mt-5 max-w-xl text-base leading-7 text-black/60 sm:text-lg">
-            Register your products, keep warranty details safely available,
-            request service, raise complaints, and track support from one place.
+            View your warranty certificates, request service, raise complaints,
+            and track support from one place.
           </p>
 
           <div className="mt-8 max-w-xl rounded-3xl bg-[#161616] p-6 text-white sm:p-8">
@@ -78,19 +57,19 @@ export default function HomePage() {
             </p>
 
             <h2 className="mt-3 text-2xl font-bold">
-              Bought a new product from Seven Years?
+              Bought a product from Seven Years?
             </h2>
 
             <p className="mt-3 text-sm leading-6 text-white/60">
-              Register the warranty now so your purchase details are ready when
-              you need service or support.
+              Our store team registers your warranty at billing. Find your
+              certificate any time with your mobile number and bill number.
             </p>
 
             <Link
-              href="/register-warranty"
+              href="/my-warranties"
               className="mt-6 inline-block w-full rounded-2xl bg-[#ff5e79] px-5 py-4 text-center text-base font-bold text-white transition hover:opacity-90 sm:w-auto"
             >
-              Register Warranty
+              Find My Warranty
             </Link>
           </div>
         </div>
@@ -115,39 +94,51 @@ export default function HomePage() {
               </p>
 
               <div className="mt-5 text-sm font-bold text-[#ff5e79]">
-                Continue →
+                Continue <span className="inline-block transition group-hover:translate-x-1">→</span>
               </div>
             </Link>
           ))}
 
-          <a
-            href="#"
-            className="sm:col-span-2 rounded-3xl bg-[#11b8d0] p-6 text-white transition hover:opacity-95"
-          >
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/70">
-              Need Help?
-            </p>
-
-            <div className="mt-2 flex items-end justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold">WhatsApp Support</h2>
-                <p className="mt-2 text-sm leading-6 text-white/80">
-                  Connect with the Seven Years Care team for assistance.
-                </p>
-              </div>
-
-              <div className="text-3xl">💬</div>
-            </div>
-          </a>
+          {whatsapp ? (
+            <a
+              href={whatsapp}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sm:col-span-2 rounded-3xl bg-[#11b8d0] p-6 text-white transition hover:opacity-95"
+            >
+              <SupportCardBody />
+            </a>
+          ) : (
+            <Link
+              href="/register-complaint"
+              className="sm:col-span-2 rounded-3xl bg-[#11b8d0] p-6 text-white transition hover:opacity-95"
+            >
+              <SupportCardBody />
+            </Link>
+          )}
         </div>
-      </section>
+      </main>
 
-      <footer className="border-t border-black/5 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-2 px-5 py-6 text-xs text-black/40 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <p>Seven Years Care</p>
-          <p>Warranty • Service • Complaints • Support</p>
+      <SiteFooter />
+    </div>
+  );
+}
+
+function SupportCardBody() {
+  return (
+    <>
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/70">
+        Need Help?
+      </p>
+      <div className="mt-2 flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold">WhatsApp Support</h2>
+          <p className="mt-2 text-sm leading-6 text-white/80">
+            Connect with the Seven Years Care team for assistance.
+          </p>
         </div>
-      </footer>
-    </main>
+        <div className="text-3xl">💬</div>
+      </div>
+    </>
   );
 }
