@@ -1,7 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { cleanMobile, generateTicketNumber, isISODate, isValidMobile } from "@/lib/helpers";
 import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
+import { SAFETY_ISSUE_TYPES } from "@/lib/sla";
+import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 
 // POST /api/service-requests
 // Creates a service request against a registered warranty.
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
       .from("service_requests")
       .select("request_number")
       .eq("warranty_id", warranty.id)
-      .in("status", ["open", "assigned", "in_progress", "awaiting_parts"])
+      .in("status", ["open", "acknowledged", "assigned", "in_progress", "awaiting_parts", "awaiting_approval"])
       .limit(1)
       .maybeSingle();
 
@@ -113,6 +115,9 @@ export async function POST(request: Request) {
       requestNumber = generateTicketNumber("SRV");
     }
 
+    // Brake / frame problems on baby gear are safety issues: top priority.
+    const priority = SAFETY_ISSUE_TYPES.includes(issueType) ? "safety" : "normal";
+
     // ---------------- Create ----------------
     const { data: created, error: insertError } = await supabaseAdmin
       .from("service_requests")
@@ -133,13 +138,47 @@ export async function POST(request: Request) {
         longitude,
         location_accuracy_meters: locationAccuracy,
         status: "open",
+        priority,
+        ...initialDeadlines("service", priority),
       })
-      .select("request_number, status, under_warranty, created_at")
+      .select("id, request_number, status, under_warranty, created_at")
       .single();
 
     if (insertError) throw insertError;
 
-    return NextResponse.json({ success: true, request: created }, { status: 201 });
+    // Alert the store manager, technicians and service head; confirm to the customer.
+    after(() =>
+      announceNewTicket({
+        type: "service",
+        id: created.id,
+        number: created.request_number,
+        storeName: warranty.store_name ?? null,
+        title: issueType,
+        summary: `${warranty.product_name} — ${issueType} · Customer: ${warranty.customer_name} (${mobile})`,
+        details: [
+          `Problem: ${description}`,
+          serviceMode === "home_visit" ? "Customer asked for a home visit / pickup." : "Customer will bring it to the store.",
+          underWarranty ? "Under warranty." : "Out of warranty (chargeable).",
+          ...(priority === "safety" ? ["SAFETY: ask the customer to stop using the product until it is checked."] : []),
+        ],
+        priority,
+        customer: { name: warranty.customer_name, mobile },
+      }).catch((error) => console.error("New service request alerts failed:", error))
+    );
+
+    return NextResponse.json(
+      {
+        success: true,
+        request: {
+          request_number: created.request_number,
+          status: created.status,
+          under_warranty: created.under_warranty,
+          created_at: created.created_at,
+          priority,
+        },
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Service request error:", error);
     return NextResponse.json(

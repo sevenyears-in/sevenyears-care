@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   };
 
   const staff = await getCurrentStaff();
-  if (!staff || staff.role !== "admin") return NextResponse.redirect(`${origin}/staff/login`);
+  if (!staff || staff.role !== "super_admin") return NextResponse.redirect(`${origin}/staff/login`);
 
   const cookieStore = await cookies();
   const expectedState = cookieStore.get("sy_zoho_state")?.value;

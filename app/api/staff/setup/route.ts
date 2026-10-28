@@ -10,7 +10,7 @@ import {
   userIdProblem,
 } from "@/lib/auth";
 
-// First-time setup: creates the first administrator.
+// First-time setup: creates the first administrator (the Super Admin).
 // Only works while there are NO staff users at all.
 
 async function staffCount() {
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
         user_id: userId,
         full_name: fullName,
         password_hash: hashPassword(password),
-        role: "admin",
+        role: "super_admin",
         store_name: storeName || null,
       })
       .select("id, session_version")

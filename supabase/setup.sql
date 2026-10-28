@@ -3,6 +3,7 @@
 -- Run in Supabase: Dashboard → SQL Editor → New query → paste → Run.
 -- Safe to run more than once. Works whether or not you already ran the
 -- older "service-and-complaints.sql".
+-- AFTER this, also run supabase/workflow-upgrade.sql (roles, workflow, alerts).
 -- =====================================================================
 
 create extension if not exists pgcrypto;

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   cardClass,
   ErrorBox,
@@ -11,7 +11,12 @@ import {
   primaryButtonClass,
   StatusBadge,
 } from "@/components/SiteChrome";
-import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
+import { formatDate, formatDateTime } from "@/lib/helpers";
+import { CUSTOMER_STATUS_LABELS } from "@/lib/sla";
+
+function label(status: string) {
+  return CUSTOMER_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
+}
 
 type Detail = { label: string; value: string | null; isDate?: boolean };
 type HistoryItem = { status: string; note: string | null; createdAt: string };
@@ -29,8 +34,8 @@ type TrackResult = {
   history: HistoryItem[];
 };
 
-const serviceSteps = ["open", "assigned", "in_progress", "resolved", "closed"];
-const complaintSteps = ["open", "under_review", "in_progress", "resolved", "closed"];
+const serviceSteps = ["open", "acknowledged", "assigned", "in_progress", "resolved", "closed"];
+const complaintSteps = ["open", "acknowledged", "under_review", "in_progress", "resolved", "closed"];
 
 export default function TrackRequestPage() {
   const [ticketNumber, setTicketNumber] = useState("");
@@ -39,14 +44,14 @@ export default function TrackRequestPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [result, setResult] = useState<TrackResult | null>(null);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const lookup = useCallback(async (ticketValue: string, mobileValue: string) => {
     setErrorMessage("");
     setResult(null);
 
-    const mobile = mobileNumber.replace(/\D/g, "");
+    const mobile = mobileValue.replace(/\D/g, "");
+    const ticket = ticketValue.trim();
 
-    if (!ticketNumber.trim()) {
+    if (!ticket) {
       setErrorMessage("Please enter your request or complaint number.");
       return;
     }
@@ -61,7 +66,7 @@ export default function TrackRequestPage() {
       const response = await fetch("/api/track", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketNumber, mobileNumber: mobile }),
+        body: JSON.stringify({ ticketNumber: ticket, mobileNumber: mobile }),
       });
 
       const data = await response.json();
@@ -77,7 +82,33 @@ export default function TrackRequestPage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    lookup(ticketNumber, mobileNumber);
   };
+
+  // Coming from the home page or a WhatsApp link: fill in and look up straight away.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("ticket")?.trim() ?? "";
+    let saved: { ticket?: string; mobile?: string } = {};
+    try {
+      saved = JSON.parse(sessionStorage.getItem("sy_track") ?? "{}");
+      sessionStorage.removeItem("sy_track");
+    } catch {
+      saved = {};
+    }
+    const ticket = fromUrl || saved.ticket || "";
+    const mobile = saved.mobile ?? "";
+    const run = async () => {
+      if (ticket) setTicketNumber(ticket);
+      if (mobile) setMobileNumber(mobile);
+      if (ticket && mobile) await lookup(ticket, mobile);
+    };
+    run();
+  }, [lookup]);
 
   return (
     <PageShell
@@ -142,7 +173,9 @@ export default function TrackRequestPage() {
 function TrackResultCard({ result }: { result: TrackResult }) {
   const steps = result.type === "service" ? serviceSteps : complaintSteps;
   const stoppedEarly = result.status === "cancelled";
-  const currentIndex = steps.indexOf(result.status === "awaiting_parts" ? "in_progress" : result.status);
+  const currentIndex = steps.indexOf(
+    ["awaiting_parts", "awaiting_approval"].includes(result.status) ? "in_progress" : result.status
+  );
 
   return (
     <div className={`${cardClass} mt-6`}>
@@ -157,11 +190,11 @@ function TrackResultCard({ result }: { result: TrackResult }) {
             Raised {formatDateTime(result.createdAt)}
           </p>
         </div>
-        <StatusBadge status={result.status} label={statusLabel(result.status)} />
+        <StatusBadge status={result.status} label={label(result.status)} />
       </div>
 
       {!stoppedEarly && (
-        <ol className="mt-6 grid grid-cols-5 gap-1" aria-label="Progress">
+        <ol className="mt-6 grid grid-cols-6 gap-1" aria-label="Progress">
           {steps.map((step, index) => {
             const done = index <= currentIndex;
             return (
@@ -174,7 +207,7 @@ function TrackResultCard({ result }: { result: TrackResult }) {
                     done ? "text-black" : "text-black/40"
                   }`}
                 >
-                  {statusLabel(step)}
+                  {label(step)}
                 </p>
               </li>
             );
@@ -224,7 +257,7 @@ function TrackResultCard({ result }: { result: TrackResult }) {
             {[...result.history].reverse().map((item, index) => (
               <li key={`${item.createdAt}-${index}`} className="relative">
                 <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full bg-[#ff5e79] ring-4 ring-white" />
-                <p className="text-sm font-bold">{statusLabel(item.status)}</p>
+                <p className="text-sm font-bold">{label(item.status)}</p>
                 <p className="text-xs text-black/50">{formatDateTime(item.createdAt)}</p>
                 {item.note && <p className="mt-1 text-sm text-black/70">{item.note}</p>}
               </li>

@@ -18,6 +18,7 @@ type Created = {
   status: string;
   under_warranty: boolean;
   created_at: string;
+  priority?: string;
 };
 
 export default function RequestServiceForm({
@@ -132,8 +133,15 @@ export default function RequestServiceForm({
         <h2 className="mt-6 text-2xl font-bold">Service request received</h2>
         <p className="mt-2 text-black/60">
           Our service team will contact you on +91 {mobileNumber.replace(/\D/g, "")}{" "}
-          to arrange the next step.
+          within 2 working hours to arrange the next step.
         </p>
+
+        {created.priority === "safety" && (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">
+            For your child&apos;s safety, please stop using this product until our team has checked it.
+            We have marked your request as urgent.
+          </div>
+        )}
 
         <div className="mt-6 rounded-3xl bg-[#161616] p-6 text-white">
           <p className="text-xs uppercase tracking-wider text-white/50">Request Number</p>
@@ -157,7 +165,7 @@ export default function RequestServiceForm({
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Link
-            href="/track-request"
+            href={`/track-request?ticket=${encodeURIComponent(created.request_number)}`}
             className="rounded-2xl bg-[#ff5e79] px-6 py-3 text-center font-bold text-white"
           >
             Track This Request

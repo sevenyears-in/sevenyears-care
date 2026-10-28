@@ -12,7 +12,7 @@ export async function GET(request: Request) {
 
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.redirect(`${origin}/staff/login`);
-  if (staff.role !== "admin") return NextResponse.redirect(`${origin}/staff`);
+  if (staff.role !== "super_admin") return NextResponse.redirect(`${origin}/staff`);
 
   const config = await zohoConfig();
   if (!config.clientId || !config.clientSecret) return back("error=keys-missing");

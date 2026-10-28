@@ -11,7 +11,38 @@ Warranty and service portal for Seven Years (Next.js 16 + Supabase + Zoho POS).
 | Register Warranty `/staff/register` | Enter bill number + date → bill is fetched from Zoho POS → each warranty-eligible item appears as its own row (qty 2 = 2 rows) → staff fill model no., serial no., customer name, mobile, address (+ optional extended warranty) → **Save** → **Generate Warranty Cards** downloads one PDF certificate per item |
 | Warranties `/staff/warranties` | Search by bill / warranty / mobile / serial, re-download PDFs |
 | Categories `/staff/admin/categories` (admin) | Which Zoho POS categories are warranty-eligible, and for how many months |
-| Staff Users `/staff/admin/users` (admin) | Add staff, reset passwords, disable accounts |
+| Staff Users `/staff/admin/users` (admin) | Add staff with role + store, e-mail / WhatsApp for alerts, reset passwords, disable accounts |
+| Service Requests `/staff/service` | Queue for Store Manager, Service Head, Technicians — acknowledge, classify, assign, resolve |
+| Complaints `/staff/complaints` | Queue for Store Manager, HR Head, Operations Manager |
+| Alerts `/staff/alerts` | The 🔔 — new requests, assignments, approvals, escalations |
+| Alerts Setup `/staff/admin/notifications` (Super Admin) | E-mail / WhatsApp / escalation status, test messages, delivery log |
+| Zoho POS `/staff/admin/zoho` (Super Admin only) | Connect / disconnect Zoho POS |
+
+## Roles
+
+| Role | Sees | Does |
+|---|---|---|
+| Super Admin (SHAJEER ALI NV) | Everything | Everything, incl. Zoho POS connection and admin accounts |
+| Admin | Everything | Categories, staff users (not admin accounts, not Zoho) |
+| Store Manager | Service requests + complaints of their store | Acknowledge, classify, assign technicians of their store, resolve, close |
+| Service Head | All service requests | Assign any technician, approve replacements, cancel |
+| Technician | Service requests of their store + jobs assigned to them | Acknowledge, start, parts, ask for replacement approval, resolve |
+| HR Head | All complaints | Leads staff-behaviour complaints |
+| Operations Manager | All complaints | Escalation level 2 |
+| Store Staff | — | Register warranties |
+
+## Process flow
+
+**Service request** (Toys Service SOP): Received → **Acknowledge** (2 hrs) → Classify
+(minor 2 days / moderate 3 / major 7 / installation 1; safety issues 24 hrs) → **Assign technician** →
+Start → (Waiting for parts / Replacement approval by Service Head) → **Resolve** (customer is told what was done) →
+**Close** after customer confirms. Reopen if the customer isn't happy.
+
+**Complaint** (Complaint Management SOP): Received → **Acknowledge** (2 hrs) → Classify → **Assign owner** →
+Investigate → **Resolve** → **Close** after customer confirms.
+
+Every step is on the timeline. "Customer sees" steps show on Track Request and go to the customer on
+WhatsApp; "Staff only" notes never do. Alerts: dashboard + e-mail + WhatsApp — see NOTIFICATIONS-SETUP.md.
 
 ## Customer side (public)
 
@@ -32,6 +63,7 @@ Warranty and service portal for Seven Years (Next.js 16 + Supabase + Zoho POS).
    ```
 
 2. **Database:** in Supabase → **SQL Editor** → New query → paste `supabase/setup.sql` → **Run**.
+   Then a new query with `supabase/workflow-upgrade.sql` → **Run** (roles, workflow, alerts).
 
 3. **`.env.local`** — add these lines (keep the Supabase ones you already have):
 
@@ -60,11 +92,9 @@ Warranty and service portal for Seven Years (Next.js 16 + Supabase + Zoho POS).
 
 5. **Add warranty categories** (Staff → Categories), then add staff users.
 
-## Day-to-day for staff handling service requests (in Supabase for now)
+## Alerts (e-mail, WhatsApp, escalation)
 
-Table Editor → `service_requests` or `complaints` → change `status`
-(`open` → `assigned` → `in_progress` → `resolved` → `closed`; service also `awaiting_parts`/`cancelled`;
-complaints also `under_review`) and type a message in `resolution_notes` — customers see it on Track Request.
+See **NOTIFICATIONS-SETUP.md**.
 
 ## Code map
 

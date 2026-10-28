@@ -8,6 +8,7 @@ import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { asRole, isAdmin, type Role } from "@/lib/roles";
 
 export const SESSION_COOKIE = "sy_staff_session";
 const SESSION_HOURS = 12;
@@ -16,8 +17,10 @@ export type StaffUser = {
   id: string;
   userId: string;
   fullName: string;
-  role: "admin" | "staff";
+  role: Role;
   storeName: string | null;
+  email: string | null;
+  whatsappNumber: string | null;
 };
 
 // ------------------------------------------------------------------
@@ -135,11 +138,32 @@ export async function getCurrentStaff(): Promise<StaffUser | null> {
   const session = readSessionValue(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) return null;
 
-  const { data: staff } = await supabaseAdmin
+  const full = await supabaseAdmin
     .from("staff_users")
-    .select("id, user_id, full_name, role, store_name, is_active, session_version")
+    .select("id, user_id, full_name, role, store_name, email, whatsapp_number, is_active, session_version")
     .eq("id", session.sid)
     .maybeSingle();
+
+  // Database not upgraded yet (supabase/workflow-upgrade.sql not run): keep logins working.
+  const result = full.error
+    ? await supabaseAdmin
+        .from("staff_users")
+        .select("id, user_id, full_name, role, store_name, is_active, session_version")
+        .eq("id", session.sid)
+        .maybeSingle()
+    : full;
+
+  const staff = result.data as unknown as {
+    id: string;
+    user_id: string;
+    full_name: string;
+    role: string;
+    store_name: string | null;
+    email?: string | null;
+    whatsapp_number?: string | null;
+    is_active: boolean;
+    session_version: number;
+  } | null;
 
   if (!staff || !staff.is_active || staff.session_version !== session.v) return null;
 
@@ -147,17 +171,22 @@ export async function getCurrentStaff(): Promise<StaffUser | null> {
     id: staff.id,
     userId: staff.user_id,
     fullName: staff.full_name,
-    role: staff.role === "admin" ? "admin" : "staff",
+    role: asRole(staff.role),
     storeName: staff.store_name ?? null,
+    email: staff.email ?? null,
+    whatsappNumber: staff.whatsapp_number ?? null,
   };
 }
 
 /**
  * For API routes. Returns { staff } when allowed, or { response } to return
- * straight away (401 not logged in / 403 not an admin).
+ * straight away (401 not logged in / 403 not allowed).
+ *   "staff"       → any logged-in staff member
+ *   "admin"       → Super Admin or Admin
+ *   "super_admin" → Super Admin only (e.g. Zoho POS connection)
  */
 export async function requireStaff(
-  role: "staff" | "admin" = "staff"
+  role: "staff" | "admin" | "super_admin" = "staff"
 ): Promise<{ staff: StaffUser; response?: undefined } | { staff?: undefined; response: NextResponse }> {
   const staff = await getCurrentStaff();
 
@@ -170,10 +199,19 @@ export async function requireStaff(
     };
   }
 
-  if (role === "admin" && staff.role !== "admin") {
+  if (role === "admin" && !isAdmin(staff.role)) {
     return {
       response: NextResponse.json(
         { error: "Only an administrator can do this." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  if (role === "super_admin" && staff.role !== "super_admin") {
+    return {
+      response: NextResponse.json(
+        { error: "Only the Super Admin can do this." },
         { status: 403 }
       ),
     };

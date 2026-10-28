@@ -134,6 +134,8 @@ const statusColours: Record<string, string> = {
   active: "bg-green-100 text-green-800",
   open: "bg-amber-100 text-amber-800",
   under_review: "bg-amber-100 text-amber-800",
+  acknowledged: "bg-sky-100 text-sky-800",
+  awaiting_approval: "bg-violet-100 text-violet-800",
   assigned: "bg-sky-100 text-sky-800",
   in_progress: "bg-sky-100 text-sky-800",
   awaiting_parts: "bg-violet-100 text-violet-800",
