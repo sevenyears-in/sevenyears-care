@@ -3,7 +3,7 @@ import { requireStaff } from "@/lib/auth";
 import { publicOrigin } from "@/lib/origin";
 import { loadZohoSettings, saveZohoSettings, zohoConfig } from "@/lib/zoho";
 
-// Admin: Zoho POS connection settings (stored server-side in Supabase).
+// Super Admin only: Zoho POS connection settings (stored server-side in Supabase).
 // GET    → status (never returns the secret or tokens)
 // POST   → save Client ID + Client Secret        { clientId, clientSecret }
 // PATCH  → choose organisation                     { organizationId }
@@ -14,7 +14,7 @@ function mask(value: string) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireStaff("admin");
+  const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
 
   const saved = await loadZohoSettings();
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireStaff("admin");
+  const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
 
   const body = await request.json().catch(() => ({}));
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireStaff("admin");
+  const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
 
   const body = await request.json().catch(() => ({}));
@@ -94,7 +94,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE() {
-  const auth = await requireStaff("admin");
+  const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
 
   const saved = await loadZohoSettings();

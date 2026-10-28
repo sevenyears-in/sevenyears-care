@@ -113,7 +113,7 @@ export default function RegisterComplaintPage() {
           </div>
           <h2 className="mt-6 text-2xl font-bold">Complaint registered</h2>
           <p className="mt-2 text-black/60">
-            Thank you for letting us know. Our team will review it and contact you.
+            Thank you for letting us know. Our team will contact you within 2 working hours.
           </p>
 
           <div className="mt-6 rounded-3xl bg-[#161616] p-6 text-white">
@@ -133,7 +133,7 @@ export default function RegisterComplaintPage() {
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/track-request"
+              href={`/track-request?ticket=${encodeURIComponent(created.complaint_number)}`}
               className="rounded-2xl bg-[#ff5e79] px-6 py-3 text-center font-bold text-white"
             >
               Track This Complaint

@@ -4,27 +4,36 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { canSeeComplaints, canSeeService, isAdmin, ROLE_LABELS, type Role } from "@/lib/roles";
 
 type Props = {
   fullName: string;
   userId: string;
-  role: "admin" | "staff";
+  role: Role;
   storeName: string | null;
+  unreadAlerts: number;
 };
 
-export function StaffHeader({ fullName, userId, role, storeName }: Props) {
+export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
 
   const links = [
     { href: "/staff", label: "Dashboard" },
+    ...(canSeeService(role) ? [{ href: "/staff/service", label: "Service Requests" }] : []),
+    ...(canSeeComplaints(role) ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
     { href: "/staff/register", label: "Register Warranty" },
     { href: "/staff/warranties", label: "Warranties" },
-    ...(role === "admin"
+    ...(isAdmin(role)
       ? [
           { href: "/staff/admin/categories", label: "Categories" },
           { href: "/staff/admin/users", label: "Staff Users" },
+        ]
+      : []),
+    ...(role === "super_admin"
+      ? [
+          { href: "/staff/admin/notifications", label: "Alerts Setup" },
           { href: "/staff/admin/zoho", label: "Zoho POS" },
         ]
       : []),
@@ -57,11 +66,22 @@ export function StaffHeader({ fullName, userId, role, storeName }: Props) {
         </div>
 
         <div className="flex items-center gap-3 text-sm">
+          <Link
+            href="/staff/alerts"
+            className="relative rounded-xl border border-black/10 px-3 py-2 text-xs font-bold transition hover:bg-[#f7f9fb]"
+            aria-label={`Alerts${unreadAlerts ? `, ${unreadAlerts} unread` : ""}`}
+          >
+            🔔 Alerts
+            {unreadAlerts > 0 && (
+              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[11px] font-bold text-white">
+                {unreadAlerts > 99 ? "99+" : unreadAlerts}
+              </span>
+            )}
+          </Link>
           <div className="text-right leading-tight">
             <p className="font-bold">{fullName}</p>
             <p className="text-xs text-black/50">
-              {userId}
-              {role === "admin" ? " • Admin" : ""}
+              {userId} • {ROLE_LABELS[role]}
               {storeName ? ` • ${storeName}` : ""}
             </p>
           </div>

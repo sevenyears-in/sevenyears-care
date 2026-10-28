@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { cleanMobile, generateTicketNumber, isValidMobile } from "@/lib/helpers";
 import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
+import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 
 // POST /api/complaints — anyone can raise a complaint (no warranty needed).
 
@@ -42,10 +43,11 @@ export async function POST(request: Request) {
       );
     }
 
+    let storeName: string | null = null;
     if (storeId) {
       const { data: store } = await supabaseAdmin
         .from("stores")
-        .select("id")
+        .select("id, store_name")
         .eq("id", storeId)
         .eq("is_active", true)
         .maybeSingle();
@@ -53,6 +55,7 @@ export async function POST(request: Request) {
       if (!store) {
         return NextResponse.json({ error: "Invalid Seven Years location." }, { status: 400 });
       }
+      storeName = store.store_name ?? null;
     }
 
     // Link to a warranty when the reference (warranty or bill number) belongs to this mobile.
@@ -61,7 +64,7 @@ export async function POST(request: Request) {
       const ref = reference.toUpperCase();
       const { data: owned } = await supabaseAdmin
         .from("warranties")
-        .select("id, warranty_number, bill_number")
+        .select("id, warranty_number, bill_number, store_name")
         .eq("customer_mobile", mobile);
 
       const match = (owned ?? []).find(
@@ -70,6 +73,8 @@ export async function POST(request: Request) {
           String(w.bill_number).toUpperCase() === ref
       );
       warrantyId = match?.id ?? null;
+      // No store chosen? Use the store the product was bought from.
+      if (!storeName && match?.store_name) storeName = match.store_name;
     }
 
     let complaintNumber = generateTicketNumber("CMP");
@@ -95,14 +100,42 @@ export async function POST(request: Request) {
         category,
         reference_number: reference || null,
         description,
+        store_name: storeName,
         status: "open",
+        priority: "normal",
+        ...initialDeadlines("complaint", "normal"),
       })
-      .select("complaint_number, status, created_at")
+      .select("id, complaint_number, status, created_at")
       .single();
 
     if (insertError) throw insertError;
 
-    return NextResponse.json({ success: true, complaint: created }, { status: 201 });
+    // Alert the store manager, HR Head and Operations Manager; confirm to the customer.
+    after(() =>
+      announceNewTicket({
+        type: "complaint",
+        id: created.id,
+        number: created.complaint_number,
+        storeName,
+        title: category,
+        summary: `${category} · Customer: ${fullName} (${mobile})`,
+        details: [`Complaint: ${description}`, ...(reference ? [`Reference: ${reference}`] : [])],
+        priority: "normal",
+        customer: { name: fullName, mobile, email: email || null },
+      }).catch((error) => console.error("New complaint alerts failed:", error))
+    );
+
+    return NextResponse.json(
+      {
+        success: true,
+        complaint: {
+          complaint_number: created.complaint_number,
+          status: created.status,
+          created_at: created.created_at,
+        },
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("Complaint error:", error);
     return NextResponse.json(

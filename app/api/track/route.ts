@@ -5,8 +5,6 @@ import { cleanMobile, isValidMobile, one } from "@/lib/helpers";
 // POST /api/track  { ticketNumber, mobileNumber }
 // Works for service requests (SY-SRV-…) and complaints (SY-CMP-…).
 
-type StoreRow = { store_name: string | null };
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -73,15 +71,13 @@ export async function POST(request: Request) {
       const { data: row, error } = await supabaseAdmin
         .from("complaints")
         .select(
-          "id, complaint_number, contact_mobile, category, description, reference_number, status, resolution_notes, created_at, updated_at, stores ( store_name )"
+          "id, complaint_number, contact_mobile, category, description, reference_number, store_name, status, resolution_notes, created_at, updated_at"
         )
         .eq("complaint_number", ticketNumber)
         .maybeSingle();
 
       if (error) throw error;
       if (!row || row.contact_mobile !== mobile) return notFound;
-
-      const store = one(row.stores as unknown as StoreRow | StoreRow[] | null);
 
       return NextResponse.json({
         type: "complaint",
@@ -94,7 +90,7 @@ export async function POST(request: Request) {
         updatedAt: row.updated_at,
         details: [
           { label: "Category", value: row.category },
-          { label: "Store", value: store?.store_name ?? null },
+          { label: "Store", value: row.store_name ?? null },
           { label: "Reference", value: row.reference_number },
         ],
         history: await loadHistory("complaint", row.id),
@@ -114,9 +110,10 @@ export async function POST(request: Request) {
 async function loadHistory(ticketType: "service" | "complaint", ticketId: string) {
   const { data, error } = await supabaseAdmin
     .from("ticket_status_history")
-    .select("status, note, created_at")
+    .select("status, note, created_at, visibility")
     .eq("ticket_type", ticketType)
     .eq("ticket_id", ticketId)
+    .neq("visibility", "internal") // staff-only notes are never shown to customers
     .order("created_at", { ascending: true });
 
   if (error) {
