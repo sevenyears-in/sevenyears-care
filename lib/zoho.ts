@@ -358,7 +358,46 @@ export async function fetchZohoStores(): Promise<ZohoStore[]> {
       errors.push(`${a.path}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  // Fallback: collect the store names printed on recent bills (needs only invoice access).
+  try {
+    const stores = await storesFromRecentInvoices();
+    if (stores.length > 0) return stores;
+    errors.push("recent bills: no store names found");
+  } catch (error) {
+    errors.push(`recent bills: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   throw new ZohoError(`Could not read the store list from Zoho POS (${errors.join("; ")}).`);
+}
+
+/** Stores that billed in the last 120 days (a new store appears after its first bill). */
+async function storesFromRecentInvoices(): Promise<ZohoStore[]> {
+  const from = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const found = new Map<string, ZohoStore>();
+
+  for (let page = 1; page <= 10; page++) {
+    const data = await zohoGet("invoices", {
+      date_start: from,
+      per_page: "200",
+      page: String(page),
+      sort_column: "date",
+      sort_order: "D",
+    });
+    for (const inv of arr(data.invoices)) {
+      const name = str(inv.location_name) || str(inv.branch_name) || str(inv.warehouse_name);
+      if (!name || found.has(name.toLowerCase())) continue;
+      found.set(name.toLowerCase(), {
+        id: str(inv.location_id) || str(inv.branch_id) || name,
+        name,
+        code: null,
+        active: true,
+      });
+    }
+    const more = obj(data.page_context).has_more_page;
+    if (!more) break;
+  }
+
+  return [...found.values()].sort((x, y) => x.name.localeCompare(y.name));
 }
 
 // ------------------------------------------------------------------
