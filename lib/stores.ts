@@ -1,0 +1,109 @@
+// Store list — taken from Zoho POS so names match the bills exactly.
+// Server only. The list is kept in Supabase (app_settings "zoho_stores") and
+// refreshed from Zoho automatically every 15 minutes, so a store newly created
+// in Zoho POS shows up here without any work.
+
+import { supabaseAdmin } from "@/lib/supabase/server";
+import { fetchZohoStores, zohoConfigured, type ZohoStore } from "@/lib/zoho";
+
+export const CORPORATE_OFFICE = "CORPORATE OFFICE";
+
+const CACHE_KEY = "zoho_stores";
+const REFRESH_MS = 15 * 60 * 1000;
+
+export type StoreOption = { name: string; code: string | null };
+
+type Cache = { fetchedAt: string; stores: ZohoStore[]; lastError?: string | null };
+
+async function readCache(): Promise<Cache | null> {
+  try {
+    const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", CACHE_KEY).maybeSingle();
+    const value = data?.value as Cache | undefined;
+    return value && Array.isArray(value.stores) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCache(value: Cache) {
+  try {
+    await supabaseAdmin
+      .from("app_settings")
+      .upsert({ key: CACHE_KEY, value, updated_at: new Date().toISOString() });
+  } catch (error) {
+    console.error("Saving store list failed:", error);
+  }
+}
+
+/** Old stores table — used only until Zoho POS is connected. */
+async function legacyStores(): Promise<ZohoStore[]> {
+  try {
+    const { data } = await supabaseAdmin
+      .from("stores")
+      .select("id, store_name, is_active")
+      .order("store_name");
+    return (data ?? [])
+      .filter((s) => s.store_name)
+      .map((s) => ({ id: String(s.id), name: String(s.store_name), code: null, active: s.is_active !== false }));
+  } catch {
+    return [];
+  }
+}
+
+export type StoreList = {
+  stores: StoreOption[];
+  source: "zoho" | "legacy";
+  fetchedAt: string | null;
+  error: string | null;
+};
+
+/** Active stores from Zoho POS (refreshed every 15 minutes, or now when force = true). */
+export async function getStores(force = false): Promise<StoreList> {
+  if (!(await zohoConfigured())) {
+    const legacy = await legacyStores();
+    return {
+      stores: legacy.filter((s) => s.active).map(({ name, code }) => ({ name, code })),
+      source: "legacy",
+      fetchedAt: null,
+      error: null,
+    };
+  }
+
+  const cache = await readCache();
+  const fresh = cache && Date.now() - new Date(cache.fetchedAt).getTime() < REFRESH_MS;
+
+  let stores = cache?.stores ?? [];
+  let fetchedAt = cache?.fetchedAt ?? null;
+  let error: string | null = cache?.lastError ?? null;
+
+  if (force || !fresh) {
+    try {
+      stores = await fetchZohoStores();
+      fetchedAt = new Date().toISOString();
+      error = null;
+      await writeCache({ fetchedAt, stores, lastError: null });
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      console.error("Zoho store list refresh failed:", error);
+      // Keep the last good list; try again in a few minutes.
+      await writeCache({
+        fetchedAt: cache?.fetchedAt ?? new Date(Date.now() - REFRESH_MS + 5 * 60 * 1000).toISOString(),
+        stores,
+        lastError: error,
+      });
+    }
+  }
+
+  return {
+    stores: stores.filter((s) => s.active).map(({ name, code }) => ({ name, code })),
+    source: "zoho",
+    fetchedAt,
+    error,
+  };
+}
+
+/** The store's exact Zoho name for a typed/selected value, or null if it isn't a Zoho store. */
+export function matchStore(stores: StoreOption[], value: string) {
+  const wanted = value.trim().toLowerCase();
+  return stores.find((s) => s.name.trim().toLowerCase() === wanted) ?? null;
+}

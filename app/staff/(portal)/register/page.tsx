@@ -288,7 +288,7 @@ export default function RegisterWarrantyStaffPage() {
               </div>
               <div className="flex gap-2">
                 <a
-                  href={`/api/certificate/${w.verification_token}/pdf?view=1`}
+                  href={`/staff/warranties/${w.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded-xl border border-black/10 px-4 py-2 text-sm font-bold hover:bg-[#f7f9fb]"
@@ -341,7 +341,7 @@ export default function RegisterWarrantyStaffPage() {
             value={billNumber}
             onChange={(e) => setBillNumber(e.target.value)}
             className={inputClass}
-            placeholder="e.g. INV-004512"
+            placeholder="e.g. VDK26-SI1-8504"
             autoComplete="off"
           />
         </div>

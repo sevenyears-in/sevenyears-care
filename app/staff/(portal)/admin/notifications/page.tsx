@@ -1,19 +1,15 @@
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { emailConfigured, emailSettings, whatsappConfigured, whatsappSettings } from "@/lib/notify";
 import { formatDateTime } from "@/lib/helpers";
 import { TestAlertButtons } from "@/components/TestAlertButtons";
+import { AlertSettingsForm } from "@/components/AlertSettingsForm";
 
-// Super Admin: is e-mail / WhatsApp set up, test it, and see what was sent.
+// Super Admin: e-mail / WhatsApp / escalation settings, tests, and what was sent.
 export default async function NotificationSettingsPage() {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
   if (staff.role !== "super_admin") redirect("/staff");
-
-  const email = emailSettings();
-  const wa = whatsappSettings();
-  const cronReady = (process.env.CRON_SECRET?.trim().length ?? 0) >= 16;
 
   const { data: log } = await supabaseAdmin
     .from("notification_log")
@@ -21,46 +17,18 @@ export default async function NotificationSettingsPage() {
     .order("created_at", { ascending: false })
     .limit(50);
 
-  const rows = [
-    {
-      name: "E-mail alerts",
-      ok: emailConfigured(),
-      detail: emailConfigured() ? `${email.host}:${email.port} as ${email.from}` : "Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM",
-    },
-    {
-      name: "WhatsApp alerts",
-      ok: whatsappConfigured(),
-      detail: whatsappConfigured()
-        ? `Templates: ${wa.staffTemplate} (staff), ${wa.customerTemplate} (customers), language ${wa.language}`
-        : "Add WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID",
-    },
-    {
-      name: "Automatic escalation",
-      ok: cronReady,
-      detail: cronReady
-        ? "CRON_SECRET is set. Make sure the 30-minute cron job calls /api/cron/sla?key=…"
-        : "Add CRON_SECRET (16+ characters) and a 30-minute cron job",
-    },
-  ];
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Alerts Setup</h1>
         <p className="mt-2 text-sm text-black/60">
-          Dashboard alerts always work. E-mail and WhatsApp need the settings below (see NOTIFICATIONS-SETUP.md in the
-          project folder). Staff receive alerts only if their e-mail / WhatsApp number is filled in under Staff Users.
+          Only the Super Admin can see and change these settings. Dashboard alerts (🔔) always work. Fill in e-mail and
+          WhatsApp below to also send alerts there. Staff get alerts only if their e-mail / WhatsApp number is filled in
+          under Staff Users.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {rows.map((r) => (
-          <div key={r.name} className={`rounded-3xl p-5 shadow-sm ring-1 ${r.ok ? "bg-green-50 ring-green-200" : "bg-amber-50 ring-amber-200"}`}>
-            <p className="font-bold">{r.ok ? "✅" : "⚠️"} {r.name}</p>
-            <p className="mt-2 break-words text-xs text-black/60">{r.detail}</p>
-          </div>
-        ))}
-      </div>
+      <AlertSettingsForm />
 
       <TestAlertButtons hasEmail={Boolean(staff.email)} hasWhatsapp={Boolean(staff.whatsappNumber)} />
 

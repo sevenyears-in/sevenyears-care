@@ -11,11 +11,10 @@ import {
   PageShell,
   primaryButtonClass,
 } from "@/components/SiteChrome";
-import { supabase } from "@/lib/supabase/client";
 import { formatDateTime } from "@/lib/helpers";
 import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
 
-type Store = { id: string; store_name: string };
+type Store = { name: string; code: string | null };
 type Created = { complaint_number: string; status: string; created_at: string };
 
 export default function RegisterComplaintPage() {
@@ -24,7 +23,7 @@ export default function RegisterComplaintPage() {
   const [fullName, setFullName] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
   const [email, setEmail] = useState("");
-  const [storeId, setStoreId] = useState("");
+  const [storeName, setStoreName] = useState("");
   const [category, setCategory] = useState("");
   const [reference, setReference] = useState("");
   const [description, setDescription] = useState("");
@@ -35,12 +34,9 @@ export default function RegisterComplaintPage() {
 
   useEffect(() => {
     const loadStores = async () => {
-      const { data } = await supabase
-        .from("stores")
-        .select("id, store_name")
-        .eq("is_active", true)
-        .order("store_name");
-      setStores(data ?? []);
+      const response = await fetch("/api/stores").catch(() => null);
+      const data = response ? await response.json().catch(() => ({})) : {};
+      setStores(data.stores ?? []);
     };
     loadStores();
   }, []);
@@ -78,7 +74,7 @@ export default function RegisterComplaintPage() {
           fullName,
           mobileNumber: mobile,
           email,
-          storeId: storeId || null,
+          storeName: storeName || null,
           category,
           reference,
           description,
@@ -234,14 +230,14 @@ export default function RegisterComplaintPage() {
                   </label>
                   <select
                     id="store"
-                    value={storeId}
-                    onChange={(e) => setStoreId(e.target.value)}
+                    value={storeName}
+                    onChange={(e) => setStoreName(e.target.value)}
                     className={inputClass}
                   >
                     <option value="">Select location (optional)</option>
                     {stores.map((store) => (
-                      <option key={store.id} value={store.id}>
-                        {store.store_name}
+                      <option key={store.name} value={store.name}>
+                        {store.name}
                       </option>
                     ))}
                   </select>

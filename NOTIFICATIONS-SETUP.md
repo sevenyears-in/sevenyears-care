@@ -1,12 +1,15 @@
 # Alerts setup — e-mail, WhatsApp and automatic escalation
 
 Dashboard alerts (the 🔔 on the staff screens) work with no setup.
-E-mail and WhatsApp need the settings below. After adding them, log in as
-Super Admin → **Alerts Setup** → press **Test e-mail** / **Test WhatsApp**.
+E-mail and WhatsApp need the settings below.
 
-Where to put the settings:
-- On your computer: in the file `.env.local` (then restart `npm run dev`).
-- On Hostinger: hPanel → your Node.js website → **Environment variables** → add each one → Redeploy/Restart.
+**Where to put the settings:** log in as Super Admin → **Alerts Setup**, fill in
+the form and press **Save settings**, then **Test e-mail** / **Test WhatsApp**.
+Only the Super Admin can see or change this page. Passwords and tokens are kept
+on the server and are never shown again (leave the box blank to keep them).
+
+(The environment-variable names below still work as a fallback for anything
+left blank on that page.)
 
 ---
 
@@ -69,20 +72,11 @@ WHATSAPP_TEMPLATE_LANGUAGE=en
 
 ## 3. Automatic escalation (every 30 minutes)
 
-Add a secret (any random text, 16+ characters):
-
-```
-CRON_SECRET=make-up-a-long-random-text-here
-```
-
-Then set a job that opens this address every 30 minutes:
-
-```
-https://care.sevenyears.in/api/cron/sla?key=THE-SAME-CRON_SECRET
-```
+Alerts Setup creates a private escalation address when you press **Save
+settings** (press **Copy** to copy it). Set a job that opens it every 30 minutes:
 
 - Hostinger: hPanel → Advanced → **Cron Jobs** → Custom command:
-  `curl -s "https://care.sevenyears.in/api/cron/sla?key=THE-SAME-CRON_SECRET"` → every 30 minutes.
+  `curl -s "PASTE-THE-ADDRESS-HERE"` → every 30 minutes.
 - Or use a free service such as cron-job.org with the same address.
 
 Escalation rules (from the SOPs):
@@ -97,5 +91,6 @@ Escalation rules (from the SOPs):
 
 Each person gets alerts only if their **e-mail** and/or **WhatsApp number** is
 filled in at Staff → Staff Users (tick boxes turn each channel on/off).
-The **store name** of Store Managers and Technicians must match the store name
-on bills / the complaint form, otherwise they won't see that store's requests.
+Store names come from Zoho POS (Staff Users shows a drop-down of the Zoho
+stores plus CORPORATE OFFICE), so they always match the bills and the
+complaint form.

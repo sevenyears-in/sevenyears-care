@@ -302,6 +302,66 @@ async function fetchItemCategories(itemIds: string[]) {
 }
 
 // ------------------------------------------------------------------
+// Stores (Zoho POS locations / branches)
+// ------------------------------------------------------------------
+
+export type ZohoStore = {
+  id: string;
+  name: string;
+  /** Branch / location code from Zoho, when Zoho has one. */
+  code: string | null;
+  active: boolean;
+};
+
+function readStore(item: Obj, idKey: string, nameKey: string): ZohoStore | null {
+  const name = str(item[nameKey]);
+  if (!name) return null;
+  const status = str(item.status).toLowerCase();
+  return {
+    id: str(item[idKey]) || name,
+    name,
+    code:
+      str(item.location_code) ||
+      str(item.branch_code) ||
+      str(item.warehouse_code) ||
+      str(item.code) ||
+      null,
+    active: !status || status === "active",
+  };
+}
+
+/**
+ * All stores set up in Zoho POS. Tries Locations first, then Branches, then
+ * Warehouses (different Zoho set-ups use different names for the same thing).
+ */
+export async function fetchZohoStores(): Promise<ZohoStore[]> {
+  const attempts: { path: string; listKey: string; idKey: string; nameKey: string }[] = [
+    { path: "locations", listKey: "locations", idKey: "location_id", nameKey: "location_name" },
+    { path: "branches", listKey: "branches", idKey: "branch_id", nameKey: "branch_name" },
+    { path: "settings/warehouses", listKey: "warehouses", idKey: "warehouse_id", nameKey: "warehouse_name" },
+  ];
+
+  const errors: string[] = [];
+  for (const a of attempts) {
+    try {
+      const data = await zohoGet(a.path);
+      const stores = arr(data[a.listKey])
+        .flatMap((item) => [item, ...arr(item.child_locations)])
+        .map((item) => readStore(item, a.idKey, a.nameKey))
+        .filter((s): s is ZohoStore => Boolean(s));
+      if (stores.length > 0) {
+        const unique = new Map(stores.map((s) => [s.name.toLowerCase(), s]));
+        return [...unique.values()].sort((x, y) => x.name.localeCompare(y.name));
+      }
+      errors.push(`${a.path}: empty`);
+    } catch (error) {
+      errors.push(`${a.path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new ZohoError(`Could not read the store list from Zoho POS (${errors.join("; ")}).`);
+}
+
+// ------------------------------------------------------------------
 // Demo bill (used until Zoho keys are added)
 // ------------------------------------------------------------------
 

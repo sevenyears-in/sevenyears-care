@@ -21,9 +21,15 @@ type StaffRow = {
 
 const STORE_ROLES: Role[] = ["store_manager", "technician", "staff"];
 
+type StoreOption = { name: string; code: string | null };
+
+const storeLabel = (s: StoreOption) => (s.code ? `${s.name} (${s.code})` : s.name);
+
 export default function StaffUsersPage() {
   const [users, setUsers] = useState<StaffRow[]>([]);
-  const [storeNames, setStoreNames] = useState<string[]>([]);
+  const [stores, setStores] = useState<StoreOption[]>([]);
+  const [storeSource, setStoreSource] = useState("zoho");
+  const [storeError, setStoreError] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<Role>("admin");
   const [loading, setLoading] = useState(true);
@@ -45,7 +51,9 @@ export default function StaffUsersPage() {
     if (!response.ok) setErrorMessage(data.error || "Unable to load staff.");
     else {
       setUsers(data.users ?? []);
-      setStoreNames(data.storeNames ?? []);
+      setStores(data.stores ?? []);
+      setStoreSource(data.storeSource ?? "zoho");
+      setStoreError(data.storeError ?? "");
       setCurrentUserId(data.currentUserId ?? "");
       setCurrentRole(data.currentRole ?? "admin");
     }
@@ -123,15 +131,20 @@ export default function StaffUsersPage() {
         <h1 className="text-3xl font-bold">Staff Users</h1>
         <p className="mt-2 text-sm text-black/60">
           Add staff with their role and store. Add an e-mail and WhatsApp number so they get alerts for new
-          service requests and complaints. The store name must match the store on bills and the complaint form.
+          service requests and complaints. Stores come from Zoho POS automatically (new Zoho stores appear here on
+          their own), plus CORPORATE OFFICE.
         </p>
+        {storeSource !== "zoho" && (
+          <p className="mt-2 rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
+            Zoho POS is not connected, so the old store list is shown. Connect Zoho POS to use the Zoho store names.
+          </p>
+        )}
+        {storeError && (
+          <p className="mt-2 rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
+            Could not refresh the store list from Zoho just now — showing the last saved list. ({storeError})
+          </p>
+        )}
       </div>
-
-      <datalist id="store-names">
-        {storeNames.map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
 
       <form onSubmit={create} className="grid gap-4 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-2 lg:grid-cols-3">
         <div>
@@ -159,7 +172,12 @@ export default function StaffUsersPage() {
           <label htmlFor="store" className={labelClass}>
             Store{STORE_ROLES.includes(role) && role !== "staff" ? " *" : ""}
           </label>
-          <input id="store" list="store-names" value={storeName} onChange={(e) => setStoreName(e.target.value)} className={inputClass} placeholder="e.g. Seven Years Vatakara" />
+          <select id="store" value={storeName} onChange={(e) => setStoreName(e.target.value)} className={inputClass}>
+            <option value="">— No store —</option>
+            {stores.map((s) => (
+              <option key={s.name} value={s.name}>{storeLabel(s)}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="email" className={labelClass}>E-mail (for alerts)</label>
@@ -224,9 +242,21 @@ export default function StaffUsersPage() {
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        <button type="button" disabled={locked} onClick={() => ask(u, "Store", u.store_name, "storeName")} className="text-left hover:underline">
-                          {u.store_name || <span className="text-black/40">Set store</span>}
-                        </button>
+                        <select
+                          value={u.store_name ?? ""}
+                          disabled={locked}
+                          onChange={(e) => patch(u.id, { storeName: e.target.value }, "Store updated.")}
+                          className="max-w-[220px] rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
+                          aria-label={`Store for ${u.user_id}`}
+                        >
+                          <option value="">— No store —</option>
+                          {u.store_name && !stores.some((s) => s.name === u.store_name) && (
+                            <option value={u.store_name}>{u.store_name} (not in Zoho — please change)</option>
+                          )}
+                          {stores.map((s) => (
+                            <option key={s.name} value={s.name}>{storeLabel(s)}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-4 py-3 text-xs">
                         <div className="flex flex-col gap-1">

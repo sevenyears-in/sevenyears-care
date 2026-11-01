@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
+import { ZohoStoresCard } from "@/components/ZohoStoresCard";
 
 type Status = {
   usingEnvFile: boolean;
@@ -252,6 +253,8 @@ export default function ZohoConnectionPage() {
           )}
         </section>
       )}
+
+      {ready && <ZohoStoresCard />}
     </div>
   );
 }

@@ -2,7 +2,8 @@
 // Server only. Sending never throws: a failed e-mail or WhatsApp message is
 // written to notification_log and the request carries on.
 //
-// Settings (.env.local on your computer / Environment variables on Hostinger):
+// Settings: Super Admin → Alerts Setup (saved in Supabase). Anything left blank
+// there falls back to these environment variables:
 //   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM          → e-mail
 //   WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID                       → WhatsApp (Meta Cloud API)
 //   WHATSAPP_STAFF_TEMPLATE     (default: staff_ticket_alert)      → 4 variables
@@ -11,6 +12,7 @@
 // See NOTIFICATIONS-SETUP.md.
 
 import { sendSmtpMail } from "@/lib/smtp";
+import { alertSettings } from "@/lib/alert-settings";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { asRole, type Role, sameStore, STORE_SCOPED_ROLES } from "@/lib/roles";
 import type { TicketType } from "@/lib/sla";
@@ -32,33 +34,29 @@ export function customerTrackLink(ticketNumber: string) {
 // Configuration status
 // ------------------------------------------------------------------
 
-export function emailSettings() {
-  return {
-    host: process.env.SMTP_HOST?.trim() ?? "",
-    port: Number(process.env.SMTP_PORT ?? 465),
-    user: process.env.SMTP_USER?.trim() ?? "",
-    pass: process.env.SMTP_PASS ?? "",
-    from: process.env.MAIL_FROM?.trim() || process.env.SMTP_USER?.trim() || "",
-  };
+export async function emailSettings() {
+  const a = await alertSettings();
+  return { host: a.smtpHost, port: a.smtpPort, user: a.smtpUser, pass: a.smtpPass, from: a.mailFrom };
 }
 
-export function emailConfigured() {
-  const s = emailSettings();
+export async function emailConfigured() {
+  const s = await emailSettings();
   return Boolean(s.host && s.user && s.pass && s.from);
 }
 
-export function whatsappSettings() {
+export async function whatsappSettings() {
+  const a = await alertSettings();
   return {
-    token: process.env.WHATSAPP_TOKEN?.trim() ?? "",
-    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() ?? "",
-    staffTemplate: process.env.WHATSAPP_STAFF_TEMPLATE?.trim() || "staff_ticket_alert",
-    customerTemplate: process.env.WHATSAPP_CUSTOMER_TEMPLATE?.trim() || "customer_ticket_update",
-    language: process.env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || "en",
+    token: a.waToken,
+    phoneNumberId: a.waPhoneNumberId,
+    staffTemplate: a.waStaffTemplate,
+    customerTemplate: a.waCustomerTemplate,
+    language: a.waLanguage,
   };
 }
 
-export function whatsappConfigured() {
-  const s = whatsappSettings();
+export async function whatsappConfigured() {
+  const s = await whatsappSettings();
   return Boolean(s.token && s.phoneNumberId);
 }
 
@@ -96,13 +94,13 @@ export async function sendEmail(
   meta: LogMeta
 ): Promise<{ ok: boolean; error?: string }> {
   if (!to) return { ok: false, error: "No e-mail address" };
-  if (!emailConfigured()) {
+  if (!(await emailConfigured())) {
     await log("email", to, "skipped", { ...meta, subject, error: "E-mail is not set up" });
-    return { ok: false, error: "E-mail is not set up (SMTP settings missing)." };
+    return { ok: false, error: "E-mail is not set up (add the e-mail settings in Alerts Setup)." };
   }
 
   try {
-    const s = emailSettings();
+    const s = await emailSettings();
     await sendSmtpMail(
       { host: s.host, port: s.port, user: s.user, pass: s.pass },
       { from: s.from, fromName: "Seven Years Care", to, subject, text, html: textToHtml(text) }
@@ -142,12 +140,12 @@ export async function sendWhatsApp(
   if (!/^[6-9]\d{9}$/.test(digits)) return { ok: false, error: "No valid WhatsApp number" };
   const to = `91${digits}`;
 
-  if (!whatsappConfigured()) {
+  if (!(await whatsappConfigured())) {
     await log("whatsapp", to, "skipped", { ...meta, subject: template, error: "WhatsApp is not set up" });
-    return { ok: false, error: "WhatsApp is not set up (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID missing)." };
+    return { ok: false, error: "WhatsApp is not set up (add the token and phone number ID in Alerts Setup)." };
   }
 
-  const s = whatsappSettings();
+  const s = await whatsappSettings();
   try {
     const response = await fetch(`https://graph.facebook.com/v21.0/${s.phoneNumberId}/messages`, {
       method: "POST",
@@ -283,7 +281,7 @@ export async function notifyStaff(recipients: Recipient[], alert: StaffAlert, ex
 
   const meta = { audience: "staff" as const, ticketNumber: alert.ticketNumber };
   const subject = `${alert.title} — ${alert.ticketNumber}`;
-  const wa = whatsappSettings();
+  const wa = await whatsappSettings();
 
   await Promise.all(
     list.map(async (r) => {
@@ -334,7 +332,7 @@ export async function notifyCustomer(input: {
     jobs.push(
       sendWhatsApp(
         input.mobile,
-        whatsappSettings().customerTemplate,
+        (await whatsappSettings()).customerTemplate,
         [name, input.ticketNumber, input.message, link],
         meta
       )

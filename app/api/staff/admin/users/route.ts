@@ -9,9 +9,10 @@ import {
 } from "@/lib/auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
 import { isRole, type Role } from "@/lib/roles";
+import { CORPORATE_OFFICE, getStores, matchStore } from "@/lib/stores";
 
 // Staff management (Super Admin and Admin).
-// GET    → list staff + known store names
+// GET    → list staff + store list (Zoho POS stores + CORPORATE OFFICE)
 // POST   → create staff   { fullName, userId, password, role, storeName, email, whatsappNumber }
 // PATCH  → update staff   { id, fullName?, role?, storeName?, email?, whatsappNumber?,
 //                           notifyEmail?, notifyWhatsapp?, isActive?, newPassword? }
@@ -19,6 +20,23 @@ import { isRole, type Role } from "@/lib/roles";
 // Only the Super Admin can create or change Super Admin / Admin accounts.
 
 const PROTECTED_ROLES: Role[] = ["super_admin", "admin"];
+
+/** Store must be a Zoho POS store or CORPORATE OFFICE. Returns the exact name. */
+async function storeValue(value: unknown): Promise<{ value: string | null; error?: string }> {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { value: null };
+  if (raw.toLowerCase() === CORPORATE_OFFICE.toLowerCase()) return { value: CORPORATE_OFFICE };
+  const list = await getStores();
+  const match = matchStore(list.stores, raw);
+  if (match) return { value: match.name };
+  return {
+    value: null,
+    error:
+      list.source === "zoho"
+        ? `"${raw}" is not a store in Zoho POS. Choose a store from the list.`
+        : `"${raw}" is not in the store list.`,
+  };
+}
 
 function emailProblem(email: string) {
   return email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "E-mail address is not valid." : null;
@@ -36,14 +54,14 @@ export async function GET() {
   const auth = await requireStaff("admin");
   if (auth.response) return auth.response;
 
-  const [{ data, error }, stores] = await Promise.all([
+  const [{ data, error }, storeList] = await Promise.all([
     supabaseAdmin
       .from("staff_users")
       .select(
         "id, user_id, full_name, role, store_name, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at"
       )
       .order("created_at", { ascending: true }),
-    supabaseAdmin.from("stores").select("store_name").order("store_name"),
+    getStores(),
   ]);
 
   if (error) {
@@ -51,15 +69,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unable to load staff. Did you run supabase/workflow-upgrade.sql?" }, { status: 500 });
   }
 
-  const storeNames = new Set<string>();
-  for (const s of stores.data ?? []) if (s.store_name) storeNames.add(String(s.store_name));
-  for (const u of data ?? []) if (u.store_name) storeNames.add(String(u.store_name));
-
   return NextResponse.json({
     users: data ?? [],
     currentUserId: auth.staff.id,
     currentRole: auth.staff.role,
-    storeNames: [...storeNames].sort(),
+    stores: [{ name: CORPORATE_OFFICE, code: null }, ...storeList.stores],
+    storeSource: storeList.source,
+    storeError: storeList.error,
   });
 }
 
@@ -73,7 +89,8 @@ export async function POST(request: Request) {
     const userId = normaliseUserId(body.userId);
     const password = String(body.password ?? "");
     const role: Role = isRole(body.role) ? body.role : "staff";
-    const storeName = String(body.storeName ?? "").trim();
+    const store = await storeValue(body.storeName);
+    const storeName = store.value ?? "";
     const email = String(body.email ?? "").trim().toLowerCase();
     const whatsapp = whatsappValue(body.whatsappNumber);
 
@@ -85,6 +102,7 @@ export async function POST(request: Request) {
     const mailProblem = emailProblem(email);
     if (mailProblem) return NextResponse.json({ error: mailProblem }, { status: 400 });
     if (whatsapp.error) return NextResponse.json({ error: whatsapp.error }, { status: 400 });
+    if (store.error) return NextResponse.json({ error: store.error }, { status: 400 });
 
     if (PROTECTED_ROLES.includes(role) && auth.staff.role !== "super_admin") {
       return NextResponse.json({ error: "Only the Super Admin can create admin accounts." }, { status: 403 });
@@ -153,7 +171,9 @@ export async function PATCH(request: Request) {
     }
 
     if (typeof body.storeName === "string") {
-      update.store_name = body.storeName.trim() || null;
+      const store = await storeValue(body.storeName);
+      if (store.error) return NextResponse.json({ error: store.error }, { status: 400 });
+      update.store_name = store.value;
     }
 
     if (typeof body.email === "string") {

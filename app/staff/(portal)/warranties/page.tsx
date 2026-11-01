@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, StatusBadge } from "@/components/SiteChrome";
 import { formatDate, statusLabel } from "@/lib/helpers";
@@ -130,14 +131,12 @@ export default function StaffWarrantiesPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          <a
-                            href={`/api/certificate/${w.verification_token}/pdf?view=1`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <Link
+                            href={`/staff/warranties/${w.id}`}
                             className="rounded-xl border border-black/10 px-3 py-1.5 text-xs font-bold hover:bg-[#f7f9fb]"
                           >
                             View
-                          </a>
+                          </Link>
                           <a
                             href={`/api/certificate/${w.verification_token}/pdf`}
                             className="rounded-xl bg-[#161616] px-3 py-1.5 text-xs font-bold text-white"

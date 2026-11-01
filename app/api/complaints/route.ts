@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { cleanMobile, generateTicketNumber, isValidMobile } from "@/lib/helpers";
 import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
+import { getStores, matchStore } from "@/lib/stores";
 
 // POST /api/complaints — anyone can raise a complaint (no warranty needed).
 
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
     const fullName = String(body.fullName ?? "").trim();
     const mobile = cleanMobile(body.mobileNumber);
     const email = String(body.email ?? "").trim();
-    const storeId = body.storeId ? String(body.storeId) : null;
+    const storeChoice = String(body.storeName ?? "").trim();
     const category = String(body.category ?? "").trim();
     const reference = String(body.reference ?? "").trim();
     const description = String(body.description ?? "").trim();
@@ -43,19 +44,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Store names come from Zoho POS (same names as on the bills).
     let storeName: string | null = null;
-    if (storeId) {
-      const { data: store } = await supabaseAdmin
-        .from("stores")
-        .select("id, store_name")
-        .eq("id", storeId)
-        .eq("is_active", true)
-        .maybeSingle();
-
+    if (storeChoice) {
+      const store = matchStore((await getStores()).stores, storeChoice);
       if (!store) {
-        return NextResponse.json({ error: "Invalid Seven Years location." }, { status: 400 });
+        return NextResponse.json({ error: "Please choose the store from the list." }, { status: 400 });
       }
-      storeName = store.store_name ?? null;
+      storeName = store.name;
     }
 
     // Link to a warranty when the reference (warranty or bill number) belongs to this mobile.
@@ -95,7 +91,6 @@ export async function POST(request: Request) {
         contact_name: fullName,
         contact_mobile: mobile,
         contact_email: email || null,
-        store_id: storeId,
         warranty_id: warrantyId,
         category,
         reference_number: reference || null,
