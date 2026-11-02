@@ -8,6 +8,7 @@ import { slaState } from "@/lib/sla";
 import { listTickets, needsActionFrom, rawSla, type Ticket } from "@/lib/tickets";
 import type { StaffUser } from "@/lib/auth";
 import { TicketTable } from "@/components/TicketUI";
+import { InstallAppCard } from "@/components/InstallApp";
 
 export default async function StaffDashboard() {
   const staff = await getCurrentStaff();
@@ -36,6 +37,7 @@ export default async function StaffDashboard() {
 
   return (
     <div className="space-y-8">
+      <InstallAppCard />
       <div>
         <p className="text-sm font-semibold text-[#ff5e79]">Welcome back</p>
         <h1 className="mt-1 text-3xl font-bold">{staff.fullName}</h1>

@@ -126,3 +126,48 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
     </header>
   );
 }
+
+/** Phone-style menu at the bottom of the screen (phones only). */
+export function StaffBottomNav({ role, unreadAlerts }: { role: Role; unreadAlerts: number }) {
+  const pathname = usePathname();
+  const items = [
+    { href: "/staff", label: "Home", icon: "🏠" },
+    ...(canSeeService(role) ? [{ href: "/staff/service", label: "Service", icon: "🛠️" }] : []),
+    ...(canSeeComplaints(role) ? [{ href: "/staff/complaints", label: "Complaints", icon: "💬" }] : []),
+    { href: "/staff/register", label: "Warranty", icon: "🧾" },
+    { href: "/staff/alerts", label: "Alerts", icon: "🔔", badge: unreadAlerts },
+  ];
+
+  return (
+    <nav
+      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 backdrop-blur sm:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      aria-label="Main menu"
+    >
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+        {items.map((item) => {
+          const active = item.href === "/staff" ? pathname === "/staff" : pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold ${
+                active ? "text-[#ff5e79]" : "text-black/55"
+              }`}
+            >
+              <span className="text-lg leading-none" aria-hidden>
+                {item.icon}
+              </span>
+              {item.label}
+              {"badge" in item && item.badge ? (
+                <span className="absolute right-[22%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[10px] font-bold text-white">
+                  {item.badge > 99 ? "99+" : item.badge}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}

@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { asRole, isAdmin, type Role } from "@/lib/roles";
 
 export const SESSION_COOKIE = "sy_staff_session";
-const SESSION_HOURS = 12;
+const SESSION_HOURS = 7 * 24; // stay logged in for a week (the app is used on personal phones)
 
 export type StaffUser = {
   id: string;

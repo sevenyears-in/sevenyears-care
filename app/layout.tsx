@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -19,6 +19,11 @@ export const metadata: Metadata = {
   },
   description:
     "Register your Seven Years product warranty, view certificates, request service, raise complaints and track support.",
+  appleWebApp: { capable: true, title: "SY Care", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#8883d7",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

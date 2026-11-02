@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { StaffHeader } from "@/components/StaffChrome";
+import { StaffBottomNav, StaffHeader } from "@/components/StaffChrome";
+import { AppSetup } from "@/components/InstallApp";
 import { pendingExplanationCount } from "@/lib/explanations";
 
 export const metadata: Metadata = {
@@ -36,7 +37,9 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
         unreadAlerts={count ?? 0}
         explanationsWaiting={explanationsWaiting}
       />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+      <AppSetup />
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-6 sm:py-8">{children}</main>
+      <StaffBottomNav role={staff.role} unreadAlerts={count ?? 0} />
     </div>
   );
 }
