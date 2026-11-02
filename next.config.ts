@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
+// Run the server in Indian Standard Time, so any date the server works out
+// (e.g. "today") matches the clock in the stores.
+process.env.TZ = "Asia/Kolkata";
+
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

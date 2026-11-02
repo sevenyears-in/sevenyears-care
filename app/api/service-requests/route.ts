@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { cleanMobile, generateTicketNumber, isISODate, isValidMobile } from "@/lib/helpers";
+import { defaultTechnicianFor } from "@/lib/store-technicians";
+import { cleanMobile, generateTicketNumber, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
 import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 import { SAFETY_ISSUE_TYPES } from "@/lib/sla";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
     const underWarranty = warranty.warranty_expiry_date >= today;
 
     // ---------------- Unique ticket number ----------------
@@ -145,6 +146,26 @@ export async function POST(request: Request) {
       .single();
 
     if (insertError) throw insertError;
+
+    // Stores without a separate technician (e.g. the Service Head does it): give the job straight to them.
+    const defaultTech = await defaultTechnicianFor(warranty.store_name ?? null).catch(() => null);
+    if (defaultTech) {
+      const { error: assignError } = await supabaseAdmin
+        .from("service_requests")
+        .update({ assigned_technician_id: defaultTech.id })
+        .eq("id", created.id);
+      if (!assignError) {
+        await supabaseAdmin.from("ticket_status_history").insert({
+          ticket_type: "service",
+          ticket_id: created.id,
+          status: "open",
+          note: `Assigned automatically to ${defaultTech.fullName} (technician for ${warranty.store_name}).`,
+          visibility: "internal",
+          action: "assign",
+          actor_name: "System",
+        });
+      }
+    }
 
     // Alert the store manager, technicians and service head; confirm to the customer.
     after(() =>

@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { formatDate } from "@/lib/helpers";
+import { formatDate, todayISO } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
 import { WARRANTY_TERMS } from "@/lib/certificate-pdf";
 
@@ -27,7 +27,7 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
   if (error) console.error("Warranty certificate error:", error);
   if (!w) notFound();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const expired = w.warranty_expiry_date < today;
   const statusText = w.status !== "active" ? "Void" : expired ? "Expired" : "Active";
   const statusClass =

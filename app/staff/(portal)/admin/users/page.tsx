@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
-import { ROLE_HELP, ROLE_LABELS, ROLES, type Role } from "@/lib/roles";
+import { ASSIGNABLE_ROLES, ROLE_HELP, ROLE_LABELS, type Role } from "@/lib/roles";
 
 type StaffRow = {
   id: string;
@@ -19,7 +19,7 @@ type StaffRow = {
   last_login_at: string | null;
 };
 
-const STORE_ROLES: Role[] = ["store_manager", "technician", "staff"];
+const STORE_ROLES: Role[] = ["store_manager", "technician", "csa"];
 
 type StoreOption = { name: string; code: string | null };
 
@@ -39,7 +39,7 @@ export default function StaffUsersPage() {
   const [fullName, setFullName] = useState("");
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("staff");
+  const [role, setRole] = useState<Role>("csa");
   const [storeName, setStoreName] = useState("");
   const [email, setEmail] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
@@ -68,7 +68,7 @@ export default function StaffUsersPage() {
   }, [load]);
 
   const isSuper = currentRole === "super_admin";
-  const assignableRoles = ROLES.filter((r) => isSuper || (r !== "super_admin" && r !== "admin"));
+  const assignableRoles = ASSIGNABLE_ROLES.filter((r) => isSuper || (r !== "super_admin" && r !== "admin"));
 
   const patch = async (id: string, change: Record<string, unknown>, success: string) => {
     setErrorMessage("");
@@ -104,7 +104,7 @@ export default function StaffUsersPage() {
     setFullName("");
     setUserId("");
     setPassword("");
-    setRole("staff");
+    setRole("csa");
     setStoreName("");
     setEmail("");
     setWhatsappNumber("");
@@ -170,7 +170,7 @@ export default function StaffUsersPage() {
         </div>
         <div>
           <label htmlFor="store" className={labelClass}>
-            Store{STORE_ROLES.includes(role) && role !== "staff" ? " *" : ""}
+            Store{STORE_ROLES.includes(role) ? " *" : ""}
           </label>
           <select id="store" value={storeName} onChange={(e) => setStoreName(e.target.value)} className={inputClass}>
             <option value="">— No store —</option>
@@ -236,7 +236,10 @@ export default function StaffUsersPage() {
                           className="rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
                           aria-label={`Role for ${u.user_id}`}
                         >
-                          {(isSuper ? ROLES : ROLES.filter((r) => r === u.role || (r !== "super_admin" && r !== "admin"))).map((r) => (
+                          {(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => r !== "super_admin" && r !== "admin"))
+                            .concat([u.role])
+                            .filter((r, i, all) => all.indexOf(r) === i)
+                            .map((r) => (
                             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                           ))}
                         </select>
@@ -321,7 +324,7 @@ export default function StaffUsersPage() {
       <div className="rounded-3xl bg-white p-5 text-sm shadow-sm ring-1 ring-black/5">
         <p className="font-bold">Who gets what</p>
         <ul className="mt-2 space-y-1 text-black/60">
-          {ROLES.map((r) => (
+          {ASSIGNABLE_ROLES.map((r) => (
             <li key={r}>
               <span className="font-semibold text-black/80">{ROLE_LABELS[r]}:</span> {ROLE_HELP[r]}
             </li>

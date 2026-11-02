@@ -214,6 +214,8 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
   page.drawLine({ start: { x: M, y: 70 }, end: { x: width - M, y: 70 }, thickness: 1, color: LINE });
   text(page, "Verify this certificate online:", M, 54, 8, regular, GREY);
   text(page, verifyUrl, M, 42, 8, bold, TEAL);
+  const accountLine = `My account: ${siteUrl.replace(/\/$/, "")}/account  |  User ID: your mobile number  |  First password: last 4 digits of your bill number`;
+  text(page, accountLine, M, 22, 7.5, regular, GREY);
   const issued = `Issued ${formatDate(w.created_at)}`;
   text(page, issued, width - M - regular.widthOfTextAtSize(issued, 8), 54, 8, regular, GREY);
   const footer = "Seven Years Care - Warranty & Service";

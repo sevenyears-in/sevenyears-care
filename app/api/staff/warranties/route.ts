@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/auth";
-import { addMonths, cleanMobile, isISODate, isValidMobile } from "@/lib/helpers";
+import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
+import { addMonths, cleanMobile, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
 import { fetchBill, ZohoError } from "@/lib/zoho";
@@ -20,7 +21,7 @@ type IncomingItem = {
 const NON_ENGLISH = /[^\x20-\x7E\xA0-\xFF\r\n\t]/;
 
 function warrantyNumber() {
-  const year = new Date().getFullYear();
+  const year = todayISO().slice(0, 4);
   const random = Math.floor(100000 + Math.random() * 900000);
   return `SY-WAR-${year}-${random}`;
 }
@@ -187,7 +188,25 @@ export async function POST(request: Request) {
       throw insertError;
     }
 
-    return NextResponse.json({ success: true, warranties: created ?? [] }, { status: 201 });
+    // Customer login: User ID = mobile, first password = last 4 digits of the bill number.
+    const accounts: { mobile: string; name: string; created: boolean; password: string | null }[] = [];
+    const seen = new Set<string>();
+    for (const r of records) {
+      const mobile = String(r.customer_mobile);
+      if (seen.has(mobile)) continue;
+      seen.add(mobile);
+      const result = await ensureCustomerAccount(mobile, String(r.customer_name), bill.billNumber).catch(() => ({
+        created: false,
+      }));
+      accounts.push({
+        mobile,
+        name: String(r.customer_name),
+        created: result.created,
+        password: result.created ? billPassword(bill.billNumber) : null,
+      });
+    }
+
+    return NextResponse.json({ success: true, warranties: created ?? [], accounts }, { status: 201 });
   } catch (error) {
     if (error instanceof ZohoError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

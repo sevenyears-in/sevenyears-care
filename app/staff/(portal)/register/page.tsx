@@ -74,6 +74,9 @@ export default function RegisterWarrantyStaffPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [errorList, setErrorList] = useState<string[]>([]);
   const [saved, setSaved] = useState<Saved[] | null>(null);
+  const [accounts, setAccounts] = useState<
+    { mobile: string; name: string; created: boolean; password: string | null }[]
+  >([]);
   const [generating, setGenerating] = useState(false);
 
   const pendingRows = lookup?.rows.filter((r) => !r.existing) ?? [];
@@ -203,6 +206,7 @@ export default function RegisterWarrantyStaffPage() {
       }
 
       setSaved(data.warranties ?? []);
+      setAccounts(data.accounts ?? []);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setErrorMessage("Something went wrong while saving.");
@@ -256,6 +260,27 @@ export default function RegisterWarrantyStaffPage() {
             Bill {lookup?.bill.billNumber} • {formatDate(lookup?.bill.billDate)}. A separate
             certificate is created for each item.
           </p>
+
+          {accounts.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-[#11b8d0]/30 bg-[#11b8d0]/5 p-4 text-sm">
+              <p className="font-bold">Customer login (care.sevenyears.in → My Account)</p>
+              <ul className="mt-2 space-y-1">
+                {accounts.map((a) => (
+                  <li key={a.mobile}>
+                    <span className="font-semibold">{a.name}</span> — User ID <span className="font-mono">{a.mobile}</span>
+                    {a.created && a.password ? (
+                      <>
+                        , password <span className="font-mono font-bold">{a.password}</span> (last 4 digits of the bill
+                        number). Ask the customer to change it after logging in.
+                      </>
+                    ) : (
+                      <> — already has a login (their existing password is unchanged).</>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <button
             type="button"

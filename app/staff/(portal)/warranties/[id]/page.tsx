@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/SiteChrome";
+import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
 
 // Staff: full details of one warranty (opened from Warranties → View).
@@ -152,6 +153,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
             </dl>
           </div>
         ))}
+        <ResetCustomerLogin warrantyId={w.id} />
       </div>
     </div>
   );

@@ -29,11 +29,13 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts }:
       ? [
           { href: "/staff/admin/categories", label: "Categories" },
           { href: "/staff/admin/users", label: "Staff Users" },
+          { href: "/staff/admin/service-setup", label: "Service Setup" },
         ]
       : []),
     ...(role === "super_admin"
       ? [
           { href: "/staff/admin/notifications", label: "Alerts Setup" },
+          { href: "/staff/admin/channels", label: "Complaint Channels" },
           { href: "/staff/admin/zoho", label: "Zoho POS" },
         ]
       : []),

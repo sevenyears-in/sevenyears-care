@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, StatusBadge } from "@/components/SiteChrome";
-import { formatDate, statusLabel } from "@/lib/helpers";
+import { formatDate, statusLabel, todayISO } from "@/lib/helpers";
 
 type Warranty = {
   id: string;
@@ -53,7 +53,7 @@ export default function StaffWarrantiesPage() {
     search(q);
   };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
 
   return (
     <div className="space-y-6">

@@ -59,6 +59,7 @@ export type Ticket = {
   longitude?: number | null;
   // complaint only
   referenceNumber?: string | null;
+  source?: string | null;
 };
 
 const TABLE: Record<TicketType, string> = { service: "service_requests", complaint: "complaints" };
@@ -70,7 +71,7 @@ const COMMON_COLS =
 
 const SELECT: Record<TicketType, string> = {
   service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, warranties ( warranty_number )`,
-  complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id`,
+  complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id, source`,
 };
 
 type Row = Record<string, unknown>;
@@ -118,6 +119,7 @@ function toTicket(type: TicketType, row: Row, names: Map<string, string>): Ticke
     latitude: typeof row.latitude === "number" ? row.latitude : null,
     longitude: typeof row.longitude === "number" ? row.longitude : null,
     referenceNumber: str(row.reference_number),
+    source: str(row.source),
   };
 }
 
@@ -135,15 +137,15 @@ async function staffNames(ids: (string | null)[]) {
 // ------------------------------------------------------------------
 
 export function canViewTicket(staff: StaffUser, type: TicketType, t: { storeName: string | null; assigneeId: string | null }) {
-  if (isAdmin(staff.role)) return true;
+  if (isAdmin(staff.role) || staff.role === "cre") return true;
+  if (t.assigneeId === staff.id) return true;
+  if (staff.role === "store_manager" || staff.role === "csa") return sameStore(staff.storeName, t.storeName);
   if (type === "service") {
     if (staff.role === "service_head") return true;
-    if (staff.role === "store_manager") return sameStore(staff.storeName, t.storeName);
-    if (staff.role === "technician") return t.assigneeId === staff.id || sameStore(staff.storeName, t.storeName);
+    if (staff.role === "technician") return sameStore(staff.storeName, t.storeName);
     return false;
   }
   if (staff.role === "hr_head" || staff.role === "operations_manager") return true;
-  if (staff.role === "store_manager") return sameStore(staff.storeName, t.storeName);
   return false;
 }
 
@@ -152,7 +154,7 @@ export function isTicketManager(staff: StaffUser, type: TicketType) {
   const managers: Role[] =
     type === "service"
       ? ["super_admin", "admin", "service_head", "store_manager"]
-      : ["super_admin", "admin", "hr_head", "operations_manager", "store_manager"];
+      : ["super_admin", "admin", "hr_head", "operations_manager", "store_manager", "cre"];
   return managers.includes(staff.role);
 }
 
@@ -175,20 +177,23 @@ export async function listTickets(
   let query = supabaseAdmin.from(TABLE[type]).select(SELECT[type]).order("created_at", { ascending: false }).limit(300);
 
   // Scope to what this person may see.
-  if (!isAdmin(staff.role)) {
+  if (!isAdmin(staff.role) && staff.role !== "cre") {
     const store = staff.storeName?.trim() ?? "";
-    if (type === "service" && staff.role === "technician") {
+    const allStores =
+      (type === "service" && staff.role === "service_head") ||
+      (type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager"));
+    const storeScoped =
+      staff.role === "store_manager" || staff.role === "csa" || (type === "service" && staff.role === "technician");
+
+    if (allStores) {
+      // sees every store
+    } else if (storeScoped) {
+      // their store, plus anything assigned to them
       query = store
-        ? query.or(`store_name.ilike.${quote(escapeLike(store))},assigned_technician_id.eq.${staff.id}`)
-        : query.eq("assigned_technician_id", staff.id);
-    } else if (staff.role === "store_manager") {
-      if (!store) return [];
-      query = query.ilike("store_name", escapeLike(store));
-    } else if (
-      !(type === "service" && staff.role === "service_head") &&
-      !(type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager"))
-    ) {
-      return [];
+        ? query.or(`store_name.ilike.${quote(escapeLike(store))},${ASSIGNEE_COL[type]}.eq.${staff.id}`)
+        : query.eq(ASSIGNEE_COL[type], staff.id);
+    } else {
+      query = query.eq(ASSIGNEE_COL[type], staff.id);
     }
   }
 
@@ -303,7 +308,7 @@ export async function assignableStaff(type: TicketType, storeName: string | null
   const roles: Role[] =
     type === "service"
       ? ["technician", "service_head"]
-      : ["store_manager", "hr_head", "operations_manager", "super_admin"];
+      : ["store_manager", "hr_head", "operations_manager", "cre", "super_admin"];
 
   const { data } = await supabaseAdmin
     .from("staff_users")
@@ -346,7 +351,7 @@ export async function announceNewTicket(input: {
   customer: { name: string | null; mobile: string | null; email?: string | null };
 }) {
   const recipients = await findRecipients(
-    input.type === "service" ? ["store_manager", "technician", "service_head"] : ["store_manager", "hr_head", "operations_manager"],
+    input.type === "service" ? ["store_manager", "technician", "service_head"] : ["store_manager", "hr_head", "operations_manager", "cre"],
     input.storeName
   );
 

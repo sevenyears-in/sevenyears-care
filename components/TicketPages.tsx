@@ -40,10 +40,11 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
   const search = typeof params.q === "string" ? params.q.slice(0, 60) : "";
   const tickets = await listTickets(staff, type, filter, search);
 
-  const scope =
-    staff.role === "store_manager" || staff.role === "technician"
-      ? `Showing ${staff.storeName ?? "your store"}${staff.role === "technician" ? " and jobs assigned to you" : ""}.`
-      : "Showing all stores.";
+  const storeScoped =
+    staff.role === "store_manager" || staff.role === "csa" || (type === "service" && staff.role === "technician");
+  const scope = storeScoped
+    ? `Showing ${staff.storeName ?? "your store"} and anything assigned to you.`
+    : "Showing all stores.";
 
   return (
     <div className="space-y-6">
@@ -52,7 +53,7 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
         <p className="mt-2 text-sm text-black/60">
           {scope} Most urgent first: overdue, then safety, then nearest deadline.
         </p>
-        {(staff.role === "store_manager" || staff.role === "technician") && !staff.storeName && (
+        {storeScoped && !staff.storeName && (
           <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             Your account has no store set, so no store requests are shown. Ask the administrator to set your store.
           </p>
@@ -87,6 +88,17 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
     { label: "Product", value: ticket.productName },
     { label: "Warranty No.", value: ticket.warrantyNumber ?? null },
     { label: "Reference", value: ticket.referenceNumber ?? null },
+    {
+      label: "Received via",
+      value:
+        type === "complaint"
+          ? ticket.source === "whatsapp"
+            ? "WhatsApp"
+            : ticket.source === "aira"
+              ? "Aira chatbot"
+              : "Website"
+          : null,
+    },
     {
       label: "Service type",
       value: ticket.serviceMode ? (ticket.serviceMode === "home_visit" ? "Home visit / pickup" : "Customer brings to store") : null,

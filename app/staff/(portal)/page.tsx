@@ -86,7 +86,7 @@ export default async function StaffDashboard() {
           extra={
             staff.role === "service_head" || staff.role === "super_admin"
               ? { label: "Awaiting your approval", value: serviceTickets.filter((t) => t.status === "awaiting_approval").length }
-              : staff.role === "technician"
+              : staff.role === "technician" || serviceTickets.some((t) => t.assigneeId === staff.id)
                 ? { label: "Assigned to me", value: serviceTickets.filter((t) => t.assigneeId === staff.id).length }
                 : { label: "Not assigned", value: serviceTickets.filter((t) => !t.assigneeId).length }
           }

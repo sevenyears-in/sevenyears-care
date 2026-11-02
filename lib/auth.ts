@@ -5,6 +5,7 @@
 //   their password logs them out immediately.
 
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -132,8 +133,11 @@ function readSessionValue(value: string | undefined) {
   }
 }
 
-/** The logged-in staff member, or null. Use in server components and route handlers. */
-export async function getCurrentStaff(): Promise<StaffUser | null> {
+/**
+ * The logged-in staff member, or null. Use in server components and route handlers.
+ * Cached for the length of one request, so the layout and the page share one lookup.
+ */
+export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
   const cookieStore = await cookies();
   const session = readSessionValue(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) return null;
@@ -176,7 +180,7 @@ export async function getCurrentStaff(): Promise<StaffUser | null> {
     email: staff.email ?? null,
     whatsappNumber: staff.whatsapp_number ?? null,
   };
-}
+});
 
 /**
  * For API routes. Returns { staff } when allowed, or { response } to return

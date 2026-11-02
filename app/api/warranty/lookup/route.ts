@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { cleanMobile, isValidMobile } from "@/lib/helpers";
+import { cleanMobile, isValidMobile, todayISO } from "@/lib/helpers";
 
 // POST /api/warranty/lookup
 // Body: { mobileNumber, reference }
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayISO();
 
     return NextResponse.json({
       customerName: list[0]?.customer_name ?? "",

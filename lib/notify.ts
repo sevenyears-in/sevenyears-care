@@ -184,6 +184,50 @@ export async function sendWhatsApp(
   }
 }
 
+/**
+ * Free-text WhatsApp reply. Only allowed within 24 hours of the customer's
+ * last message (used by the WhatsApp complaint bot).
+ */
+export async function sendWhatsAppText(
+  mobile10: string,
+  body: string,
+  meta: LogMeta
+): Promise<{ ok: boolean; error?: string }> {
+  const digits = String(mobile10 ?? "").replace(/\D/g, "").slice(-10);
+  if (!/^\d{10}$/.test(digits)) return { ok: false, error: "No valid WhatsApp number" };
+  const to = `91${digits}`;
+  if (!(await whatsappConfigured())) {
+    await log("whatsapp", to, "skipped", { ...meta, subject: "chat reply", error: "WhatsApp is not set up" });
+    return { ok: false, error: "WhatsApp is not set up." };
+  }
+  const s = await whatsappSettings();
+  try {
+    const response = await fetch(`https://graph.facebook.com/v21.0/${s.phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${s.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: body.slice(0, 4000), preview_url: false },
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+      const message = data.error?.message ?? `HTTP ${response.status}`;
+      await log("whatsapp", to, "failed", { ...meta, subject: "chat reply", error: message });
+      return { ok: false, error: message };
+    }
+    await log("whatsapp", to, "sent", { ...meta, subject: "chat reply" });
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await log("whatsapp", to, "failed", { ...meta, subject: "chat reply", error: message });
+    return { ok: false, error: message };
+  }
+}
+
 // ------------------------------------------------------------------
 // Who gets told about a ticket
 // ------------------------------------------------------------------
@@ -209,7 +253,7 @@ const RECIPIENT_COLUMNS =
  */
 export const ROUTING: Record<TicketType, Role[]> = {
   service: ["store_manager", "technician", "service_head"],
-  complaint: ["store_manager", "hr_head", "operations_manager"],
+  complaint: ["store_manager", "hr_head", "operations_manager", "cre"],
 };
 
 export async function findRecipients(roles: Role[], storeName: string | null): Promise<Recipient[]> {

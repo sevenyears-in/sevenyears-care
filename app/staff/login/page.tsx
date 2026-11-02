@@ -3,11 +3,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ErrorBox, inputClass, labelClass, primaryButtonClass } from "@/components/SiteChrome";
 
 export default function StaffLoginPage() {
-  const router = useRouter();
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,20 +37,24 @@ export default function StaffLoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, password }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        setErrorMessage(data.error || "Unable to log in.");
+        setErrorMessage(
+          data.error ||
+            (response.status >= 500 ? "The server is busy. Please try again in a moment." : "Unable to log in.")
+        );
+        setLoading(false);
         return;
       }
 
-      router.replace("/staff");
-      router.refresh();
+      // Full page load: the new session cookie is always picked up (no stale cached page).
+      window.location.assign("/staff");
+      return;
     } catch {
-      setErrorMessage("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+      setErrorMessage("Network problem. Please check your internet connection and try again.");
     }
+    setLoading(false);
   };
 
   return (

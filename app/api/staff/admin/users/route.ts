@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     const fullName = String(body.fullName ?? "").trim();
     const userId = normaliseUserId(body.userId);
     const password = String(body.password ?? "");
-    const role: Role = isRole(body.role) ? body.role : "staff";
+    const role: Role = isRole(body.role) && body.role !== "staff" ? body.role : "csa";
     const store = await storeValue(body.storeName);
     const storeName = store.value ?? "";
     const email = String(body.email ?? "").trim().toLowerCase();
@@ -107,8 +107,8 @@ export async function POST(request: Request) {
     if (PROTECTED_ROLES.includes(role) && auth.staff.role !== "super_admin") {
       return NextResponse.json({ error: "Only the Super Admin can create admin accounts." }, { status: 403 });
     }
-    if ((role === "store_manager" || role === "technician") && !storeName) {
-      return NextResponse.json({ error: "Store Managers and Technicians need a store." }, { status: 400 });
+    if ((role === "store_manager" || role === "technician" || role === "csa") && !storeName) {
+      return NextResponse.json({ error: "Store Managers, Technicians and CSAs need a store." }, { status: 400 });
     }
 
     const { data: existing } = await supabaseAdmin
@@ -191,6 +191,10 @@ export async function PATCH(request: Request) {
 
     if (typeof body.notifyEmail === "boolean") update.notify_email = body.notifyEmail;
     if (typeof body.notifyWhatsapp === "boolean") update.notify_whatsapp = body.notifyWhatsapp;
+
+    if (body.role === "staff" && target.role !== "staff") {
+      return NextResponse.json({ error: "“Store Staff” is no longer used. Choose CSA or CRE." }, { status: 400 });
+    }
 
     if (isRole(body.role) && body.role !== target.role) {
       if (isSelf) {
