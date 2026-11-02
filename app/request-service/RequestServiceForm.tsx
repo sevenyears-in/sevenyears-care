@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   cardClass,
@@ -42,6 +42,32 @@ export default function RequestServiceForm({
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [created, setCreated] = useState<Created | null>(null);
+  const [newAccount, setNewAccount] = useState(false);
+  const [me, setMe] = useState<{
+    loggedIn: boolean;
+    name?: string;
+    mobile?: string;
+    warranties?: { warrantyNumber: string; productName: string; serialNumber: string; billNumber: string; active: boolean }[];
+  } | null>(null);
+
+  // Logged in to My Account? Fill in the mobile number and list their warranties.
+  useEffect(() => {
+    const load = async () => {
+      const response = await fetch("/api/account/me", { cache: "no-store" }).catch(() => null);
+      const data = response ? await response.json().catch(() => ({ loggedIn: false })) : { loggedIn: false };
+      setMe(data);
+      if (data.loggedIn) {
+        setMobileNumber(data.mobile ?? "");
+        const list = (data.warranties ?? []) as { warrantyNumber: string; active: boolean }[];
+        const chosen = list.find((w) => w.warrantyNumber === initialWarrantyNumber) ?? list.find((w) => w.active) ?? list[0];
+        if (chosen) setWarrantyNumber(chosen.warrantyNumber);
+      }
+    };
+    load();
+  }, [initialWarrantyNumber]);
+
+  const loggedIn = Boolean(me?.loggedIn);
+  const myWarranties = me?.warranties ?? [];
 
   const captureLocation = () => {
     if (!navigator.geolocation) {
@@ -71,7 +97,7 @@ export default function RequestServiceForm({
 
     const mobile = mobileNumber.replace(/\D/g, "");
 
-    if (!/^[6-9]\d{9}$/.test(mobile)) {
+    if (!loggedIn && !/^[6-9]\d{9}$/.test(mobile)) {
       setErrorMessage("Please enter a valid 10-digit mobile number.");
       return;
     }
@@ -116,6 +142,7 @@ export default function RequestServiceForm({
       }
 
       setCreated(data.request);
+      setNewAccount(Boolean(data.account?.created));
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setErrorMessage("Something went wrong. Please try again.");
@@ -150,6 +177,16 @@ export default function RequestServiceForm({
             Raised on {formatDateTime(created.created_at)}
           </p>
         </div>
+
+        {newAccount && (
+          <div className="mt-5 rounded-2xl border border-[#11b8d0]/30 bg-[#11b8d0]/5 p-4 text-sm">
+            <p className="font-bold">Your My Account login is ready</p>
+            <p className="mt-1 text-black/70">
+              User ID: your mobile number. Password: the <b>last 4 digits of your mobile number</b>. Log in at My Account
+              to follow this request and see your warranties. You can change the password after logging in.
+            </p>
+          </div>
+        )}
 
         {!created.under_warranty && (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -186,6 +223,30 @@ export default function RequestServiceForm({
       <form onSubmit={handleSubmit} className="space-y-8" noValidate>
         <section>
           <h2 className="text-lg font-bold">1. Your Warranty</h2>
+          {loggedIn && myWarranties.length > 0 ? (
+            <div className="mt-4">
+              <label htmlFor="warranty-select" className={labelClass}>
+                Product *
+              </label>
+              <select
+                id="warranty-select"
+                value={warrantyNumber}
+                onChange={(e) => setWarrantyNumber(e.target.value)}
+                className={inputClass}
+              >
+                {myWarranties.map((w) => (
+                  <option key={w.warrantyNumber} value={w.warrantyNumber} disabled={!w.active}>
+                    {w.productName} · S/N {w.serialNumber} · {w.warrantyNumber}
+                    {w.active ? "" : " (warranty ended)"}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-black/45">
+                Logged in as {me?.name || "you"} (+91 {mobileNumber}). Your details are taken from your warranty.
+              </p>
+            </div>
+          ) : (
+            <>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="mobile" className={labelClass}>
@@ -229,8 +290,9 @@ export default function RequestServiceForm({
               Find it in My Warranties
             </Link>
           </p>
+            </>
+          )}
         </section>
-
         <section>
           <h2 className="text-lg font-bold">2. The Problem</h2>
           <div className="mt-4 space-y-4">

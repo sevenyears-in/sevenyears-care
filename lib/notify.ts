@@ -274,6 +274,28 @@ export async function findRecipients(roles: Role[], storeName: string | null): P
     .filter((row) => !STORE_SCOPED_ROLES.includes(row.role) || sameStore(row.store_name, storeName));
 }
 
+/** Directors who look after this store (a Director with no stores set looks after all stores). */
+export async function findDirectors(storeName: string | null): Promise<Recipient[]> {
+  const { data, error } = await supabaseAdmin
+    .from("staff_users")
+    .select(`${RECIPIENT_COLUMNS}, director_stores`)
+    .eq("is_active", true)
+    .eq("role", "director");
+  if (error) {
+    console.error("Director lookup failed:", error);
+    return [];
+  }
+  return (data ?? [])
+    .filter((row) => {
+      const stores = Array.isArray(row.director_stores) ? (row.director_stores as string[]) : [];
+      return stores.length === 0 || stores.some((s) => sameStore(s, storeName));
+    })
+    .map(({ director_stores: _ds, ...row }) => {
+      void _ds;
+      return { ...row, role: asRole(row.role) } as Recipient;
+    });
+}
+
 export async function findStaffByIds(ids: (string | null | undefined)[]): Promise<Recipient[]> {
   const clean = [...new Set(ids.filter((id): id is string => Boolean(id)))];
   if (clean.length === 0) return [];

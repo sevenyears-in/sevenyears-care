@@ -127,7 +127,7 @@ export default function ChannelsPage() {
         </div>
         <p className="mt-2 text-sm text-black/60">
           Customers send any message (for example “Hi”) to the Seven Years Care WhatsApp number. The bot asks their name,
-          store, what the complaint is about and the details, then registers it and replies with the complaint number.
+          bill or warranty number, what the complaint is about and the details, then registers it and replies with the complaint number.
           They can also check the status of their requests.
         </p>
         {!view.whatsappReady && (
@@ -227,9 +227,9 @@ export default function ChannelsPage() {
             <p className="font-bold">Register a complaint</p>
             <p className="font-mono">POST {view.airaBaseUrl}/complaints</p>
             <p className="font-mono">
-              {'{ "name": "Anu", "mobile": "9876543210", "description": "…", "category": "Product quality", "store": "VATAKARA", "reference": "VDK26-SI1-8504" }'}
+              {'{ "name": "Anu", "mobile": "9876543210", "reference": "VDK26-SI1-8504", "description": "…", "category": "Product quality" }'}
             </p>
-            <p className="mt-2">category, store, reference and email are optional. Reply: complaintNumber, status, trackUrl, message.</p>
+            <p className="mt-2">reference (bill or warranty number) is required — it gives the store and the staff on the bill. category and email are optional. Reply: complaintNumber, staffName, storeName, status, trackUrl, message.</p>
 
             <p className="mt-3 font-bold">Store names and complaint categories (for Aira&apos;s menus)</p>
             <p className="font-mono">GET {view.airaBaseUrl}/options</p>

@@ -60,6 +60,8 @@ export type Ticket = {
   // complaint only
   referenceNumber?: string | null;
   source?: string | null;
+  involvedStaffName?: string | null;
+  involvedStaffId?: string | null;
 };
 
 const TABLE: Record<TicketType, string> = { service: "service_requests", complaint: "complaints" };
@@ -71,7 +73,7 @@ const COMMON_COLS =
 
 const SELECT: Record<TicketType, string> = {
   service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, warranties ( warranty_number )`,
-  complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id, source`,
+  complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id, source, involved_staff_name, involved_staff_id`,
 };
 
 type Row = Record<string, unknown>;
@@ -120,6 +122,8 @@ function toTicket(type: TicketType, row: Row, names: Map<string, string>): Ticke
     longitude: typeof row.longitude === "number" ? row.longitude : null,
     referenceNumber: str(row.reference_number),
     source: str(row.source),
+    involvedStaffName: str(row.involved_staff_name),
+    involvedStaffId: str(row.involved_staff_id),
   };
 }
 
@@ -137,9 +141,10 @@ async function staffNames(ids: (string | null)[]) {
 // ------------------------------------------------------------------
 
 export function canViewTicket(staff: StaffUser, type: TicketType, t: { storeName: string | null; assigneeId: string | null }) {
-  if (isAdmin(staff.role) || staff.role === "cre") return true;
+  if (isAdmin(staff.role) || staff.role === "cre" || staff.role === "director") return true;
   if (t.assigneeId === staff.id) return true;
-  if (staff.role === "store_manager" || staff.role === "csa") return sameStore(staff.storeName, t.storeName);
+  if (staff.role === "store_manager" || staff.role === "csa" || staff.role === "floor_incharge")
+    return sameStore(staff.storeName, t.storeName);
   if (type === "service") {
     if (staff.role === "service_head") return true;
     if (staff.role === "technician") return sameStore(staff.storeName, t.storeName);
@@ -177,13 +182,16 @@ export async function listTickets(
   let query = supabaseAdmin.from(TABLE[type]).select(SELECT[type]).order("created_at", { ascending: false }).limit(300);
 
   // Scope to what this person may see.
-  if (!isAdmin(staff.role) && staff.role !== "cre") {
+  if (!isAdmin(staff.role) && staff.role !== "cre" && staff.role !== "director") {
     const store = staff.storeName?.trim() ?? "";
     const allStores =
       (type === "service" && staff.role === "service_head") ||
       (type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager"));
     const storeScoped =
-      staff.role === "store_manager" || staff.role === "csa" || (type === "service" && staff.role === "technician");
+      staff.role === "store_manager" ||
+      staff.role === "csa" ||
+      staff.role === "floor_incharge" ||
+      (type === "service" && staff.role === "technician");
 
     if (allStores) {
       // sees every store
@@ -243,6 +251,8 @@ export function rawSla(t: Ticket) {
 /** Does this ticket wait on this person right now? */
 export function needsActionFrom(staff: StaffUser, t: Ticket) {
   if (!activeStatuses(t.type).includes(t.status)) return false;
+  // Directors watch for SOP violations: late or escalated requests.
+  if (staff.role === "director") return t.escalationLevel > 0 || slaState(rawSla(t)).state === "overdue";
   if (t.status === "open") return true; // everyone who can see it should acknowledge
   if (t.assigneeId === staff.id) return true;
   if (!t.assigneeId && isTicketManager(staff, t.type)) return true; // still needs an owner
@@ -431,7 +441,7 @@ export function availableActions(staff: StaffUser, t: Ticket): ActionName[] {
   const s = t.status;
   const list: ActionName[] = [];
 
-  if (s === "open") list.push("acknowledge");
+  if (s === "open" && staff.role !== "director") list.push("acknowledge");
 
   if (t.type === "service") {
     const active = activeStatuses("service").includes(s);

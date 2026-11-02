@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
-import { canSeeComplaints, canSeeService, ROLE_LABELS } from "@/lib/roles";
+import { asRole, canSeeComplaints, canSeeService, ROLE_LABELS } from "@/lib/roles";
 import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
 import {
   COMPLAINT_RESOLUTIONS,
@@ -24,6 +24,9 @@ import {
 import { StatusBadge } from "@/components/SiteChrome";
 import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, TicketTable } from "@/components/TicketUI";
 import { TicketActions } from "@/components/TicketActions";
+import { ExplanationsPanel } from "@/components/ExplanationsPanel";
+import { canRequestExplanation, explanationsForTicket } from "@/lib/explanations";
+import { supabaseAdmin } from "@/lib/supabase/server";
 
 const BASE: Record<TicketType, string> = { service: "/staff/service", complaint: "/staff/complaints" };
 const TITLE: Record<TicketType, string> = { service: "Service Requests", complaint: "Complaints" };
@@ -41,7 +44,10 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
   const tickets = await listTickets(staff, type, filter, search);
 
   const storeScoped =
-    staff.role === "store_manager" || staff.role === "csa" || (type === "service" && staff.role === "technician");
+    staff.role === "store_manager" ||
+    staff.role === "csa" ||
+    staff.role === "floor_incharge" ||
+    (type === "service" && staff.role === "technician");
   const scope = storeScoped
     ? `Showing ${staff.storeName ?? "your store"} and anything assigned to you.`
     : "Showing all stores.";
@@ -75,9 +81,20 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
 
   const { id } = await params;
   const ticket = await getTicket(type, id);
-  if (!ticket || !canViewTicket(staff, type, ticket)) notFound();
+  if (!ticket) notFound();
+  const explanations = await explanationsForTicket(type, id);
+  // Staff asked to explain can open the request even if it isn't theirs to handle.
+  const askedToExplain = explanations.some((e) => e.staffId === staff.id);
+  if (!canViewTicket(staff, type, ticket) && !askedToExplain) notFound();
 
-  const [history, people] = await Promise.all([getHistory(type, id), assignableStaff(type, ticket.storeName)]);
+  const canAsk = canRequestExplanation(staff.role);
+  const [history, people, everyone] = await Promise.all([
+    getHistory(type, id),
+    assignableStaff(type, ticket.storeName),
+    canAsk
+      ? supabaseAdmin.from("staff_users").select("id, full_name, role, store_name").eq("is_active", true).order("full_name")
+      : Promise.resolve({ data: [] as { id: string; full_name: string; role: string; store_name: string | null }[] }),
+  ]);
   const actions = availableActions(staff, ticket);
 
   const details: { label: string; value: string | null }[] = [
@@ -87,7 +104,8 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
     { label: "Store", value: ticket.storeName },
     { label: "Product", value: ticket.productName },
     { label: "Warranty No.", value: ticket.warrantyNumber ?? null },
-    { label: "Reference", value: ticket.referenceNumber ?? null },
+    { label: "Bill / warranty no.", value: ticket.referenceNumber ?? null },
+    { label: "Staff on the bill", value: ticket.involvedStaffName ?? null },
     {
       label: "Received via",
       value:
@@ -212,6 +230,21 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
               ))}
             </ol>
           </div>
+
+          <ExplanationsPanel
+            type={type}
+            ticketId={ticket.id}
+            currentStaffId={staff.id}
+            canAsk={canAsk}
+            explanations={explanations}
+            suggestedStaffId={ticket.involvedStaffId ?? ticket.assigneeId ?? null}
+            people={(everyone.data ?? [])
+              .filter((p) => String(p.id) !== staff.id)
+              .map((p) => ({
+                id: String(p.id),
+                label: `${p.full_name} — ${ROLE_LABELS[asRole(p.role)]}${p.store_name ? `, ${p.store_name}` : ""}`,
+              }))}
+          />
         </div>
 
         <TicketActions

@@ -5,6 +5,8 @@ import { cleanMobile, generateTicketNumber, isValidMobile } from "@/lib/helpers"
 import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 import { getStores, matchStore } from "@/lib/stores";
+import { resolveComplaintReference } from "@/lib/complaint-reference";
+import { requestExplanation } from "@/lib/explanations";
 
 export type ComplaintSource = "web" | "whatsapp" | "aira";
 
@@ -26,7 +28,16 @@ export type NewComplaint = {
 };
 
 export type CreateResult =
-  | { ok: true; id: string; complaintNumber: string; status: string; createdAt: string; announce: () => Promise<void> }
+  | {
+      ok: true;
+      id: string;
+      complaintNumber: string;
+      status: string;
+      createdAt: string;
+      staffName: string | null;
+      storeName: string | null;
+      announce: () => Promise<void>;
+    }
   | { ok: false; error: string; status: number };
 
 /** Category as given, or the closest match (or "Other") for chat channels. */
@@ -59,35 +70,17 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
     return { ok: false, error: "Please describe the issue in a little more detail.", status: 400 };
   }
 
-  // Store names come from Zoho POS (same names as on the bills).
-  let storeName: string | null = null;
-  if (input.storeName?.trim()) {
-    const store = matchStore((await getStores()).stores, input.storeName);
-    if (!store) return { ok: false, error: "Please choose the store from the list.", status: 400 };
-    storeName = store.name;
-  }
+  // The invoice / warranty number is required: it tells us the store and the staff who made the sale.
+  const resolved = await resolveComplaintReference(reference, mobile);
+  if (!resolved.ok) return { ok: false, error: resolved.error, status: 400 };
+  const ref = resolved.value;
 
-  // Link to a warranty when the reference (warranty or bill number) belongs to this mobile.
-  let warrantyId: string | null = null;
-  {
-    const { data: owned } = await supabaseAdmin
-      .from("warranties")
-      .select("id, warranty_number, bill_number, store_name")
-      .eq("customer_mobile", mobile);
-    const ref = reference.toUpperCase();
-    const match = ref
-      ? (owned ?? []).find(
-          (w) => String(w.warranty_number).toUpperCase() === ref || String(w.bill_number).toUpperCase() === ref
-        )
-      : null;
-    warrantyId = match?.id ?? null;
-    // No store chosen? Use the store the product was bought from (or their only store).
-    if (!storeName && match?.store_name) storeName = match.store_name;
-    if (!storeName) {
-      const stores = [...new Set((owned ?? []).map((w) => w.store_name).filter(Boolean))];
-      if (stores.length === 1) storeName = String(stores[0]);
-    }
-  }
+  // Store: from the bill; otherwise the one the customer chose.
+  let storeName: string | null = null;
+  const storeList = (await getStores()).stores;
+  if (ref.storeName) storeName = matchStore(storeList, ref.storeName)?.name ?? ref.storeName;
+  if (!storeName && input.storeName?.trim()) storeName = matchStore(storeList, input.storeName)?.name ?? null;
+  const warrantyId = ref.warrantyId;
 
   let complaintNumber = generateTicketNumber("CMP");
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -107,7 +100,10 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
     contact_email: email || null,
     warranty_id: warrantyId,
     category,
-    reference_number: reference || null,
+    reference_number: ref.reference,
+    bill_number: ref.billNumber,
+    involved_staff_name: ref.staffName,
+    involved_staff_id: ref.staffId,
     description,
     store_name: storeName,
     status: "open",
@@ -116,31 +112,42 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
     ...initialDeadlines("complaint", "normal"),
   };
 
-  let result = await supabaseAdmin.from("complaints").insert(row).select("id, complaint_number, status, created_at").single();
-  if (result.error && /source/.test(result.error.message ?? "")) {
-    // Database not upgraded yet (no "source" column) — save without it.
-    const { source: _source, ...withoutSource } = row;
-    void _source;
-    result = await supabaseAdmin.from("complaints").insert(withoutSource).select("id, complaint_number, status, created_at").single();
-  }
+  const result = await supabaseAdmin.from("complaints").insert(row).select("id, complaint_number, status, created_at").single();
+
   if (result.error || !result.data) {
     console.error("Create complaint error:", result.error);
     return { ok: false, error: "Unable to register the complaint. Please try again.", status: 500 };
   }
   const created = result.data;
 
-  const announce = () =>
-    announceNewTicket({
+  const announce = async () => {
+    // Ask the staff member on the bill for their side of the story.
+    if (ref.staffId) {
+      await requestExplanation({
+        ticketType: "complaint",
+        ticketId: created.id,
+        ticketNumber: created.complaint_number,
+        staffId: ref.staffId,
+        reason: `Customer complaint (${category}) about bill ${ref.billNumber}: ${description.slice(0, 300)}`,
+        requestedBy: null,
+      }).catch((error) => console.error("Auto explanation request failed:", error));
+    }
+    await announceNewTicket({
       type: "complaint",
       id: created.id,
       number: created.complaint_number,
       storeName,
       title: category,
       summary: `${category} · Customer: ${fullName} (${mobile}) · via ${SOURCE_LABELS[input.source]}`,
-      details: [`Complaint: ${description}`, ...(reference ? [`Reference: ${reference}`] : [])],
+      details: [
+        `Complaint: ${description}`,
+        `Bill / warranty: ${ref.reference}`,
+        ...(ref.staffName ? [`Staff on the bill: ${ref.staffName}`] : []),
+      ],
       priority: "normal",
       customer: { name: fullName, mobile, email: email || null },
     }).catch((error) => console.error("New complaint alerts failed:", error));
+  };
 
   return {
     ok: true,
@@ -148,6 +155,8 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
     complaintNumber: created.complaint_number,
     status: created.status,
     createdAt: created.created_at,
+    staffName: ref.staffName,
+    storeName,
     announce,
   };
 }

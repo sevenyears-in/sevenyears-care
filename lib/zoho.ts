@@ -28,6 +28,8 @@ export type Bill = {
   billNumber: string;
   billDate: string; // YYYY-MM-DD
   storeName: string | null;
+  /** Staff who made the sale (Zoho salesperson), when Zoho has one. */
+  salespersonName: string | null;
   customer: {
     name: string;
     mobile: string; // 10 digits, may be empty
@@ -250,6 +252,7 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
     billDate: str(detail.date || match.date),
     storeName:
       str(detail.location_name) || str(detail.branch_name) || str(detail.warehouse_name) || null,
+    salespersonName: str(detail.salesperson_name) || str(match.salesperson_name) || null,
     customer: {
       name: str(detail.customer_name || match.customer_name),
       mobile,
@@ -268,6 +271,46 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
       };
     }),
     demo: false,
+  };
+}
+
+export type InvoiceSummary = {
+  billNumber: string;
+  billDate: string;
+  storeName: string | null;
+  salespersonName: string | null;
+  customerName: string;
+};
+
+/** Look up a bill by its number only (no date). Null if Zoho doesn't have it. */
+export async function fetchInvoiceByNumber(billNumber: string): Promise<InvoiceSummary | null> {
+  if (!(await zohoConfigured())) return null;
+  const wanted = billNumber.trim().toUpperCase();
+  const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
+  const matches = arr(list.invoices)
+    .filter((inv) => str(inv.invoice_number).toUpperCase() === wanted)
+    .sort((a, b) => str(b.date).localeCompare(str(a.date)));
+  const match = matches[0];
+  if (!match) return null;
+
+  let salesperson = str(match.salesperson_name);
+  let storeName = str(match.location_name) || str(match.branch_name) || "";
+  if (!salesperson || !storeName) {
+    try {
+      const detail = obj((await zohoGet(`invoices/${str(match.invoice_id)}`)).invoice);
+      salesperson = salesperson || str(detail.salesperson_name);
+      storeName = storeName || str(detail.location_name) || str(detail.branch_name) || str(detail.warehouse_name);
+    } catch (error) {
+      console.warn("Zoho invoice detail failed (continuing):", error);
+    }
+  }
+
+  return {
+    billNumber: str(match.invoice_number),
+    billDate: str(match.date),
+    storeName: storeName || null,
+    salespersonName: salesperson || null,
+    customerName: str(match.customer_name),
   };
 }
 
@@ -413,6 +456,7 @@ function demoBill(billNumber: string, billDate: string): Bill {
     billNumber: safeNumber,
     billDate,
     storeName: "Seven Years Vatakara (Edodi)",
+    salespersonName: null,
     customer: {
       name: "",
       mobile: "",

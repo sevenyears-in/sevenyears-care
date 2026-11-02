@@ -6,11 +6,12 @@
 //           Operations Manager (+ Service Head for service requests)
 // Level 3 — still not resolved 48 hours after the deadline:
 //           Super Admin (senior management)
+// The Directors of the store are told at every level.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { Role } from "@/lib/roles";
 import { activeStatuses, type TicketType } from "@/lib/sla";
-import { findRecipients, notifyStaff } from "@/lib/notify";
+import { findDirectors, findRecipients, notifyStaff } from "@/lib/notify";
 
 const LEVEL_ROLES: Record<TicketType, Record<number, Role[]>> = {
   service: {
@@ -82,7 +83,11 @@ export async function runEscalations() {
       });
 
       const storeName = (row.store_name as string | null) ?? null;
-      const recipients = await findRecipients(LEVEL_ROLES[type][level], storeName);
+      // Every SOP violation also goes to the Directors of that store.
+      const recipients = [
+        ...(await findRecipients(LEVEL_ROLES[type][level], storeName)),
+        ...(await findDirectors(storeName)),
+      ];
       await notifyStaff(recipients, {
         ticketType: type,
         ticketId: String(row.id),

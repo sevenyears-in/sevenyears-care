@@ -6,16 +6,15 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { sendWhatsAppText, customerTrackLink, siteUrl } from "@/lib/notify";
 import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
-import { getStores } from "@/lib/stores";
+import { resolveComplaintReference } from "@/lib/complaint-reference";
 import { createComplaint } from "@/lib/complaints";
 import { statusLabel } from "@/lib/helpers";
 
-type State = "idle" | "ask_name" | "ask_store" | "ask_category" | "ask_description";
+type State = "idle" | "ask_name" | "ask_reference" | "ask_category" | "ask_description";
 
 type SessionData = {
   name?: string;
-  storeName?: string | null;
-  stores?: string[];
+  reference?: string;
   category?: string;
   lastMessageId?: string;
 };
@@ -156,24 +155,21 @@ export async function handleWhatsAppMessage(input: { mobile: string; text: strin
       return startStore(name);
     }
 
-    case "ask_store": {
-      const stores = session.data.stores ?? [];
-      const n = Number(text);
-      let storeName: string | null | undefined;
-      if (Number.isInteger(n) && n >= 1 && n <= stores.length) storeName = stores[n - 1];
-      else if (Number.isInteger(n) && n === stores.length + 1) storeName = null;
-      else {
-        const match = stores.find((s) => s.toLowerCase() === lower);
-        storeName = match;
-      }
-      if (storeName === undefined) {
-        await reply(`Please reply with a number from the list.\n\n${storeQuestion(stores)}`, "ask_store", session.data);
+    case "ask_reference": {
+      const check = await resolveComplaintReference(text, mobile);
+      if (!check.ok) {
+        await reply(`${check.error}\n\nPlease send the *bill number* or *warranty number* again (or *0* to cancel).`, "ask_reference", session.data);
         return;
       }
+      const found = check.value;
       await reply(
-        `What is the complaint about?\n\n${numbered(COMPLAINT_CATEGORIES)}`,
+        [
+          `Found bill *${found.billNumber}*${found.storeName ? ` (${found.storeName})` : ""}${found.staffName ? `, billed by ${found.staffName}` : ""}.`,
+          "",
+          `What is the complaint about?\n\n${numbered(COMPLAINT_CATEGORIES)}`,
+        ].join("\n"),
         "ask_category",
-        { ...session.data, storeName }
+        { ...session.data, reference: found.reference }
       );
       return;
     }
@@ -189,7 +185,7 @@ export async function handleWhatsAppMessage(input: { mobile: string; text: strin
         return;
       }
       await reply(
-        "Please describe the problem in one message (what happened, which product, bill number if you have it).",
+        "Please describe the problem in one message (what happened and when).",
         "ask_description",
         { ...session.data, category }
       );
@@ -201,13 +197,11 @@ export async function handleWhatsAppMessage(input: { mobile: string; text: strin
         await reply("Please tell us a little more about the problem.", "ask_description", session.data);
         return;
       }
-      const billMatch = text.match(/\b[A-Z]{2,5}\d{2}-[A-Z0-9]{2,5}-\d{2,8}\b/i);
       const result = await createComplaint({
         fullName: session.data.name || input.profileName || "WhatsApp customer",
         mobile,
-        storeName: session.data.storeName ?? null,
         category: session.data.category ?? "Other",
-        reference: billMatch?.[0]?.toUpperCase() ?? null,
+        reference: session.data.reference ?? null,
         description: text,
         source: "whatsapp",
       });
@@ -220,6 +214,7 @@ export async function handleWhatsAppMessage(input: { mobile: string; text: strin
           "✅ Your complaint has been registered.",
           "",
           `Complaint number: *${result.complaintNumber}*`,
+          ...(result.staffName ? [`Staff on the bill: ${result.staffName}`] : []),
           "Our team will contact you within 2 working hours.",
           "",
           `Track it: ${customerTrackLink(result.complaintNumber)}`,
@@ -232,18 +227,10 @@ export async function handleWhatsAppMessage(input: { mobile: string; text: strin
   }
 
   async function startStore(name: string) {
-    const stores = (await getStores()).stores.map((s) => s.name);
-    if (stores.length === 0) {
-      await reply(`Thank you, ${name}.\n\nWhat is the complaint about?\n\n${numbered(COMPLAINT_CATEGORIES)}`, "ask_category", {
-        name,
-        storeName: null,
-      });
-      return;
-    }
-    await reply(`Thank you, ${name}.\n\n${storeQuestion(stores)}`, "ask_store", { name, stores });
+    await reply(
+      `Thank you, ${name}.\n\nPlease send your *bill (invoice) number* or *warranty number* — e.g. VDK26-SI1-8504 or SY-WAR-2026-123456.`,
+      "ask_reference",
+      { name }
+    );
   }
-}
-
-function storeQuestion(stores: string[]) {
-  return `Which Seven Years store is it about?\n\n${numbered([...stores, "Not sure / online"])}`;
 }

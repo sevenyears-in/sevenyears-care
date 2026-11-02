@@ -12,9 +12,10 @@ type Props = {
   role: Role;
   storeName: string | null;
   unreadAlerts: number;
+  explanationsWaiting: number;
 };
 
-export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts }: Props) {
+export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, explanationsWaiting }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -23,6 +24,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts }:
     { href: "/staff", label: "Dashboard" },
     ...(canSeeService(role) ? [{ href: "/staff/service", label: "Service Requests" }] : []),
     ...(canSeeComplaints(role) ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
+    { href: "/staff/explanations", label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations" },
     { href: "/staff/register", label: "Register Warranty" },
     { href: "/staff/warranties", label: "Warranties" },
     ...(isAdmin(role)
@@ -87,6 +89,12 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts }:
               {storeName ? ` • ${storeName}` : ""}
             </p>
           </div>
+          <Link
+            href="/staff/password"
+            className="hidden rounded-xl border border-black/10 px-3 py-2 text-xs font-bold transition hover:bg-[#f7f9fb] sm:inline-block"
+          >
+            Password
+          </Link>
           <button
             type="button"
             onClick={logout}

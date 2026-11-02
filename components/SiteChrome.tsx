@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { CustomerMenu } from "@/components/CustomerMenu";
 
 const navLinks = [
-  { href: "/account", label: "My Account" },
   { href: "/my-warranties", label: "My Warranties" },
   { href: "/request-service", label: "Request Service" },
   { href: "/register-complaint", label: "Complaints" },
@@ -37,12 +37,7 @@ export function SiteHeader() {
           ))}
         </nav>
 
-        <Link
-          href="/account"
-          className="rounded-2xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-black hover:text-white lg:hidden"
-        >
-          My Account
-        </Link>
+        <CustomerMenu />
       </div>
     </header>
   );
@@ -59,7 +54,6 @@ export function SiteFooter() {
           <Link href="/request-service" className="hover:text-black">Service</Link>
           <Link href="/register-complaint" className="hover:text-black">Complaints</Link>
           <Link href="/track-request" className="hover:text-black">Track</Link>
-          <Link href="/staff/login" className="hover:text-black">Staff Login</Link>
         </div>
       </div>
     </footer>

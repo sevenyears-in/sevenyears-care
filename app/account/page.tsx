@@ -28,7 +28,7 @@ export default async function AccountPage() {
       .order("created_at", { ascending: false }),
     supabaseAdmin
       .from("complaints")
-      .select("id, complaint_number, category, status, resolution_notes, created_at, updated_at")
+      .select("id, complaint_number, category, status, resolution_notes, created_at, updated_at, reference_number, store_name, involved_staff_name")
       .eq("contact_mobile", customer.mobile)
       .order("created_at", { ascending: false }),
   ]);
@@ -103,6 +103,12 @@ export default async function AccountPage() {
                       Request service
                     </Link>
                   )}
+                  <Link
+                    href={`/register-complaint?ref=${encodeURIComponent(w.bill_number)}`}
+                    className="rounded-xl border border-black/10 px-3 py-2 text-xs font-bold hover:bg-[#f7f9fb]"
+                  >
+                    Complaint about this purchase
+                  </Link>
                 </div>
               </div>
             );
@@ -148,6 +154,11 @@ export default async function AccountPage() {
                 <div>
                   <p className="font-mono text-xs font-bold text-black/50">{c.complaint_number}</p>
                   <p className="mt-1 font-bold">{c.category}</p>
+                  <p className="text-sm text-black/55">
+                    {[c.reference_number && `Bill ${c.reference_number}`, c.store_name, c.involved_staff_name && `Staff: ${c.involved_staff_name}`]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
                 </div>
                 <StatusBadge status={c.status} label={statusLabel(c.status)} />
               </div>

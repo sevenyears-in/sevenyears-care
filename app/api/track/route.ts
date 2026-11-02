@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       const { data: row, error } = await supabaseAdmin
         .from("complaints")
         .select(
-          "id, complaint_number, contact_mobile, category, description, reference_number, store_name, status, resolution_notes, created_at, updated_at"
+          "id, complaint_number, contact_mobile, category, description, reference_number, store_name, involved_staff_name, status, resolution_notes, created_at, updated_at"
         )
         .eq("complaint_number", ticketNumber)
         .maybeSingle();
@@ -91,7 +91,8 @@ export async function POST(request: Request) {
         details: [
           { label: "Category", value: row.category },
           { label: "Store", value: row.store_name ?? null },
-          { label: "Reference", value: row.reference_number },
+          { label: "Bill / Warranty No.", value: row.reference_number },
+          { label: "Staff", value: row.involved_staff_name ?? null },
         ],
         history: await loadHistory("complaint", row.id),
       });

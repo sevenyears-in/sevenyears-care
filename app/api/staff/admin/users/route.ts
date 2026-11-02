@@ -19,7 +19,7 @@ import { CORPORATE_OFFICE, getStores, matchStore } from "@/lib/stores";
 //
 // Only the Super Admin can create or change Super Admin / Admin accounts.
 
-const PROTECTED_ROLES: Role[] = ["super_admin", "admin"];
+const PROTECTED_ROLES: Role[] = ["super_admin", "admin", "director"];
 
 /** Store must be a Zoho POS store or CORPORATE OFFICE. Returns the exact name. */
 async function storeValue(value: unknown): Promise<{ value: string | null; error?: string }> {
@@ -36,6 +36,19 @@ async function storeValue(value: unknown): Promise<{ value: string | null; error
         ? `"${raw}" is not a store in Zoho POS. Choose a store from the list.`
         : `"${raw}" is not in the store list.`,
   };
+}
+
+/** Directors: one or more stores (all Zoho stores they look after). */
+async function directorStoresValue(value: unknown): Promise<{ value: string[]; error?: string }> {
+  if (!Array.isArray(value)) return { value: [] };
+  const list = await getStores();
+  const out: string[] = [];
+  for (const raw of value) {
+    const match = matchStore(list.stores, String(raw ?? ""));
+    if (!match) return { value: [], error: `"${String(raw)}" is not in the store list.` };
+    if (!out.includes(match.name)) out.push(match.name);
+  }
+  return { value: out };
 }
 
 function emailProblem(email: string) {
@@ -58,7 +71,7 @@ export async function GET() {
     supabaseAdmin
       .from("staff_users")
       .select(
-        "id, user_id, full_name, role, store_name, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at"
+        "id, user_id, full_name, role, store_name, director_stores, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at"
       )
       .order("created_at", { ascending: true }),
     getStores(),
@@ -91,6 +104,8 @@ export async function POST(request: Request) {
     const role: Role = isRole(body.role) && body.role !== "staff" ? body.role : "csa";
     const store = await storeValue(body.storeName);
     const storeName = store.value ?? "";
+    const directorStores = await directorStoresValue(body.directorStores);
+    if (directorStores.error) return NextResponse.json({ error: directorStores.error }, { status: 400 });
     const email = String(body.email ?? "").trim().toLowerCase();
     const whatsapp = whatsappValue(body.whatsappNumber);
 
@@ -107,7 +122,7 @@ export async function POST(request: Request) {
     if (PROTECTED_ROLES.includes(role) && auth.staff.role !== "super_admin") {
       return NextResponse.json({ error: "Only the Super Admin can create admin accounts." }, { status: 403 });
     }
-    if ((role === "store_manager" || role === "technician" || role === "csa") && !storeName) {
+    if ((role === "store_manager" || role === "technician" || role === "csa" || role === "floor_incharge") && !storeName) {
       return NextResponse.json({ error: "Store Managers, Technicians and CSAs need a store." }, { status: 400 });
     }
 
@@ -126,7 +141,9 @@ export async function POST(request: Request) {
       full_name: fullName,
       password_hash: hashPassword(password),
       role,
-      store_name: storeName || null,
+      store_name: storeName || (role === "director" ? directorStores.value[0] ?? null : null),
+      director_stores: role === "director" ? directorStores.value : [],
+      must_change_password: true,
       email: email || null,
       whatsapp_number: whatsapp.value,
     });
@@ -176,6 +193,13 @@ export async function PATCH(request: Request) {
       update.store_name = store.value;
     }
 
+    if (Array.isArray(body.directorStores)) {
+      const ds = await directorStoresValue(body.directorStores);
+      if (ds.error) return NextResponse.json({ error: ds.error }, { status: 400 });
+      update.director_stores = ds.value;
+      if (ds.value.length > 0) update.store_name = ds.value[0];
+    }
+
     if (typeof body.email === "string") {
       const email = body.email.trim().toLowerCase();
       const problem = emailProblem(email);
@@ -222,6 +246,7 @@ export async function PATCH(request: Request) {
       const pwProblem = passwordProblem(body.newPassword);
       if (pwProblem) return NextResponse.json({ error: pwProblem }, { status: 400 });
       update.password_hash = hashPassword(body.newPassword);
+      if (!isSelf) update.must_change_password = true;
       // log the user out of every device (except when admins change their own)
       if (!isSelf) update.session_version = target.session_version + 1;
     }

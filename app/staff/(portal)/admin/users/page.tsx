@@ -11,6 +11,7 @@ type StaffRow = {
   full_name: string;
   role: Role;
   store_name: string | null;
+  director_stores: string[] | null;
   email: string | null;
   whatsapp_number: string | null;
   notify_email: boolean;
@@ -19,7 +20,7 @@ type StaffRow = {
   last_login_at: string | null;
 };
 
-const STORE_ROLES: Role[] = ["store_manager", "technician", "csa"];
+const STORE_ROLES: Role[] = ["store_manager", "technician", "csa", "floor_incharge"];
 
 type StoreOption = { name: string; code: string | null };
 
@@ -41,6 +42,7 @@ export default function StaffUsersPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("csa");
   const [storeName, setStoreName] = useState("");
+  const [directorStores, setDirectorStores] = useState<string[]>([]);
   const [email, setEmail] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [saving, setSaving] = useState(false);
@@ -68,7 +70,8 @@ export default function StaffUsersPage() {
   }, [load]);
 
   const isSuper = currentRole === "super_admin";
-  const assignableRoles = ASSIGNABLE_ROLES.filter((r) => isSuper || (r !== "super_admin" && r !== "admin"));
+  const PROTECTED: Role[] = ["super_admin", "admin", "director"];
+  const assignableRoles = ASSIGNABLE_ROLES.filter((r) => isSuper || !PROTECTED.includes(r));
 
   const patch = async (id: string, change: Record<string, unknown>, success: string) => {
     setErrorMessage("");
@@ -92,7 +95,7 @@ export default function StaffUsersPage() {
     const response = await fetch("/api/staff/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullName, userId, password, role, storeName, email, whatsappNumber }),
+      body: JSON.stringify({ fullName, userId, password, role, storeName, directorStores, email, whatsappNumber }),
     });
     const data = await response.json().catch(() => ({}));
     setSaving(false);
@@ -106,6 +109,7 @@ export default function StaffUsersPage() {
     setPassword("");
     setRole("csa");
     setStoreName("");
+    setDirectorStores([]);
     setEmail("");
     setWhatsappNumber("");
     load();
@@ -170,14 +174,34 @@ export default function StaffUsersPage() {
         </div>
         <div>
           <label htmlFor="store" className={labelClass}>
-            Store{STORE_ROLES.includes(role) ? " *" : ""}
+            {role === "director" ? "Stores" : "Store"}{STORE_ROLES.includes(role) ? " *" : ""}
           </label>
-          <select id="store" value={storeName} onChange={(e) => setStoreName(e.target.value)} className={inputClass}>
-            <option value="">— No store —</option>
-            {stores.map((s) => (
-              <option key={s.name} value={s.name}>{storeLabel(s)}</option>
-            ))}
-          </select>
+          {role === "director" ? (
+            <div className="space-y-1 rounded-2xl border border-black/10 bg-white p-3 text-sm">
+              {stores
+                .filter((s) => s.name !== "CORPORATE OFFICE")
+                .map((s) => (
+                  <label key={s.name} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={directorStores.includes(s.name)}
+                      onChange={(e) =>
+                        setDirectorStores((list) => (e.target.checked ? [...list, s.name] : list.filter((x) => x !== s.name)))
+                      }
+                    />
+                    {storeLabel(s)}
+                  </label>
+                ))}
+              <p className="text-xs text-black/45">Tick every store this Director looks after (none = all stores).</p>
+            </div>
+          ) : (
+            <select id="store" value={storeName} onChange={(e) => setStoreName(e.target.value)} className={inputClass}>
+              <option value="">— No store —</option>
+              {stores.map((s) => (
+                <option key={s.name} value={s.name}>{storeLabel(s)}</option>
+              ))}
+            </select>
+          )}
         </div>
         <div>
           <label htmlFor="email" className={labelClass}>E-mail (for alerts)</label>
@@ -218,7 +242,7 @@ export default function StaffUsersPage() {
               <tbody className="divide-y divide-black/5">
                 {users.map((u) => {
                   const self = u.id === currentUserId;
-                  const locked = !isSuper && !self && (u.role === "super_admin" || u.role === "admin");
+                  const locked = !isSuper && !self && PROTECTED.includes(u.role);
                   return (
                     <tr key={u.id} className={u.is_active ? "" : "opacity-50"}>
                       <td className="px-4 py-3">
@@ -236,7 +260,7 @@ export default function StaffUsersPage() {
                           className="rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
                           aria-label={`Role for ${u.user_id}`}
                         >
-                          {(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => r !== "super_admin" && r !== "admin"))
+                          {(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => !PROTECTED.includes(r)))
                             .concat([u.role])
                             .filter((r, i, all) => all.indexOf(r) === i)
                             .map((r) => (
@@ -245,6 +269,14 @@ export default function StaffUsersPage() {
                         </select>
                       </td>
                       <td className="px-4 py-3">
+                        {u.role === "director" ? (
+                          <DirectorStores
+                            current={u.director_stores ?? []}
+                            stores={stores.filter((s) => s.name !== "CORPORATE OFFICE").map((s) => s.name)}
+                            disabled={locked}
+                            onSave={(list) => patch(u.id, { directorStores: list }, "Director's stores updated.")}
+                          />
+                        ) : (
                         <select
                           value={u.store_name ?? ""}
                           disabled={locked}
@@ -260,6 +292,7 @@ export default function StaffUsersPage() {
                             <option key={s.name} value={s.name}>{storeLabel(s)}</option>
                           ))}
                         </select>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         <div className="flex flex-col gap-1">
@@ -331,6 +364,55 @@ export default function StaffUsersPage() {
           ))}
         </ul>
       </div>
+    </div>
+  );
+}
+
+function DirectorStores({
+  current,
+  stores,
+  disabled,
+  onSave,
+}: {
+  current: string[];
+  stores: string[];
+  disabled: boolean;
+  onSave: (list: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<string[]>(current);
+  return (
+    <div className="max-w-[240px] text-xs">
+      <p className="font-semibold">{current.length ? current.join(", ") : "All stores"}</p>
+      {!disabled && (
+        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[#11b8d0] hover:underline">
+          {open ? "Close" : "Change stores"}
+        </button>
+      )}
+      {open && (
+        <div className="mt-2 space-y-1 rounded-xl border border-black/10 p-2">
+          {stores.map((s) => (
+            <label key={s} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={list.includes(s)}
+                onChange={(e) => setList((l) => (e.target.checked ? [...l, s] : l.filter((x) => x !== s)))}
+              />
+              {s}
+            </label>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              onSave(list);
+              setOpen(false);
+            }}
+            className="mt-1 rounded-lg bg-[#161616] px-3 py-1 font-bold text-white"
+          >
+            Save
+          </button>
+        </div>
+      )}
     </div>
   );
 }

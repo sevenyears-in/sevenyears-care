@@ -22,6 +22,10 @@ export type StaffUser = {
   storeName: string | null;
   email: string | null;
   whatsappNumber: string | null;
+  /** Directors: the stores they look after (empty = all stores). */
+  directorStores: string[];
+  /** First login with a temporary password: must choose their own. */
+  mustChangePassword: boolean;
 };
 
 // ------------------------------------------------------------------
@@ -144,7 +148,7 @@ export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
 
   const full = await supabaseAdmin
     .from("staff_users")
-    .select("id, user_id, full_name, role, store_name, email, whatsapp_number, is_active, session_version")
+    .select("id, user_id, full_name, role, store_name, email, whatsapp_number, is_active, session_version, director_stores, must_change_password")
     .eq("id", session.sid)
     .maybeSingle();
 
@@ -167,6 +171,8 @@ export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
     whatsapp_number?: string | null;
     is_active: boolean;
     session_version: number;
+    director_stores?: string[] | null;
+    must_change_password?: boolean | null;
   } | null;
 
   if (!staff || !staff.is_active || staff.session_version !== session.v) return null;
@@ -179,6 +185,8 @@ export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
     storeName: staff.store_name ?? null,
     email: staff.email ?? null,
     whatsappNumber: staff.whatsapp_number ?? null,
+    directorStores: Array.isArray(staff.director_stores) ? staff.director_stores : [],
+    mustChangePassword: Boolean(staff.must_change_password),
   };
 });
 

@@ -5,7 +5,7 @@ import { customerTrackLink } from "@/lib/notify";
 
 // POST /api/channels/aira/complaints — the Aira chatbot registers a complaint.
 // Header:  X-API-Key: <key from Staff → Complaint Channels>
-// Body:    { name, mobile, description, category?, store?, email?, reference? }
+// Body:    { name, mobile, reference (bill or warranty no.), description, category?, email? }
 // Returns: { complaintNumber, status, trackUrl }
 export async function POST(request: Request) {
   const denied = await airaGuard(request);
@@ -30,6 +30,8 @@ export async function POST(request: Request) {
     {
       success: true,
       complaintNumber: result.complaintNumber,
+      staffName: result.staffName,
+      storeName: result.storeName,
       status: result.status,
       trackUrl: customerTrackLink(result.complaintNumber),
       message: `Your complaint ${result.complaintNumber} has been registered. Our team will contact you within 2 working hours.`,

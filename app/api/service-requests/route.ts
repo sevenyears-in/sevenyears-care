@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { defaultTechnicianFor } from "@/lib/store-technicians";
+import { ensureCustomerAccountFromRequest, getCurrentCustomer } from "@/lib/customer-auth";
 import { cleanMobile, generateTicketNumber, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
 import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 import { SAFETY_ISSUE_TYPES } from "@/lib/sla";
@@ -13,8 +14,10 @@ import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const customer = await getCurrentCustomer();
 
-    const mobile = cleanMobile(body.mobileNumber);
+    // Logged in to My Account: the mobile number comes from their account.
+    const mobile = customer ? customer.mobile : cleanMobile(body.mobileNumber);
     const warrantyNumber = String(body.warrantyNumber ?? "").trim().toUpperCase();
     const issueType = String(body.issueType ?? "").trim();
     const description = String(body.description ?? "").trim();
@@ -187,9 +190,15 @@ export async function POST(request: Request) {
       }).catch((error) => console.error("New service request alerts failed:", error))
     );
 
+    // First request from this mobile: give them a My Account login.
+    const account = customer
+      ? { created: false }
+      : await ensureCustomerAccountFromRequest(mobile, String(warranty.customer_name ?? ""));
+
     return NextResponse.json(
       {
         success: true,
+        account: account.created ? { created: true } : null,
         request: {
           request_number: created.request_number,
           status: created.status,

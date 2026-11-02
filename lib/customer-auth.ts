@@ -14,7 +14,7 @@ import { isValidMobile } from "@/lib/helpers";
 export const CUSTOMER_COOKIE = "sy_customer_session";
 const SESSION_DAYS = 30;
 
-export type Customer = { mobile: string; name: string | null };
+export type Customer = { mobile: string; name: string | null; email: string | null };
 
 /** Last 4 digits of a bill number (padded with 0 if it has fewer). */
 export function billPassword(billNumber: string) {
@@ -26,6 +26,31 @@ export function customerPasswordProblem(password: string) {
   if (password.length < 6) return "Use at least 6 characters.";
   if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return "Use letters and numbers.";
   return null;
+}
+
+/**
+ * Called when a customer raises a service request or complaint on the website
+ * and has no login yet: User ID = mobile, password = last 4 digits of the mobile.
+ */
+export async function ensureCustomerAccountFromRequest(mobile: string, name: string, email?: string | null) {
+  if (!isValidMobile(mobile)) return { created: false };
+  const { data: existing } = await supabaseAdmin
+    .from("customer_accounts")
+    .select("mobile")
+    .eq("mobile", mobile)
+    .maybeSingle();
+  if (existing) return { created: false };
+  const { error } = await supabaseAdmin.from("customer_accounts").insert({
+    mobile,
+    full_name: name || null,
+    email: email || null,
+    password_hash: hashPassword(mobile.slice(-4)),
+  });
+  if (error) {
+    if ((error as { code?: string }).code !== "23505") console.error("Create customer account (request) error:", error);
+    return { created: false };
+  }
+  return { created: true };
 }
 
 /**
@@ -122,7 +147,8 @@ export async function customerLogin(mobile: string, password: string): Promise<L
     }
     return {
       ok: false,
-      error: "Mobile number or password is not correct. Your first password is the last 4 digits of your bill number.",
+      error:
+        "Mobile number or password is not correct. Your first password is the last 4 digits of your bill number (or of your mobile number if your login was made when you raised a request).",
       status: 401,
     };
   }
@@ -213,9 +239,13 @@ export const getCurrentCustomer = cache(async (): Promise<Customer | null> => {
 
   const { data } = await supabaseAdmin
     .from("customer_accounts")
-    .select("mobile, full_name, session_version")
+    .select("mobile, full_name, email, session_version")
     .eq("mobile", session.m)
     .maybeSingle();
   if (!data || (data.session_version ?? 1) !== session.v) return null;
-  return { mobile: String(data.mobile), name: data.full_name ? String(data.full_name) : null };
+  return {
+    mobile: String(data.mobile),
+    name: data.full_name ? String(data.full_name) : null,
+    email: data.email ? String(data.email) : null,
+  };
 });
