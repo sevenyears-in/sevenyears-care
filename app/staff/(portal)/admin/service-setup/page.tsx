@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ErrorBox } from "@/components/SiteChrome";
+import { ZohoStoresCard } from "@/components/ZohoStoresCard";
 
 type Data = {
   stores: { name: string; staffId: string }[];
@@ -113,6 +114,8 @@ export default function ServiceSetupPage() {
           No active Technicians or Service Heads yet — add them under Staff Users first.
         </p>
       )}
+
+      <ZohoStoresCard onChange={load} />
     </div>
   );
 }

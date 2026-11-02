@@ -1,4 +1,6 @@
 // Store list — taken from Zoho POS so names match the bills exactly.
+// A new store with no Zoho bill yet can be added by hand on the Zoho POS page;
+// once Zoho lists it, the Zoho entry is used.
 // Server only. The list is kept in Supabase (app_settings "zoho_stores") and
 // refreshed from Zoho automatically every 15 minutes, so a store newly created
 // in Zoho POS shows up here without any work.
@@ -11,7 +13,64 @@ export const CORPORATE_OFFICE = "CORPORATE OFFICE";
 const CACHE_KEY = "zoho_stores";
 const REFRESH_MS = 15 * 60 * 1000;
 
-export type StoreOption = { name: string; code: string | null };
+export type StoreOption = { name: string; code: string | null; manual?: boolean };
+
+// ------------------------------------------------------------------
+// Stores added by hand (a new store that has no Zoho bill yet)
+// ------------------------------------------------------------------
+
+const MANUAL_KEY = "manual_stores";
+type ManualStore = { name: string; addedAt: string; addedBy: string | null };
+
+export async function loadManualStores(): Promise<ManualStore[]> {
+  try {
+    const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", MANUAL_KEY).maybeSingle();
+    const list = (data?.value as { stores?: ManualStore[] } | null)?.stores;
+    return Array.isArray(list) ? list.filter((s) => s && typeof s.name === "string" && s.name.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveManualStores(stores: ManualStore[]) {
+  const { error } = await supabaseAdmin
+    .from("app_settings")
+    .upsert({ key: MANUAL_KEY, value: { stores }, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+export function cleanStoreName(value: string) {
+  return value.replace(/\s+/g, " ").trim().toUpperCase().slice(0, 80);
+}
+
+export async function addManualStore(name: string, addedBy: string | null) {
+  const clean = cleanStoreName(name);
+  if (clean.length < 3) return { ok: false as const, error: "Type the store name (at least 3 letters)." };
+  if (clean.toLowerCase() === CORPORATE_OFFICE.toLowerCase()) {
+    return { ok: false as const, error: "CORPORATE OFFICE is always available." };
+  }
+  const current = await getStores();
+  if (matchStore(current.stores, clean)) return { ok: false as const, error: `${clean} is already in the list.` };
+  const list = await loadManualStores();
+  await saveManualStores([...list, { name: clean, addedAt: new Date().toISOString(), addedBy }]);
+  return { ok: true as const, name: clean };
+}
+
+export async function removeManualStore(name: string) {
+  const wanted = name.trim().toLowerCase();
+  const list = await loadManualStores();
+  await saveManualStores(list.filter((s) => s.name.trim().toLowerCase() !== wanted));
+}
+
+/** Zoho stores first; hand-added stores that Zoho doesn't list yet are added after them. */
+async function withManual(stores: StoreOption[]): Promise<StoreOption[]> {
+  const manual = await loadManualStores();
+  const known = new Set(stores.map((s) => s.name.trim().toLowerCase()));
+  const extra = manual
+    .filter((m) => !known.has(m.name.trim().toLowerCase()))
+    .map((m) => ({ name: m.name, code: null, manual: true }));
+  return [...stores, ...extra].sort((a, b) => a.name.localeCompare(b.name));
+}
 
 type Cache = { fetchedAt: string; stores: ZohoStore[]; lastError?: string | null };
 
@@ -62,7 +121,7 @@ export async function getStores(force = false): Promise<StoreList> {
   if (!(await zohoConfigured())) {
     const legacy = await legacyStores();
     return {
-      stores: legacy.filter((s) => s.active).map(({ name, code }) => ({ name, code })),
+      stores: await withManual(legacy.filter((s) => s.active).map(({ name, code }) => ({ name, code }))),
       source: "legacy",
       fetchedAt: null,
       error: null,
@@ -95,7 +154,7 @@ export async function getStores(force = false): Promise<StoreList> {
   }
 
   return {
-    stores: stores.filter((s) => s.active).map(({ name, code }) => ({ name, code })),
+    stores: await withManual(stores.filter((s) => s.active).map(({ name, code }) => ({ name, code }))),
     source: "zoho",
     fetchedAt,
     error,
