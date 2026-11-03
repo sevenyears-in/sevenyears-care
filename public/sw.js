@@ -2,9 +2,9 @@
 // Keeps the app installable and shows a friendly page when there is no internet.
 // Pages and data always come fresh from the server (nothing private is cached).
 
-const CACHE = "sy-care-v2";
+const CACHE = "sy-care-v3";
 const OFFLINE_URL = "/offline.html";
-const SHELL = [OFFLINE_URL, "/app-icon-192.png", "/seven-years-logo.png"];
+const SHELL = [OFFLINE_URL, "/app-icon-192.png", "/seven-years-logo-2026.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

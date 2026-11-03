@@ -43,11 +43,11 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
           <div className="border-b border-black/5 p-6 sm:p-8">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
               <Image
-                src="/seven-years-logo.png"
+                src="/seven-years-logo-2026.png"
                 alt="Seven Years"
-                width={190}
-                height={80}
-                className="h-auto w-[170px] object-contain"
+                width={724}
+                height={405}
+                className="h-auto w-[150px] object-contain"
                 priority
               />
               <div className="sm:text-right">

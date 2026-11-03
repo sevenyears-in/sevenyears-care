@@ -105,9 +105,9 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
 
   let logoBottom = height - 90;
   try {
-    const logoBytes = await readFile(path.join(process.cwd(), "public", "seven-years-logo.png"));
+    const logoBytes = await readFile(path.join(process.cwd(), "public", "seven-years-logo-2026.png"));
     const logo = await pdf.embedPng(logoBytes);
-    const logoWidth = 150;
+    const logoWidth = 120;
     const logoHeight = (logo.height / logo.width) * logoWidth;
     page.drawImage(logo, { x: M, y: height - 30 - logoHeight, width: logoWidth, height: logoHeight });
     logoBottom = height - 30 - logoHeight;

@@ -141,88 +141,130 @@ export default async function StaffDashboard() {
 }
 
 /** Store-wise open / overdue counts (Corporate Office, Directors, Service Head). */
+const STORE_COLOURS = ["#ff5e79", "#8883d7", "#ffa95a", "#11b8d0"]; // logo colours
+
 function StoreBreakdown({ service, complaints }: { service: Ticket[] | null; complaints: Ticket[] | null }) {
-  const stores = new Map<string, { s: number; so: number; c: number; co: number }>();
-  const bump = (t: Ticket, kind: "s" | "c") => {
+  type Counts = { open: number; overdue: number };
+  const stores = new Map<string, { service: Counts; complaints: Counts }>();
+  const bump = (t: Ticket, kind: "service" | "complaints") => {
     const key = t.storeName?.trim() || "Not specified";
-    const row = stores.get(key) ?? { s: 0, so: 0, c: 0, co: 0 };
-    const overdue = slaState(rawSla(t)).state === "overdue";
-    if (kind === "s") {
-      row.s++;
-      if (overdue) row.so++;
-    } else {
-      row.c++;
-      if (overdue) row.co++;
-    }
+    const row = stores.get(key) ?? { service: { open: 0, overdue: 0 }, complaints: { open: 0, overdue: 0 } };
+    row[kind].open++;
+    if (slaState(rawSla(t)).state === "overdue") row[kind].overdue++;
     stores.set(key, row);
   };
-  (service ?? []).forEach((t) => bump(t, "s"));
-  (complaints ?? []).forEach((t) => bump(t, "c"));
-  const rows = [...stores.entries()].sort((a, b) => b[1].so + b[1].co - (a[1].so + a[1].co) || a[0].localeCompare(b[0]));
-  const totals = rows.reduce(
-    (acc, [, r]) => ({ s: acc.s + r.s, so: acc.so + r.so, c: acc.c + r.c, co: acc.co + r.co }),
-    { s: 0, so: 0, c: 0, co: 0 }
+  (service ?? []).forEach((t) => bump(t, "service"));
+  (complaints ?? []).forEach((t) => bump(t, "complaints"));
+
+  const overdueOf = (r: { service: Counts; complaints: Counts }) => r.service.overdue + r.complaints.overdue;
+  const openOf = (r: { service: Counts; complaints: Counts }) => r.service.open + r.complaints.open;
+  const rows = [...stores.entries()].sort(
+    (a, b) => overdueOf(b[1]) - overdueOf(a[1]) || openOf(b[1]) - openOf(a[1]) || a[0].localeCompare(b[0])
   );
-  const cell = (value: number, href: string | null, danger = false) => (
-    <td className={`px-3 py-3 text-right ${danger && value > 0 ? "font-bold text-red-700" : value ? "font-semibold" : "text-black/30"}`}>
-      {href && value ? (
-        <Link href={href} className="hover:underline">
-          {value}
-        </Link>
-      ) : (
-        value
-      )}
-    </td>
+  const total = rows.reduce(
+    (acc, [, r]) => ({ open: acc.open + openOf(r), overdue: acc.overdue + overdueOf(r) }),
+    { open: 0, overdue: 0 }
   );
+  const maxOpen = Math.max(1, ...rows.map(([, r]) => openOf(r)));
   const link = (base: string, filter: string, store: string) =>
-    store === "Not specified" ? null : `${base}?filter=${filter}&store=${encodeURIComponent(store)}`;
+    store === "Not specified" ? undefined : `${base}?filter=${filter}&store=${encodeURIComponent(store)}`;
+
+  const Metric = ({ label, icon, counts, base, store }: { label: string; icon: string; counts: Counts; base: string; store: string }) => {
+    const openHref = link(base, "active", store);
+    const overdueHref = link(base, "overdue", store);
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#f7f9fb] px-4 py-3">
+        <div className="flex items-center gap-2 text-sm text-black/55">
+          <span aria-hidden>{icon}</span>
+          {label}
+        </div>
+        <div className="flex items-center gap-2">
+          {openHref && counts.open ? (
+            <Link href={openHref} className="text-xl font-bold hover:text-[#ff5e79]">
+              {counts.open}
+            </Link>
+          ) : (
+            <span className={`text-xl font-bold ${counts.open ? "" : "text-black/25"}`}>{counts.open}</span>
+          )}
+          {counts.overdue > 0 ? (
+            <Link
+              href={overdueHref ?? "#"}
+              className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-red-700 ring-1 ring-red-200 hover:bg-red-100"
+            >
+              {counts.overdue} overdue
+            </Link>
+          ) : counts.open > 0 ? (
+            <span className="rounded-full bg-green-50 px-2.5 py-1 text-[11px] font-bold text-green-700 ring-1 ring-green-200">
+              On time
+            </span>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-xl font-bold">Store-wise</h2>
-      <div className="overflow-x-auto rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead className="bg-[#f7f9fb] text-xs uppercase tracking-wider text-black/45">
-            <tr>
-              <th className="px-4 py-3 text-left">Store</th>
-              {service && <th className="px-3 py-3 text-right">Service open</th>}
-              {service && <th className="px-3 py-3 text-right">Service overdue</th>}
-              {complaints && <th className="px-3 py-3 text-right">Complaints open</th>}
-              {complaints && <th className="px-3 py-3 text-right">Complaints overdue</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/5">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-black/50">
-                  Nothing open in any store. 🎉
-                </td>
-              </tr>
-            ) : (
-              rows.map(([store, r]) => (
-                <tr key={store}>
-                  <td className="px-4 py-3 font-semibold">{store}</td>
-                  {service && cell(r.s, link("/staff/service", "active", store))}
-                  {service && cell(r.so, link("/staff/service", "overdue", store), true)}
-                  {complaints && cell(r.c, link("/staff/complaints", "active", store))}
-                  {complaints && cell(r.co, link("/staff/complaints", "overdue", store), true)}
-                </tr>
-              ))
-            )}
-          </tbody>
-          {rows.length > 1 && (
-            <tfoot className="border-t border-black/10 bg-[#f7f9fb]">
-              <tr>
-                <td className="px-4 py-3 font-bold">All stores</td>
-                {service && cell(totals.s, null)}
-                {service && cell(totals.so, null, true)}
-                {complaints && cell(totals.c, null)}
-                {complaints && cell(totals.co, null, true)}
-              </tr>
-            </tfoot>
-          )}
-        </table>
+    <section className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/5 bg-gradient-to-r from-[#8883d7]/10 via-[#ff5e79]/5 to-[#11b8d0]/10 px-5 py-5 sm:px-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8883d7]">All stores</p>
+          <h2 className="mt-1 text-xl font-bold">Store-wise status</h2>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-black/5">
+            {rows.length} {rows.length === 1 ? "store" : "stores"}
+          </span>
+          <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-black/5">{total.open} open</span>
+          <span
+            className={`rounded-full px-3 py-1.5 shadow-sm ring-1 ${
+              total.overdue ? "bg-red-50 text-red-700 ring-red-200" : "bg-green-50 text-green-700 ring-green-200"
+            }`}
+          >
+            {total.overdue ? `${total.overdue} overdue` : "Nothing overdue"}
+          </span>
+        </div>
       </div>
+
+      {rows.length === 0 ? (
+        <p className="px-6 py-10 text-center text-sm text-black/50">Nothing open in any store. 🎉</p>
+      ) : (
+        <ul className="divide-y divide-black/5">
+          {rows.map(([store, r], i) => {
+            const colour = STORE_COLOURS[i % STORE_COLOURS.length];
+            const late = overdueOf(r) > 0;
+            return (
+              <li key={store} className={`px-5 py-4 sm:px-6 ${late ? "bg-red-50/30" : ""}`}>
+                <div className="grid items-center gap-3 lg:grid-cols-[220px_1fr]">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold text-white"
+                      style={{ backgroundColor: colour }}
+                      aria-hidden
+                    >
+                      {store.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">{store}</p>
+                      <div className="mt-1.5 h-1.5 w-full max-w-[140px] overflow-hidden rounded-full bg-black/5">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${Math.round((openOf(r) / maxOpen) * 100)}%`, backgroundColor: colour }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`grid gap-2 ${service && complaints ? "sm:grid-cols-2" : ""}`}>
+                    {service && <Metric label="Service" icon="🛠️" counts={r.service} base="/staff/service" store={store} />}
+                    {complaints && (
+                      <Metric label="Complaints" icon="💬" counts={r.complaints} base="/staff/complaints" store={store} />
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

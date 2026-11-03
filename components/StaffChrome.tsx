@@ -82,11 +82,11 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3">
         <Link href="/staff" className="shrink-0">
           <Image
-            src="/seven-years-logo.png"
+            src="/seven-years-logo-2026.png"
             alt="Seven Years"
-            width={150}
-            height={58}
-            className="h-auto w-[104px] sm:w-[130px]"
+            width={724}
+            height={405}
+            className="h-12 w-auto sm:h-14"
             priority
           />
         </Link>

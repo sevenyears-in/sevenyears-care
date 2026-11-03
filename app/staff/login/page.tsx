@@ -62,11 +62,11 @@ export default function StaffLoginPage() {
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
           <Image
-            src="/seven-years-logo.png"
+            src="/seven-years-logo-2026.png"
             alt="Seven Years"
-            width={180}
-            height={70}
-            className="h-auto w-[160px]"
+            width={724}
+            height={405}
+            className="h-auto w-[180px]"
             priority
           />
           <p className="mt-5 text-sm font-semibold text-[#ff5e79]">Seven Years Care</p>
