@@ -184,9 +184,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
             const ticketHref =
               r.kind === "service"
                 ? `/staff/service/${r.ref_id}`
-                : r.kind === "complaint"
-                  ? `/staff/complaints/${r.ref_id}`
-                  : `/staff/warranties/${r.ref_id}`;
+                : `/staff/complaints/${r.ref_id}`;
             return (
               <li key={r.id} className={`${card} p-5`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -195,9 +193,13 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                       {FORM_TITLES[r.kind]}
                       {r.confidential ? " · Confidential (HR)" : ""}
                     </p>
-                    <Link href={ticketHref} className="mt-1 block font-mono text-sm font-bold hover:underline">
-                      {r.kind === "sales" ? `Bill ${r.ref_number}` : r.ref_number}
-                    </Link>
+                    {r.kind === "sales" ? (
+                      <p className="mt-1 font-mono text-sm font-bold">Bill {r.ref_number}</p>
+                    ) : (
+                      <Link href={ticketHref} className="mt-1 block font-mono text-sm font-bold hover:underline">
+                        {r.ref_number}
+                      </Link>
+                    )}
                     <p className="text-xs text-black/50">
                       {[r.store_name, r.staff_name && !r.confidential ? `Staff: ${r.staff_name}` : null, r.confidential ? null : r.mobile]
                         .filter(Boolean)

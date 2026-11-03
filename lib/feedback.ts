@@ -1,6 +1,8 @@
 // Customer feedback: what is being rated, saving answers, complaint confirmation (server only).
 
+import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { fetchInvoiceByNumber } from "@/lib/zoho";
 import { feedbackLink, type FeedbackKind } from "@/lib/feedback-token";
 import {
   COMPLAINT_RESOLVED_QUESTION,
@@ -32,7 +34,63 @@ export type SavedFeedback = {
   rated: boolean;
 };
 
+/** Sales feedback for a bill that has no registered warranty: id = "bill_<BILL NO>_<mobile>". */
+export function zohoBillFeedbackId(billNumber: string, mobile: string) {
+  return `bill_${billNumber.toUpperCase()}_${mobile}`;
+}
+
+/** Stable UUID for a bill number (customer_feedback.ref_id needs a UUID). */
+function uuidFromText(text: string) {
+  const h = createHash("sha256").update(`sy-bill:${text}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+async function loadZohoBillSubject(id: string): Promise<FeedbackSubject | null> {
+  const rest = id.slice("bill_".length);
+  const cut = rest.lastIndexOf("_");
+  if (cut <= 0) return null;
+  const billNumber = rest.slice(0, cut);
+  const mobile = rest.slice(cut + 1);
+  // A warranty may have been registered since the link was made.
+  const { data: w } = await supabaseAdmin
+    .from("warranties")
+    .select("id")
+    .ilike("bill_number", billNumber)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (w?.length) return loadFeedbackSubject("sales", w[0].id);
+
+  let invoice = null;
+  try {
+    invoice = await fetchInvoiceByNumber(billNumber);
+  } catch (error) {
+    console.warn("Zoho invoice lookup for feedback failed:", error);
+  }
+  if (!invoice) return null;
+  const matched = invoice.salespersonName ? await staffByName(invoice.salespersonName) : null;
+  return {
+    kind: "sales",
+    id: uuidFromText(invoice.billNumber.toUpperCase()),
+    number: invoice.billNumber,
+    storeName: invoice.storeName,
+    customerName: invoice.customerName || null,
+    mobile: /^[6-9]\d{9}$/.test(mobile) ? mobile : null,
+    staffName: matched?.full_name ?? invoice.salespersonName ?? null,
+    confidential: false,
+    status: null,
+    title: "Your purchase",
+    ownerId: null,
+  };
+}
+
+async function staffByName(name: string) {
+  const wanted = name.replace(/\s+/g, " ").trim().toLowerCase();
+  const { data } = await supabaseAdmin.from("staff_users").select("id, full_name").eq("is_active", true);
+  return (data ?? []).find((x) => String(x.full_name).replace(/\s+/g, " ").trim().toLowerCase() === wanted) ?? null;
+}
+
 export async function loadFeedbackSubject(kind: FeedbackKind, id: string): Promise<FeedbackSubject | null> {
+  if (kind === "sales" && id.startsWith("bill_")) return loadZohoBillSubject(id);
   if (kind === "sales") {
     const { data } = await supabaseAdmin
       .from("warranties")
