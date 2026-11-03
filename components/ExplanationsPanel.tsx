@@ -34,6 +34,8 @@ export function ExplanationsPanel({ type, ticketId, currentStaffId, canAsk, expl
   );
   const [reason, setReason] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [managing, setManaging] = useState<{ id: string; action: "record" | "withdraw" } | null>(null);
+  const [manageText, setManageText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -69,11 +71,26 @@ export function ExplanationsPanel({ type, ticketId, currentStaffId, canAsk, expl
         <ul className="mt-4 space-y-3">
           {explanations.map((e) => {
             const mine = e.staffId === currentStaffId && !e.explainedAt;
+            const state = !e.explainedAt
+              ? "waiting"
+              : e.explanation?.startsWith("Withdrawn by ")
+                ? "withdrawn"
+                : e.explanation?.startsWith("Recorded by ")
+                  ? "recorded"
+                  : "replied";
+            const badge = {
+              waiting: "bg-amber-100 text-amber-800",
+              replied: "bg-green-100 text-green-800",
+              recorded: "bg-sky-100 text-sky-800",
+              withdrawn: "bg-black/10 text-black/55",
+            }[state];
+            const badgeText = { waiting: "Waiting", replied: "Replied", recorded: "Recorded by HR / manager", withdrawn: "Withdrawn" }[state];
+            const canManage = canAsk && state === "waiting" && !mine;
             return (
               <li key={e.id} className={`rounded-2xl p-4 text-sm ${mine ? "bg-amber-50 ring-1 ring-amber-200" : "bg-[#f7f9fb]"}`}>
                 <p className="font-bold">
                   {e.staffName}
-                  {!e.explainedAt && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Waiting</span>}
+                  <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${badge}`}>{badgeText}</span>
                 </p>
                 <p className="mt-1 text-black/70">
                   <span className="font-semibold">Asked:</span> {e.reason}
@@ -82,9 +99,82 @@ export function ExplanationsPanel({ type, ticketId, currentStaffId, canAsk, expl
                   {e.requestedByName ?? "System"} · {formatDateTime(e.requestedAt)}
                 </p>
                 {e.explanation && (
-                  <div className="mt-3 rounded-xl bg-white p-3">
+                  <div className={`mt-3 rounded-xl p-3 ${state === "withdrawn" ? "bg-white/60 text-black/55" : "bg-white"}`}>
                     <p className="whitespace-pre-line">{e.explanation}</p>
-                    <p className="mt-1 text-xs text-black/45">Replied {formatDateTime(e.explainedAt)}</p>
+                    <p className="mt-1 text-xs text-black/45">
+                      {state === "replied" ? "Replied" : state === "recorded" ? "Recorded" : "Withdrawn"} {formatDateTime(e.explainedAt)}
+                    </p>
+                  </div>
+                )}
+                {canManage && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-black/55">
+                      No reply yet? Remind them, write down what they told you in person / on the phone, or withdraw it.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => send("PATCH", { id: e.id, action: "remind" }, `Reminder sent to ${e.staffName}.`)}
+                        className="rounded-xl bg-[#161616] px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                      >
+                        🔔 Send reminder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManaging(managing?.id === e.id && managing.action === "record" ? null : { id: e.id, action: "record" });
+                          setManageText("");
+                        }}
+                        className="rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-bold"
+                      >
+                        📝 Record what they said
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManaging(managing?.id === e.id && managing.action === "withdraw" ? null : { id: e.id, action: "withdraw" });
+                          setManageText("");
+                        }}
+                        className="rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-bold text-black/60"
+                      >
+                        Withdraw
+                      </button>
+                    </div>
+                    {managing?.id === e.id && (
+                      <div className="space-y-2">
+                        <textarea
+                          rows={3}
+                          maxLength={3000}
+                          value={manageText}
+                          onChange={(ev) => setManageText(ev.target.value)}
+                          className={box}
+                          placeholder={
+                            managing.action === "record"
+                              ? `What ${e.staffName} told you (meeting / phone call)…`
+                              : "Why it is no longer needed…"
+                          }
+                        />
+                        <button
+                          type="button"
+                          disabled={busy || manageText.trim().length < 10}
+                          onClick={async () => {
+                            const ok = await send(
+                              "PATCH",
+                              { id: e.id, action: managing.action, text: manageText },
+                              managing.action === "record" ? "Explanation recorded." : "Request withdrawn."
+                            );
+                            if (ok) {
+                              setManaging(null);
+                              setManageText("");
+                            }
+                          }}
+                          className="rounded-xl bg-[#ff5e79] px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                        >
+                          {managing.action === "record" ? "Save explanation" : "Withdraw request"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {mine && (

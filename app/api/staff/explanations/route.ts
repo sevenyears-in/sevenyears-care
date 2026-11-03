@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
-import { answerExplanation, canRequestExplanation, requestExplanation } from "@/lib/explanations";
+import { answerExplanation, canRequestExplanation, manageExplanation, requestExplanation } from "@/lib/explanations";
 import { canViewTicket, getTicket } from "@/lib/tickets";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { CORPORATE_OFFICE_NAME, sameStore } from "@/lib/roles";
 
 // POST  { type, ticketId, staffId, reason } → ask a staff member to explain
 // PATCH { id, explanation }                 → the staff member replies
+// PATCH { id, action: "remind" }            → send the staff member a reminder
+// PATCH { id, action: "record", text }      → HR / manager records what they said in person
+// PATCH { id, action: "withdraw", text }    → no longer needed
 
 export async function POST(request: Request) {
   const auth = await requireStaff();
@@ -52,7 +55,23 @@ export async function PATCH(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const result = await answerExplanation(auth.staff, String(body.id ?? ""), String(body.explanation ?? ""));
+  const manage = body.action === "remind" || body.action === "record" || body.action === "withdraw";
+  if (manage) {
+    // Only people who can open the complaint / request can manage its explanations.
+    const { data: row } = await supabaseAdmin
+      .from("ticket_explanations")
+      .select("ticket_type, ticket_id")
+      .eq("id", String(body.id ?? ""))
+      .maybeSingle();
+    const ttype = row?.ticket_type === "service" ? "service" : "complaint";
+    const ticket = row ? await getTicket(ttype, String(row.ticket_id)) : null;
+    if (!ticket || !canViewTicket(auth.staff, ttype, ticket)) {
+      return NextResponse.json({ error: "Request not found." }, { status: 404 });
+    }
+  }
+  const result = manage
+    ? await manageExplanation(auth.staff, String(body.id ?? ""), body.action as "remind" | "record" | "withdraw", String(body.text ?? ""))
+    : await answerExplanation(auth.staff, String(body.id ?? ""), String(body.explanation ?? ""));
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ success: true });
 }

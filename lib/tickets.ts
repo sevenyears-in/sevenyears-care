@@ -794,7 +794,10 @@ function planAction(
       const types = (t.type === "service" ? SERVICE_RESOLUTIONS : staffKind ? HR_RESOLUTIONS : COMPLAINT_RESOLUTIONS).map(
         (r) => r.value
       );
-      if (!input.resolutionType || !types.includes(input.resolutionType)) return "Choose how it was resolved.";
+      if (!input.resolutionType || !types.includes(input.resolutionType)) {
+        return staffKind ? "Choose the HR decision." : "Choose how it was resolved.";
+      }
+      if (staffKind && note.length < 10) return "Write the HR findings and decision (staff only).";
       const message =
         customerNote ||
         (staffKind ? "Our HR team has reviewed your complaint and taken appropriate action. Thank you for telling us." : "");

@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import type { StaffUser } from "@/lib/auth";
 import type { TicketType } from "@/lib/sla";
 import { findStaffByIds, notifyStaff, siteUrl } from "@/lib/notify";
-import { isAdmin, type Role } from "@/lib/roles";
+import { isAdmin, ROLE_LABELS, type Role } from "@/lib/roles";
 
 export type Explanation = {
   id: string;
@@ -44,7 +44,7 @@ function toExplanation(r: Record<string, unknown>): Explanation {
 
 /** Who may ask a staff member to explain. */
 export function canRequestExplanation(role: Role) {
-  const allowed: Role[] = ["director", "hr_head", "operations_manager", "service_head", "store_manager", "cre"];
+  const allowed: Role[] = ["director", "hr_head", "hr_executive", "operations_manager", "service_head", "store_manager", "cre"];
   return isAdmin(role) || allowed.includes(role);
 }
 
@@ -202,4 +202,93 @@ export async function latestExplanations(limit = 100) {
     .order("requested_at", { ascending: false })
     .limit(limit);
   return (data ?? []).map((r) => toExplanation(r as Record<string, unknown>));
+}
+
+// ------------------------------------------------------------------
+// When the staff member doesn't reply: remind, record what they said
+// in person / on the phone, or withdraw the request.
+// ------------------------------------------------------------------
+
+export const WITHDRAWN_PREFIX = "Withdrawn by ";
+export const RECORDED_PREFIX = "Recorded by ";
+
+export function explanationState(e: { explanation: string | null; explainedAt: string | null }) {
+  if (!e.explainedAt) return "waiting" as const;
+  if (e.explanation?.startsWith(WITHDRAWN_PREFIX)) return "withdrawn" as const;
+  if (e.explanation?.startsWith(RECORDED_PREFIX)) return "recorded" as const;
+  return "replied" as const;
+}
+
+type ManageAction = "remind" | "record" | "withdraw";
+
+export async function manageExplanation(staff: StaffUser, id: string, action: ManageAction, text: string) {
+  if (!canRequestExplanation(staff.role)) return { ok: false as const, error: "You can't change explanation requests." };
+  const { data: row } = await supabaseAdmin.from("ticket_explanations").select(`${COLS}, requested_by`).eq("id", id).maybeSingle();
+  if (!row) return { ok: false as const, error: "Request not found." };
+  if (row.explained_at) return { ok: false as const, error: "This has already been answered." };
+  const e = toExplanation(row);
+  const body = text.trim();
+  const roleLabel = ROLE_LABELS[staff.role];
+
+  if (action === "remind") {
+    const [person] = await findStaffByIds([e.staffId]);
+    if (!person) return { ok: false as const, error: "This staff member is no longer active. Record or withdraw instead." };
+    await notifyStaff([person], {
+      ticketType: e.ticketType,
+      ticketId: e.ticketId,
+      ticketNumber: e.ticketNumber,
+      title: "Reminder: your explanation is needed",
+      summary: e.reason,
+      details: [`Reminder from ${staff.fullName}`, `Reply here: ${siteUrl()}/staff/explanations`],
+      storeName: null,
+      link: `${siteUrl()}/staff/explanations`,
+    });
+    await history(e, staff, `Reminder sent to ${e.staffName} for their explanation.`);
+    return { ok: true as const };
+  }
+
+  if (body.length < 10) {
+    return {
+      ok: false as const,
+      error: action === "record" ? "Write what the staff member said (at least a sentence)." : "Give the reason for withdrawing.",
+    };
+  }
+  const value =
+    action === "record"
+      ? `${RECORDED_PREFIX}${staff.fullName} (${roleLabel}) after speaking to ${e.staffName}:\n${body}`
+      : `${WITHDRAWN_PREFIX}${staff.fullName} (${roleLabel}): ${body}`;
+
+  const { error } = await supabaseAdmin
+    .from("ticket_explanations")
+    .update({ explanation: value.slice(0, 4000), explained_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("explained_at", null);
+  if (error) {
+    console.error("Manage explanation error:", error);
+    return { ok: false as const, error: "Unable to save. Please try again." };
+  }
+  await history(
+    e,
+    staff,
+    action === "record"
+      ? `Explanation of ${e.staffName} recorded by ${staff.fullName}: ${body}`
+      : `Explanation request to ${e.staffName} withdrawn by ${staff.fullName}: ${body}`
+  );
+  return { ok: true as const };
+}
+
+async function history(e: Explanation, staff: StaffUser, note: string) {
+  await supabaseAdmin
+    .from("ticket_status_history")
+    .insert({
+      ticket_type: e.ticketType,
+      ticket_id: e.ticketId,
+      status: "explanation",
+      note,
+      action: "explanation",
+      actor_id: staff.id,
+      actor_name: staff.fullName,
+      visibility: "internal",
+    })
+    .then(({ error }) => error && console.error("History insert (manage explanation) error:", error));
 }

@@ -5,6 +5,7 @@ import {
   canRequestExplanation,
   explanationsForStaff,
   explanationsRequestedBy,
+  explanationState,
   latestExplanations,
   type Explanation,
 } from "@/lib/explanations";
@@ -163,10 +164,16 @@ function Overview({
                 )}
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                    e.explainedAt ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-800"
+                    !e.explainedAt
+                      ? "bg-amber-50 text-amber-800"
+                      : explanationState(e) === "withdrawn"
+                        ? "bg-black/5 text-black/50"
+                        : explanationState(e) === "recorded"
+                          ? "bg-sky-50 text-sky-700"
+                          : "bg-green-50 text-green-700"
                   }`}
                 >
-                  {e.explainedAt ? "Replied" : "Waiting"}
+                  {{ waiting: "Waiting", replied: "Replied", recorded: "Recorded", withdrawn: "Withdrawn" }[explanationState(e)]}
                 </span>
               </div>
               <p className="mt-1.5 text-sm">

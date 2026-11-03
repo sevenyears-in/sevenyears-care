@@ -302,6 +302,8 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
           }))}
           currentAssigneeId={ticket.assigneeId}
           currentStaffId={staff.id}
+          pendingExplanations={explanations.filter((e) => !e.explainedAt).map((e) => e.staffName)}
+          acknowledged={Boolean(ticket.acknowledgedAt)}
           complaintKind={type === "complaint" ? complaintKind(ticket.title) : null}
           severity={ticket.severity}
           priority={ticket.priority}

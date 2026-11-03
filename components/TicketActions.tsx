@@ -15,6 +15,9 @@ type Props = {
   currentAssigneeId: string | null;
   currentStaffId: string;
   complaintKind?: "store" | "service" | "staff" | null;
+  /** Names of staff whose explanation is still awaited. */
+  pendingExplanations?: string[];
+  acknowledged?: boolean;
   severity: string | null;
   priority: string;
   severities: Option[];
@@ -82,6 +85,31 @@ const CONFIG: Record<
   note: { label: "Add note / update", help: "Staff-only note, or an update the customer will see.", fields: ["visibility", "note"], required: ["note"] },
 };
 
+/** The staff behaviour (HR) workflow uses its own wording. */
+function cfgFor(action: ActionName, props: Props) {
+  const base = CONFIG[action];
+  if (props.type !== "complaint") return base;
+  if (action === "take_ownership" && props.acknowledged) {
+    return { ...base, label: "Change owner / severity", tone: "plain" as const, help: "Change the severity (deadline) or hand the case to someone else." };
+  }
+  if (props.complaintKind !== "staff") return base;
+  if (action === "take_ownership") {
+    return { ...base, label: "Take ownership (HR)", help: "Set the severity (it sets the deadline) and confirm the HR owner. The customer is told our HR team is reviewing it." };
+  }
+  if (action === "start") {
+    return { ...base, label: "Start HR review", help: "Mark that HR is now investigating (meetings, CCTV, statements). The customer is not given details." };
+  }
+  if (action === "resolve") {
+    return {
+      ...base,
+      label: "Record HR decision",
+      help: "Write the findings and the decision. The customer only gets a polite standard message (or yours) and is asked to confirm — never share disciplinary details.",
+      required: ["resolution", "note"] as Field[],
+    };
+  }
+  return base;
+}
+
 export function TicketActions(props: Props) {
   const router = useRouter();
   const [open, setOpen] = useState<ActionName | null>(null);
@@ -137,7 +165,7 @@ export function TicketActions(props: Props) {
       return;
     }
 
-    setDone(`${CONFIG[open].label} — saved.`);
+    setDone(`${cfgFor(open, props).label} — saved.`);
     setOpen(null);
     router.refresh();
   };
@@ -154,7 +182,7 @@ export function TicketActions(props: Props) {
 
         <div className="mt-4 flex flex-wrap gap-2">
           {props.actions.map((action) => {
-            const cfg = CONFIG[action];
+            const cfg = cfgFor(action, props);
             const tone =
               cfg.tone === "primary"
                 ? "bg-[#ff5e79] text-white"
@@ -184,7 +212,13 @@ export function TicketActions(props: Props) {
 
         {open && (
           <form onSubmit={submit} className="mt-5 space-y-4 border-t border-black/5 pt-5">
-            <p className="text-sm text-black/60">{CONFIG[open].help}</p>
+            <p className="text-sm text-black/60">{cfgFor(open, props).help}</p>
+            {open === "resolve" && props.complaintKind === "staff" && (props.pendingExplanations?.length ?? 0) > 0 && (
+              <p className="rounded-2xl bg-amber-50 p-3 text-xs font-semibold text-amber-900 ring-1 ring-amber-200">
+                Still waiting for an explanation from {props.pendingExplanations!.join(", ")}. You can decide now, or first use
+                “Record what they said” / “Send reminder” in Staff explanations.
+              </p>
+            )}
 
             {CONFIG[open].fields.includes("severity") && (
               <div>
@@ -233,7 +267,9 @@ export function TicketActions(props: Props) {
 
             {CONFIG[open].fields.includes("resolution") && (
               <div>
-                <label htmlFor="resolution" className={labelClass}>How was it resolved? *</label>
+                <label htmlFor="resolution" className={labelClass}>
+                  {props.complaintKind === "staff" ? "HR decision *" : "How was it resolved? *"}
+                </label>
                 <select id="resolution" value={resolutionType} onChange={(e) => setResolutionType(e.target.value)} className={inputClass}>
                   <option value="">Choose…</option>
                   {props.resolutions.map((o) => (
@@ -283,7 +319,9 @@ export function TicketActions(props: Props) {
                 <label htmlFor="note" className={labelClass}>
                   {open === "note"
                     ? visibility === "customer" ? "Update for the customer *" : "Staff note *"
-                    : `Staff note${CONFIG[open].required?.includes("note") ? " *" : " (optional)"}`}
+                    : open === "resolve" && props.complaintKind === "staff"
+                      ? "HR findings & decision (staff only) *"
+                      : `Staff note${cfgFor(open, props).required?.includes("note") ? " *" : " (optional)"}`}
                 </label>
                 <textarea
                   id="note"
@@ -304,7 +342,7 @@ export function TicketActions(props: Props) {
               disabled={saving}
               className="w-full rounded-2xl bg-[#161616] px-5 py-3 font-bold text-white transition hover:opacity-90 disabled:opacity-50"
             >
-              {saving ? "Saving..." : `Confirm: ${CONFIG[open].label}`}
+              {saving ? "Saving..." : `Confirm: ${cfgFor(open, props).label}`}
             </button>
           </form>
         )}
@@ -319,9 +357,9 @@ export function TicketActions(props: Props) {
           </p>
         ) : props.complaintKind === "staff" ? (
           <p className="mt-1">
-            Confidential. Received → HR takes ownership & sets severity (within 2 hrs) → Explanation from the staff member → HR
-            decision → Customer is told action has been taken → Customer confirms (or auto-closes after 3 days). Critical 24 h ·
-            High 48 h · Normal 72 h.
+            Confidential. 1) Take ownership (HR) & set severity within 2 hrs → 2) Start HR review → 3) Staff explanation: the staff
+            member replies in Explanations — or send a reminder / record what they told you in person → 4) Record HR decision →
+            5) Customer gets a polite message and confirms (auto-closes after 3 days). Critical 24 h · High 48 h · Normal 72 h.
           </p>
         ) : (
           <p className="mt-1">
