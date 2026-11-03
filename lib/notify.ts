@@ -273,6 +273,7 @@ export async function findRecipients(roles: Role[], storeName: string | null): P
     .map((row) => ({ ...row, role: asRole(row.role) }) as Recipient)
     // Store teams only hear about their own store; corporate office staff hear about every store.
     .filter((row) => {
+      if (row.role === "super_admin" || row.role === "admin") return true; // admins cover every store
       if (sameStore(row.store_name, storeName)) return true;
       if (STORE_SCOPED_ROLES.includes(row.role)) return false;
       return !row.store_name || sameStore(row.store_name, "CORPORATE OFFICE");
@@ -323,6 +324,8 @@ export type StaffAlert = {
   /** Extra lines for the e-mail and dashboard alert. */
   details?: string[];
   storeName: string | null;
+  /** Open this page instead of the ticket (e.g. My Explanations). */
+  link?: string;
 };
 
 /** Dashboard alert + e-mail + WhatsApp to each staff member (once each). */
@@ -332,7 +335,7 @@ export async function notifyStaff(recipients: Recipient[], alert: StaffAlert, ex
   const list = [...unique.values()];
   if (list.length === 0) return;
 
-  const link = staffTicketLink(alert.ticketType, alert.ticketId);
+  const link = alert.link || staffTicketLink(alert.ticketType, alert.ticketId);
   const body = [alert.summary, ...(alert.details ?? [])].filter(Boolean).join("\n");
 
   try {

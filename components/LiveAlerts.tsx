@@ -20,6 +20,7 @@ const EVENT = "sy-alerts-count";
 const POLL_MS = 30_000;
 
 function alertHref(a: LiveAlert) {
+  if (/explanation is needed/i.test(a.title)) return "/staff/explanations";
   if (a.ticket_id) return `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`;
   return /feedback/i.test(a.title) ? "/staff/feedback" : "/staff/alerts";
 }
@@ -124,11 +125,14 @@ export function LiveAlerts() {
     const first = setTimeout(check, 4000);
     const timer = setInterval(check, POLL_MS);
     const onVisible = () => document.visibilityState === "visible" && check();
+    const onDemand = () => check();
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("sy-alerts-check", onDemand);
     return () => {
       clearTimeout(first);
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("sy-alerts-check", onDemand);
     };
   }, [check]);
 
@@ -213,6 +217,21 @@ export function AlertSoundSettings() {
     if (next) playChime();
   };
 
+  const [testing, setTesting] = useState(false);
+  const sendTest = async () => {
+    setTesting(true);
+    playChime(); // also unlocks sound on this device
+    await fetch("/api/staff/alerts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test: true }),
+    }).catch(() => null);
+    setTimeout(() => {
+      window.dispatchEvent(new Event("sy-alerts-check"));
+      setTesting(false);
+    }, 1500);
+  };
+
   const allow = async () => {
     if (!("Notification" in window)) return;
     const result = await Notification.requestPermission();
@@ -239,6 +258,14 @@ export function AlertSoundSettings() {
           📲 Turn on phone notifications
         </button>
       )}
+      <button
+        type="button"
+        onClick={sendTest}
+        disabled={testing}
+        className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-[#f7f9fb] disabled:opacity-50"
+      >
+        🧪 {testing ? "Sending test alert…" : "Send me a test alert"}
+      </button>
       {permission === "denied" && (
         <p className="px-3 text-xs text-black/45">Notifications are blocked. Allow them in the browser / phone settings.</p>
       )}

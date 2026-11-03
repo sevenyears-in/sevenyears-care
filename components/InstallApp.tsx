@@ -15,7 +15,8 @@ export function AppSetup() {
 }
 
 /** "Install the app" card for the staff dashboard (hidden once installed). */
-export function InstallAppCard() {
+export function InstallAppCard({ audience = "staff" }: { audience?: "staff" | "customer" }) {
+  const hideKey = audience === "staff" ? "sy_install_hidden" : "sy_install_hidden_customer";
   const [installEvent, setInstallEvent] = useState<InstallEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const [platform, setPlatform] = useState<"ios" | "android" | "desktop">("desktop");
@@ -33,7 +34,7 @@ export function InstallAppCard() {
         : "desktop";
     let dismissed = false;
     try {
-      dismissed = localStorage.getItem("sy_install_hidden") === "1";
+      dismissed = localStorage.getItem(hideKey) === "1";
     } catch {
       dismissed = false;
     }
@@ -64,19 +65,19 @@ export function InstallAppCard() {
   const hide = () => {
     setHidden(true);
     try {
-      localStorage.setItem("sy_install_hidden", "1");
+      localStorage.setItem(hideKey, "1");
     } catch {
       /* ignore */
     }
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-3xl bg-[#8883d7] p-5 text-white shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-[#8883d7] to-[#6f69c9] p-5 text-white shadow-lg shadow-[#8883d7]/25 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/app-icon-192.png" alt="" className="h-12 w-12 rounded-2xl bg-white" />
+        <img src="/app-icon-round-192.png" alt="" className="h-12 w-12 rounded-full bg-white" />
         <div>
-          <p className="font-bold">Get the Seven Years Care app</p>
+          <p className="font-bold">{audience === "staff" ? "Get the SY Staff app" : "Get the Seven Years Care app"}</p>
           <p className="text-sm text-white/85">
             {platform === "ios"
               ? "On iPhone: open this page in Safari, tap the Share button (square with arrow), then “Add to Home Screen”."
@@ -84,7 +85,9 @@ export function InstallAppCard() {
                 ? "Install it on this device — opens full screen, straight from your home screen."
                 : platform === "android"
                   ? "On Android: tap the ⋮ menu in Chrome, then “Install app” or “Add to Home screen”."
-                  : "Open care.sevenyears.in/staff on your phone to install it there."}
+                  : audience === "staff"
+                    ? "Open care.sevenyears.in/staff on your phone to install it there."
+                    : "Warranties, service and complaint tracking on your phone — open care.sevenyears.in on your phone to install it."}
           </p>
         </div>
       </div>

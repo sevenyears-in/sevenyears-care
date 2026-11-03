@@ -3,9 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AlertSoundSettings, LiveAlerts, useUnreadCount } from "@/components/LiveAlerts";
 import { canSeeComplaints, canSeeService, isAdmin, ROLE_LABELS, type Role } from "@/lib/roles";
+
+/** Logo colours, used in turn for the menu items. */
+export const LOGO_COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"]; // orange & teal slightly deeper so white text stays readable
+const navTone = (i: number) => ({ "--c": LOGO_COLOURS[i % LOGO_COLOURS.length] }) as CSSProperties;
 
 type Props = {
   fullName: string;
@@ -179,15 +183,18 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
 
       <nav className="mx-auto hidden max-w-6xl items-center gap-1 px-4 pb-2.5 sm:flex sm:px-6">
         <div className="no-scrollbar flex min-w-0 flex-1 gap-1 overflow-x-auto">
-        {links.map((link) => {
+        {links.map((link, i) => {
           const active =
             link.href === "/staff" ? pathname === "/staff" : pathname.startsWith(link.href);
           return (
             <Link
               key={link.href}
               href={link.href}
+              style={navTone(i)}
               className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition ${
-                active ? "bg-[#161616] text-white shadow-sm" : "text-black/55 hover:bg-[#f7f9fb] hover:text-black"
+                active
+                  ? "bg-[var(--c)] text-white shadow-sm"
+                  : "text-black/55 hover:bg-[color-mix(in_srgb,var(--c)_12%,transparent)] hover:text-[var(--c)]"
               }`}
             >
               {link.label}
@@ -202,21 +209,27 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
               onClick={() => setSettingsOpen((o) => !o)}
               aria-expanded={settingsOpen}
               aria-haspopup="menu"
+              style={navTone(links.length)}
               className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition ${
-                settingsActive || settingsOpen ? "bg-[#161616] text-white shadow-sm" : "text-black/55 hover:bg-[#f7f9fb] hover:text-black"
+                settingsActive || settingsOpen
+                  ? "bg-[var(--c)] text-white shadow-sm"
+                  : "text-black/55 hover:bg-[color-mix(in_srgb,var(--c)_12%,transparent)] hover:text-[var(--c)]"
               }`}
             >
               ⚙️ Settings <span className={`text-[10px] transition ${settingsOpen ? "rotate-180" : ""}`}>▼</span>
             </button>
             {settingsOpen && (
               <div role="menu" className="absolute right-0 top-11 z-40 w-60 rounded-2xl bg-white p-2 shadow-xl ring-1 ring-black/10">
-                {settings.map((l) => (
+                {settings.map((l, i) => (
                   <Link
                     key={l.href}
                     href={l.href}
                     onClick={() => setSettingsOpen(false)}
+                    style={navTone(i)}
                     className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold ${
-                      pathname.startsWith(l.href) ? "bg-[#ff5e79]/10 text-[#ff5e79]" : "hover:bg-[#f7f9fb]"
+                      pathname.startsWith(l.href)
+                        ? "bg-[color-mix(in_srgb,var(--c)_14%,transparent)] text-[var(--c)]"
+                        : "hover:bg-[color-mix(in_srgb,var(--c)_10%,transparent)] hover:text-[var(--c)]"
                     }`}
                   >
                     <span aria-hidden>{l.icon}</span>
@@ -232,14 +245,15 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
       <nav className="no-scrollbar flex gap-1.5 overflow-x-auto px-3 pb-2.5 sm:hidden" aria-label="More pages">
         {[...links, ...settings]
           .filter((l) => !["/staff", "/staff/service", "/staff/complaints", "/staff/register"].includes(l.href))
-          .map((link) => {
+          .map((link, i) => {
             const active = pathname.startsWith(link.href);
             return (
               <Link
                 key={link.href}
                 href={link.href}
+                style={navTone(i)}
                 className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  active ? "bg-[#ff5e79] text-white" : "bg-[#f7f9fb] text-black/60"
+                  active ? "bg-[var(--c)] text-white" : "bg-[#f7f9fb] text-black/60"
                 }`}
               >
                 {link.label}
@@ -270,14 +284,15 @@ export function StaffBottomNav({ role, unreadAlerts }: { role: Role; unreadAlert
       aria-label="Main menu"
     >
       <div className="grid" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
-        {items.map((item) => {
+        {items.map((item, i) => {
           const active = item.href === "/staff" ? pathname === "/staff" : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
+              style={navTone(i)}
               className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold ${
-                active ? "text-[#ff5e79]" : "text-black/55"
+                active ? "text-[var(--c)]" : "text-black/55"
               }`}
             >
               <span className="text-lg leading-none" aria-hidden>

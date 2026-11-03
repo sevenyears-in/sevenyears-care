@@ -38,7 +38,24 @@ export async function POST(request: Request) {
   const auth = await requireStaff("staff");
   if (auth.response) return auth.response;
 
-  const body = (await request.json().catch(() => ({}))) as { id?: string };
+  const body = (await request.json().catch(() => ({}))) as { id?: string; test?: boolean };
+
+  // "Send me a test alert" (profile menu) — checks sound, pop-up and phone notification.
+  if (body.test) {
+    const { error } = await supabaseAdmin.from("staff_notifications").insert({
+      staff_id: auth.staff.id,
+      ticket_type: null,
+      ticket_id: null,
+      ticket_number: null,
+      title: "Test alert",
+      body: "Alerts are working on this device. 🎉",
+    });
+    if (error) {
+      console.error("Test alert error:", error);
+      return NextResponse.json({ error: "Unable to send a test alert." }, { status: 500 });
+    }
+    return NextResponse.json({ success: true });
+  }
   let query = supabaseAdmin
     .from("staff_notifications")
     .update({ read_at: new Date().toISOString() })

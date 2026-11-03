@@ -62,7 +62,7 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
       <div>
         <h1 className="text-3xl font-bold">{TITLE[type]}</h1>
         <p className="mt-2 text-sm text-black/60">
-          {scope} Most urgent first: overdue, then safety, then nearest deadline.
+          {scope} Most urgent first: overdue, then {type === "service" ? "safety" : "critical"}, then nearest deadline.
         </p>
         {storeScoped && !staff.storeName && (
           <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -177,16 +177,23 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm font-bold text-black/50">{ticket.number}</span>
           <StatusBadge status={ticket.status} label={statusLabel(ticket.status)} />
-          <PriorityBadge priority={ticket.priority} />
+          <PriorityBadge priority={ticket.priority} type={type} severity={ticket.severity} />
           <EscalationBadge level={ticket.escalationLevel} />
           <SlaBadge ticket={ticket} />
         </div>
         <h1 className="mt-3 text-2xl font-bold">{ticket.title}</h1>
         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-black/70">{ticket.description}</p>
 
-        {ticket.priority === "safety" && (
+        {type === "service" && ticket.priority === "safety" && (
           <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">
             Safety issue: call the customer now and ask them to stop using the product until it is checked.
+          </p>
+        )}
+        {type === "complaint" && ticket.severity === "critical" && (
+          <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">
+            {complaintKind(ticket.title) === "staff"
+              ? "Critical staff behaviour complaint: HR must act within 24 hours. Keep it confidential."
+              : "Critical complaint: call the customer today and resolve within 24 hours."}
           </p>
         )}
 

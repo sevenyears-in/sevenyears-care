@@ -4,6 +4,7 @@ import { getCurrentCustomer } from "@/lib/customer-auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { PageShell, StatusBadge } from "@/components/SiteChrome";
 import { CustomerLogoutButton } from "@/components/CustomerLogoutButton";
+import { InstallAppCard } from "@/components/InstallApp";
 import { formatDate, formatDateTime, statusLabel, todayISO } from "@/lib/helpers";
 import { feedbackLink } from "@/lib/feedback-token";
 import { complaintKind, customerComplaintStatus } from "@/lib/sla";
@@ -74,6 +75,10 @@ export default async function AccountPage() {
           Change Password
         </Link>
         <CustomerLogoutButton />
+      </div>
+
+      <div className="mb-8">
+        <InstallAppCard audience="customer" />
       </div>
 
       <section className="space-y-3">

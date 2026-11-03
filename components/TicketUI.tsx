@@ -31,7 +31,23 @@ export function SlaBadge({ ticket }: { ticket: Ticket }) {
   );
 }
 
-export function PriorityBadge({ priority }: { priority: string }) {
+export function PriorityBadge({
+  priority,
+  type = "service",
+  severity = null,
+}: {
+  priority: string;
+  type?: "service" | "complaint";
+  severity?: string | null;
+}) {
+  if (type === "complaint") {
+    // Complaints show their severity (Critical 24 h / High 48 h), never "safety".
+    if (severity === "critical")
+      return <span className="inline-flex rounded-full bg-red-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm shadow-red-600/30">Critical · 24 h</span>;
+    if (severity === "high")
+      return <span className="inline-flex rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 ring-1 ring-inset ring-orange-600/20">High · 48 h</span>;
+    return null;
+  }
   if (priority === "safety")
     return <span className="inline-flex rounded-full bg-red-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm shadow-red-600/30">⚠ SAFETY</span>;
   if (priority === "high")
@@ -120,7 +136,7 @@ export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; b
         {tickets.map((t) => {
           const overdue = slaState(rawSlaOf(t)).state === "overdue";
           const accent =
-            t.priority === "safety" || overdue
+            (t.type === "service" && t.priority === "safety") || (t.type === "complaint" && t.severity === "critical") || overdue
               ? "bg-red-500"
               : t.priority === "high"
                 ? "bg-orange-400"
@@ -136,7 +152,7 @@ export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; b
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-xs font-bold text-black/50">{t.number}</span>
                 <StatusBadge status={t.status} label={statusLabel(t.status)} />
-                <PriorityBadge priority={t.priority} />
+                <PriorityBadge priority={t.priority} type={t.type} severity={t.severity} />
                 <EscalationBadge level={t.escalationLevel} />
                 <SlaBadge ticket={t} />
               </div>

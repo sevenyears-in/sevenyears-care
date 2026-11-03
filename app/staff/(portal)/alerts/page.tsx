@@ -38,7 +38,9 @@ export default async function AlertsPage() {
       ) : (
         <ul className="divide-y divide-black/5 overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
           {alerts.map((a) => {
-            const href = a.ticket_id
+            const href = /explanation is needed/i.test(a.title)
+              ? "/staff/explanations"
+              : a.ticket_id
               ? `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`
               : /feedback/i.test(a.title)
                 ? "/staff/feedback"

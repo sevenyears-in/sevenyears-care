@@ -278,14 +278,21 @@ export function needsActionFrom(staff: StaffUser, t: Ticket) {
 }
 
 const PRIORITY_RANK: Record<string, number> = { safety: 0, high: 1, normal: 2 };
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, normal: 2 };
+
+/** Urgency rank: product safety (service) or Critical (complaint) first. */
+function urgencyRank(t: Ticket) {
+  if (t.type === "complaint") return SEVERITY_RANK[t.severity ?? ""] ?? 2;
+  return PRIORITY_RANK[t.priority] ?? 2;
+}
 
 export function sortByUrgency(tickets: Ticket[]) {
   return [...tickets].sort((a, b) => {
     const sa = slaState(rawSla(a)).state === "overdue" ? 0 : 1;
     const sb = slaState(rawSla(b)).state === "overdue" ? 0 : 1;
     if (sa !== sb) return sa - sb;
-    const pa = PRIORITY_RANK[a.priority] ?? 2;
-    const pb = PRIORITY_RANK[b.priority] ?? 2;
+    const pa = urgencyRank(a);
+    const pb = urgencyRank(b);
     if (pa !== pb) return pa - pb;
     const da = new Date(a.ackDueAt && !a.acknowledgedAt ? a.ackDueAt : a.resolutionDueAt ?? a.createdAt).getTime();
     const db = new Date(b.ackDueAt && !b.acknowledgedAt ? b.ackDueAt : b.resolutionDueAt ?? b.createdAt).getTime();
@@ -441,6 +448,8 @@ export async function announceNewTicket(input: {
       input.storeName
     )),
     ...(input.type === "complaint" ? await findDirectors(input.storeName) : []),
+    // Super Admins see every new request and complaint in their alerts.
+    ...(await findRecipients(["super_admin"], null)),
   ];
 
   const headline =
@@ -618,7 +627,8 @@ function planAction(
         update: {
           ...ackFields,
           severity,
-          priority: severity === "critical" ? "safety" : severity === "high" ? "high" : "normal",
+          // "safety" is only for product safety on service requests; complaints use the severity.
+          priority: severity === "normal" ? "normal" : "high",
           resolution_due_at: due,
           owner_id: ownerId,
           status: newStatus,

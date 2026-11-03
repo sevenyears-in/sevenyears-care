@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { HomeTrackForm } from "@/components/HomeTrackForm";
+import { InstallAppCard } from "@/components/InstallApp";
 import { ACK_HOURS } from "@/lib/sla";
 
 const steps = [
@@ -125,8 +126,26 @@ export default function HomePage() {
               </div>
               <span className="text-3xl transition group-hover:translate-x-1">🛡️</span>
             </Link>
+
+            <Link
+              href="/feedback"
+              className="group flex items-center justify-between gap-4 rounded-3xl bg-gradient-to-br from-[#8883d7] to-[#6f69c9] p-6 text-white shadow-lg shadow-[#8883d7]/25 transition hover:-translate-y-0.5"
+            >
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/75">Feedback</p>
+                <h2 className="mt-1 text-xl font-bold">Rate your experience</h2>
+                <p className="mt-1 text-sm text-white/85">
+                  Your purchase, a service visit or how we handled a complaint — 1 minute.
+                </p>
+              </div>
+              <span className="text-3xl transition group-hover:translate-x-1">⭐</span>
+            </Link>
           </div>
         </section>
+        </div>
+
+        <div className="mx-auto w-full max-w-7xl px-5 pb-10 sm:px-8">
+          <InstallAppCard audience="customer" />
         </div>
 
         {/* How it works */}

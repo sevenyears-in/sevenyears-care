@@ -1,13 +1,16 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { CustomerMenu } from "@/components/CustomerMenu";
+
+const NAV_COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"]; // logo colours (orange & teal a little deeper for readability)
 
 const navLinks = [
   { href: "/my-warranties", label: "My Warranties" },
   { href: "/request-service", label: "Request Service" },
   { href: "/register-complaint", label: "Complaints" },
   { href: "/track-request", label: "Track Request" },
+  { href: "/feedback", label: "Feedback" },
 ];
 
 export function SiteHeader() {
@@ -27,11 +30,12 @@ export function SiteHeader() {
         </Link>
 
         <nav className="hidden items-center gap-1 lg:flex">
-          {navLinks.map((link) => (
+          {navLinks.map((link, i) => (
             <Link
               key={link.href}
               href={link.href}
-              className="rounded-full px-4 py-2 text-sm font-semibold text-black/60 transition hover:bg-[#ff5e79]/10 hover:text-[#ff5e79]"
+              style={{ "--c": NAV_COLOURS[i % 4] } as CSSProperties}
+              className="rounded-full px-4 py-2 text-sm font-semibold text-black/60 transition hover:bg-[color-mix(in_srgb,var(--c)_12%,transparent)] hover:text-[var(--c)]"
             >
               {link.label}
             </Link>
@@ -42,11 +46,12 @@ export function SiteHeader() {
       </div>
       {/* Phones and tablets: the same links as a swipeable row. */}
       <nav className="no-scrollbar flex gap-2 overflow-x-auto px-5 pb-3 lg:hidden" aria-label="Main">
-        {navLinks.map((link) => (
+        {navLinks.map((link, i) => (
           <Link
             key={link.href}
             href={link.href}
-            className="whitespace-nowrap rounded-full bg-[#f7f9fb] px-4 py-1.5 text-xs font-semibold text-black/65 ring-1 ring-black/5"
+            style={{ "--c": NAV_COLOURS[i % 4] } as CSSProperties}
+            className="whitespace-nowrap rounded-full bg-[color-mix(in_srgb,var(--c)_10%,white)] px-4 py-1.5 text-xs font-semibold text-[var(--c)] ring-1 ring-[color-mix(in_srgb,var(--c)_25%,transparent)]"
           >
             {link.label}
           </Link>
@@ -73,6 +78,7 @@ export function SiteFooter() {
           <Link href="/request-service" className="hover:text-white">Request Service</Link>
           <Link href="/register-complaint" className="hover:text-white">Complaints</Link>
           <Link href="/track-request" className="hover:text-white">Track Request</Link>
+          <Link href="/feedback" className="hover:text-white">Give Feedback</Link>
           <a href="https://sevenyears.in" className="hover:text-white">sevenyears.in ↗</a>
         </div>
       </div>

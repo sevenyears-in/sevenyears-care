@@ -104,6 +104,7 @@ export async function requestExplanation(input: {
     summary: input.reason,
     details: [`Asked by ${input.requestedBy?.fullName ?? "Seven Years Care"}`, `Reply here: ${siteUrl()}/staff/explanations`],
     storeName: null,
+    link: `${siteUrl()}/staff/explanations`,
   });
 
   return { ok: true as const };
@@ -180,4 +181,25 @@ export async function pendingExplanationCount(staffId: string) {
     .eq("staff_id", staffId)
     .is("explained_at", null);
   return count ?? 0;
+}
+
+/** Explanations this person asked for. */
+export async function explanationsRequestedBy(staffId: string) {
+  const { data } = await supabaseAdmin
+    .from("ticket_explanations")
+    .select(COLS)
+    .eq("requested_by", staffId)
+    .order("requested_at", { ascending: false })
+    .limit(100);
+  return (data ?? []).map((r) => toExplanation(r as Record<string, unknown>));
+}
+
+/** Latest explanations of every store (Corporate Office / HR overview). */
+export async function latestExplanations(limit = 100) {
+  const { data } = await supabaseAdmin
+    .from("ticket_explanations")
+    .select(COLS)
+    .order("requested_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []).map((r) => toExplanation(r as Record<string, unknown>));
 }
