@@ -365,8 +365,8 @@ export async function assignableStaff(type: TicketType, storeName: string | null
   }));
 
   return people
-    // store teams only for their own store; corporate people for any store
-    .filter((p) => kind === "staff" || type === "service" || p.sameStore || p.corporate)
+    // Only the staff of this store and Corporate Office staff can be chosen.
+    .filter((p) => p.sameStore || p.corporate)
     .sort((a, b) => Number(b.sameStore) - Number(a.sameStore));
 }
 

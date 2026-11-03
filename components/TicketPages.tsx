@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
-import { asRole, canSeeComplaints, canSeeService, ROLE_LABELS } from "@/lib/roles";
+import { asRole, canSeeComplaints, canSeeService, ROLE_LABELS, sameStore } from "@/lib/roles";
 import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
 import {
   COMPLAINT_RESOLUTIONS,
@@ -272,7 +272,19 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
             explanations={explanations}
             suggestedStaffId={ticket.involvedStaffId ?? ticket.assigneeId ?? null}
             people={(everyone.data ?? [])
+              // Only the staff of this store and Corporate Office staff.
               .filter((p) => String(p.id) !== staff.id)
+              .filter(
+                (p) =>
+                  !p.store_name ||
+                  sameStore(p.store_name, "CORPORATE OFFICE") ||
+                  sameStore(p.store_name, ticket.storeName) ||
+                  String(p.id) === ticket.involvedStaffId
+              )
+              .sort(
+                (a, b) =>
+                  Number(sameStore(b.store_name, ticket.storeName)) - Number(sameStore(a.store_name, ticket.storeName))
+              )
               .map((p) => ({
                 id: String(p.id),
                 label: `${p.full_name} — ${ROLE_LABELS[asRole(p.role)]}${p.store_name ? `, ${p.store_name}` : ""}`,

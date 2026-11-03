@@ -63,11 +63,18 @@ export async function PUT(request: Request) {
     if (!store && !map[key]) return NextResponse.json({ error: "Unknown store." }, { status: 400 });
     const { data: person } = await supabaseAdmin
       .from("staff_users")
-      .select("id, role, is_active")
+      .select("id, role, is_active, store_name")
       .eq("id", staffId)
       .maybeSingle();
     if (!person || !person.is_active || !["technician", "service_head"].includes(String(person.role))) {
       return NextResponse.json({ error: "Choose an active Technician or Service Head." }, { status: 400 });
+    }
+    const personStore = String(person.store_name ?? "").trim().toLowerCase();
+    if (personStore && personStore !== "corporate office" && personStore !== storeName.trim().toLowerCase()) {
+      return NextResponse.json(
+        { error: "Choose a technician of this store or of the Corporate Office." },
+        { status: 400 }
+      );
     }
     map[key] = { storeName: store?.name ?? map[key].storeName, staffId };
   }

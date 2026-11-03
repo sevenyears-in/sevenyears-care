@@ -94,7 +94,12 @@ export default function ServiceSetupPage() {
                       aria-label={`Technician for ${s.name}`}
                     >
                       <option value="">No default — assign by hand</option>
-                      {data.people.map((p) => (
+                      {data.people
+                        .filter((p) => {
+                          const st = (p.storeName ?? "").trim().toLowerCase();
+                          return !st || st === "corporate office" || st === s.name.trim().toLowerCase() || p.id === s.staffId;
+                        })
+                        .map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.fullName} — {p.role}
                           {p.storeName ? `, ${p.storeName}` : ""}
