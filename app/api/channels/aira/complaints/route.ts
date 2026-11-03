@@ -3,7 +3,7 @@ import { airaGuard } from "@/lib/aira";
 import { createComplaint, pickCategory } from "@/lib/complaints";
 import { customerTrackLink } from "@/lib/notify";
 
-// POST /api/channels/aira/complaints — the Aira chatbot registers a complaint.
+// POST /api/channels/aira/complaints — the Sevi chatbot registers a complaint.
 // Header:  X-API-Key: <key from Staff → Complaint Channels>
 // Body:    { name, mobile, reference (bill or warranty no.), description, category?, email? }
 // Returns: { complaintNumber, status, trackUrl }

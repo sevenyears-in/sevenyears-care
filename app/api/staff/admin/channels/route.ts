@@ -3,7 +3,7 @@ import { requireStaff } from "@/lib/auth";
 import { channelSettings, randomKey, saveChannelSettings } from "@/lib/channel-settings";
 import { whatsappConfigured, siteUrl } from "@/lib/notify";
 
-// Super Admin: complaint channels (WhatsApp bot + Aira chatbot).
+// Super Admin: complaint channels (WhatsApp bot + Sevi chatbot).
 // GET → settings (the app secret is never sent back)
 // PUT → { waEnabled?, airaEnabled?, waAppSecret?, clearWaAppSecret?, newVerifyToken?, newAiraKey? }
 
@@ -17,7 +17,7 @@ async function view() {
     whatsappReady: await whatsappConfigured(),
     airaEnabled: s.airaEnabled,
     airaApiKey: s.airaApiKey,
-    airaBaseUrl: `${siteUrl()}/api/channels/aira`,
+    airaBaseUrl: `${siteUrl()}/api/channels/sevi`,
   };
 }
 
@@ -45,7 +45,7 @@ export async function PUT(request: Request) {
   }
   if (body.clearWaAppSecret === true) s.waAppSecret = "";
   if (body.newVerifyToken === true || (s.waEnabled && !s.waVerifyToken)) s.waVerifyToken = randomKey(18);
-  if (body.newAiraKey === true || (s.airaEnabled && !s.airaApiKey)) s.airaApiKey = `aira_${randomKey(24)}`;
+  if (body.newAiraKey === true || (s.airaEnabled && !s.airaApiKey)) s.airaApiKey = `sevi_${randomKey(24)}`;
 
   try {
     await saveChannelSettings(s);

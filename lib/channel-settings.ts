@@ -1,4 +1,4 @@
-// Complaint channels: WhatsApp and the Seven Years chatbot "Aira" (server only).
+// Complaint channels: WhatsApp and the Seven Years chatbot "Sevi" (formerly "Aira"; settings keep the old key names) (server only).
 // Set by the Super Admin on Staff → Complaint Channels; kept in Supabase
 // (app_settings "channels"). WhatsApp uses the token and phone number ID
 // from Alerts Setup to send its replies.

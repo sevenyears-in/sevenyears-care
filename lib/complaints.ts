@@ -1,4 +1,4 @@
-// Creating a complaint — shared by the website form, WhatsApp and the Aira chatbot (server only).
+// Creating a complaint — shared by the website form, WhatsApp and the Sevi chatbot (server only).
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { cleanMobile, generateTicketNumber, isValidMobile } from "@/lib/helpers";
@@ -14,7 +14,7 @@ export type ComplaintSource = "web" | "whatsapp" | "aira";
 export const SOURCE_LABELS: Record<ComplaintSource, string> = {
   web: "Website",
   whatsapp: "WhatsApp",
-  aira: "Aira chatbot",
+  aira: "Sevi chatbot", // stored as "aira" (old name of the chatbot)
 };
 
 export type NewComplaint = {

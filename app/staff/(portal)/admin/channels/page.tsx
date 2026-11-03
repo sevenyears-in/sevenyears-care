@@ -103,7 +103,7 @@ export default function ChannelsPage() {
       <div>
         <h1 className="text-3xl font-bold">Complaint Channels</h1>
         <p className="mt-2 text-sm text-black/60">
-          Let customers register complaints by WhatsApp and through the Seven Years chatbot Aira. Complaints from these
+          Let customers register complaints by WhatsApp and through the Seven Years chatbot Sevi. Complaints from these
           channels go to the same Complaints list as the website, marked with where they came from. Only the Super Admin
           can see this page.
         </p>
@@ -187,19 +187,19 @@ export default function ChannelsPage() {
         </div>
       </div>
 
-      {/* Aira */}
+      {/* Sevi */}
       <div className={section}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-lg font-bold">2. Aira chatbot</p>
+          <p className="text-lg font-bold">2. Sevi chatbot</p>
           <Toggle
             on={view.airaEnabled}
-            label="Aira"
+            label="Sevi"
             disabled={busy}
-            onChange={(v) => save({ airaEnabled: v }, v ? "Aira channel turned on." : "Aira channel turned off.")}
+            onChange={(v) => save({ airaEnabled: v }, v ? "Sevi channel turned on." : "Sevi channel turned off.")}
           />
         </div>
         <p className="mt-2 text-sm text-black/60">
-          Give these details to whoever manages Aira. Aira sends the customer&apos;s complaint here and gets the complaint
+          Give these details to whoever manages Sevi. Sevi sends the customer&apos;s complaint here and gets the complaint
           number back to show the customer. It can also look up the status of their requests.
         </p>
 
@@ -212,14 +212,14 @@ export default function ChannelsPage() {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => window.confirm("Make a new key? Aira stops working until it is given the new key.") && save({ newAiraKey: true }, "New API key created — give it to the Aira team.")}
+                  onClick={() => window.confirm("Make a new key? Sevi stops working until it is given the new key.") && save({ newAiraKey: true }, "New API key created — give it to the Sevi team.")}
                   className="rounded-xl border border-black/10 px-3 py-2 text-xs font-bold hover:bg-[#f7f9fb] disabled:opacity-50"
                 >
                   New key
                 </button>
               </div>
             ) : (
-              <p className="text-sm text-black/55">Turn Aira on to create the key.</p>
+              <p className="text-sm text-black/55">Turn Sevi on to create the key.</p>
             )}
           </div>
 
@@ -231,7 +231,7 @@ export default function ChannelsPage() {
             </p>
             <p className="mt-2">reference (bill or warranty number) is required — it gives the store and the staff on the bill. category and email are optional. Reply: complaintNumber, staffName, storeName, status, trackUrl, message.</p>
 
-            <p className="mt-3 font-bold">Store names and complaint categories (for Aira&apos;s menus)</p>
+            <p className="mt-3 font-bold">Store names and complaint categories (for Sevi&apos;s menus)</p>
             <p className="font-mono">GET {view.airaBaseUrl}/options</p>
 
             <p className="mt-3 font-bold">Status of a customer&apos;s requests</p>

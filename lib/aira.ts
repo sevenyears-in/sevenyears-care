@@ -1,4 +1,4 @@
-// Aira chatbot access check (server only).
+// Sevi chatbot (formerly "Aira") access check (server only).
 import { NextResponse } from "next/server";
 import { channelSettings, sameSecret } from "@/lib/channel-settings";
 
@@ -6,7 +6,7 @@ import { channelSettings, sameSecret } from "@/lib/channel-settings";
 export async function airaGuard(request: Request) {
   const settings = await channelSettings();
   if (!settings.airaEnabled || !settings.airaApiKey) {
-    return NextResponse.json({ error: "The Aira channel is turned off." }, { status: 503 });
+    return NextResponse.json({ error: "The Sevi channel is turned off." }, { status: 503 });
   }
   const given =
     request.headers.get("x-api-key") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";

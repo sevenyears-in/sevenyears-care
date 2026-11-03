@@ -128,7 +128,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
           ? ticket.source === "whatsapp"
             ? "WhatsApp"
             : ticket.source === "aira"
-              ? "Aira chatbot"
+              ? "Sevi chatbot"
               : "Website"
           : null,
     },
