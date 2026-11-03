@@ -39,9 +39,9 @@ export const SERVICE_SEVERITIES = [
 ];
 
 export const COMPLAINT_SEVERITIES = [
-  { value: "critical", label: "Critical — child safety, legal / social media threat, repeat complaint (24 h)" },
-  { value: "high", label: "High — product not usable, wrong bill / overcharge, rude behaviour (48 h)" },
-  { value: "normal", label: "Normal — small defect, delay, general unhappiness (72 h)" },
+  { value: "critical", label: "Critical · 24 h" },
+  { value: "high", label: "High · 48 h" },
+  { value: "normal", label: "Normal · 72 h" },
 ];
 
 // ------------------------------------------------------------------

@@ -23,6 +23,17 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
   const [menuOpen, setMenuOpen] = useState(false);
   const unread = useUnreadCount(unreadAlerts);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const close = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -45,21 +56,26 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
     ...(seesFeedback ? [{ href: "/staff/feedback", label: "Feedback" }] : []),
     { href: "/staff/register", label: "Register Warranty" },
     { href: "/staff/warranties", label: "Warranties" },
+  ];
+
+  // Admin pages live under one "Settings" menu so the top bar stays short.
+  const settings = [
     ...(isAdmin(role)
       ? [
-          { href: "/staff/admin/categories", label: "Categories" },
-          { href: "/staff/admin/users", label: "Staff Users" },
-          { href: "/staff/admin/service-setup", label: "Service Setup" },
+          { href: "/staff/admin/users", label: "Staff Users", icon: "👥" },
+          { href: "/staff/admin/categories", label: "Warranty Categories", icon: "🗂️" },
+          { href: "/staff/admin/service-setup", label: "Service Setup", icon: "🛠️" },
         ]
       : []),
     ...(role === "super_admin"
       ? [
-          { href: "/staff/admin/notifications", label: "Alerts Setup" },
-          { href: "/staff/admin/channels", label: "Complaint Channels" },
-          { href: "/staff/admin/zoho", label: "Zoho POS" },
+          { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
+          { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
+          { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
         ]
       : []),
   ];
+  const settingsActive = settings.some((l) => pathname.startsWith(l.href));
 
   const initials =
     fullName
@@ -161,7 +177,8 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
         </div>
       </div>
 
-      <nav className="no-scrollbar mx-auto hidden max-w-6xl gap-1 overflow-x-auto px-4 pb-2.5 sm:flex sm:px-6">
+      <nav className="mx-auto hidden max-w-6xl items-center gap-1 px-4 pb-2.5 sm:flex sm:px-6">
+        <div className="no-scrollbar flex min-w-0 flex-1 gap-1 overflow-x-auto">
         {links.map((link) => {
           const active =
             link.href === "/staff" ? pathname === "/staff" : pathname.startsWith(link.href);
@@ -177,10 +194,43 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
             </Link>
           );
         })}
+        </div>
+        {settings.length > 0 && (
+          <div className="relative shrink-0" ref={settingsRef}>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((o) => !o)}
+              aria-expanded={settingsOpen}
+              aria-haspopup="menu"
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition ${
+                settingsActive || settingsOpen ? "bg-[#161616] text-white shadow-sm" : "text-black/55 hover:bg-[#f7f9fb] hover:text-black"
+              }`}
+            >
+              ⚙️ Settings <span className={`text-[10px] transition ${settingsOpen ? "rotate-180" : ""}`}>▼</span>
+            </button>
+            {settingsOpen && (
+              <div role="menu" className="absolute right-0 top-11 z-40 w-60 rounded-2xl bg-white p-2 shadow-xl ring-1 ring-black/10">
+                {settings.map((l) => (
+                  <Link
+                    key={l.href}
+                    href={l.href}
+                    onClick={() => setSettingsOpen(false)}
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold ${
+                      pathname.startsWith(l.href) ? "bg-[#ff5e79]/10 text-[#ff5e79]" : "hover:bg-[#f7f9fb]"
+                    }`}
+                  >
+                    <span aria-hidden>{l.icon}</span>
+                    {l.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </nav>
       {/* Phones: the main pages are in the bottom menu; everything else scrolls here. */}
       <nav className="no-scrollbar flex gap-1.5 overflow-x-auto px-3 pb-2.5 sm:hidden" aria-label="More pages">
-        {links
+        {[...links, ...settings]
           .filter((l) => !["/staff", "/staff/service", "/staff/complaints", "/staff/register"].includes(l.href))
           .map((link) => {
             const active = pathname.startsWith(link.href);

@@ -5,22 +5,25 @@ import { runAction, type ActionInput, type ActionName } from "@/lib/tickets";
 // POST /api/staff/tickets/service/<id>   or   /api/staff/tickets/complaint/<id>
 // Body: { action, note?, customerNote?, severity?, priority?, assigneeId?, resolutionType?, visibility? }
 
-const ACTIONS: ActionName[] = [
-  "acknowledge",
-  "triage",
-  "assign",
-  "classify_assign",
-  "start",
-  "awaiting_parts",
-  "request_approval",
-  "approve",
-  "reject",
-  "resolve",
-  "close",
-  "reopen",
-  "cancel",
-  "note",
-];
+// Every action must be listed here (TypeScript refuses to build if one is missing).
+const ACTION_SET: Record<ActionName, true> = {
+  acknowledge: true,
+  take_ownership: true,
+  triage: true,
+  assign: true,
+  classify_assign: true,
+  start: true,
+  awaiting_parts: true,
+  request_approval: true,
+  approve: true,
+  reject: true,
+  resolve: true,
+  close: true,
+  reopen: true,
+  cancel: true,
+  note: true,
+};
+const ACTIONS = Object.keys(ACTION_SET) as ActionName[];
 
 function text(value: unknown, max = 2000) {
   return typeof value === "string" ? value.trim().slice(0, max) : undefined;
