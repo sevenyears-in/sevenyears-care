@@ -44,9 +44,16 @@ export default function HomePage() {
 
       <main className="flex-1">
         {/* Hero: the two things customers come for */}
-        <section className="mx-auto grid w-full max-w-7xl gap-8 px-5 pb-10 pt-10 sm:px-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-12 lg:pt-16">
+        <div className="brand-wash">
+        <section className="mx-auto grid w-full max-w-7xl gap-8 px-5 pb-12 pt-10 sm:px-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-12 lg:pt-16">
           <div>
-            <div className="inline-flex w-fit rounded-full bg-[#ff5e79]/10 px-4 py-2 text-sm font-bold text-[#ff5e79]">
+            <div className="inline-flex w-fit items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-[#ff5e79] soft-card ring-1 ring-black/5">
+              <span className="flex gap-1" aria-hidden>
+                <span className="h-2 w-2 rounded-full bg-[#ff5e79]" />
+                <span className="h-2 w-2 rounded-full bg-[#8883d7]" />
+                <span className="h-2 w-2 rounded-full bg-[#ffa95a]" />
+                <span className="h-2 w-2 rounded-full bg-[#11b8d0]" />
+              </span>
               Seven Years Care
             </div>
 
@@ -61,9 +68,10 @@ export default function HomePage() {
             <div className="mt-8 grid gap-4 sm:grid-cols-2">
               <Link
                 href="/request-service"
-                className="group rounded-3xl bg-[#161616] p-6 text-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+                className="group relative overflow-hidden rounded-3xl bg-[#161616] p-6 text-white shadow-xl shadow-black/10 transition hover:-translate-y-1 hover:shadow-2xl"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-2xl">🛠️</div>
+                <span className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-[#ff5e79]/25 blur-2xl" aria-hidden />
+                <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-2xl">🛠️</div>
                 <h2 className="mt-5 text-2xl font-bold">Request Service</h2>
                 <p className="mt-2 text-sm leading-6 text-white/65">
                   Product not working, damaged, or needs assembly or installation.
@@ -75,7 +83,7 @@ export default function HomePage() {
 
               <Link
                 href="/register-complaint"
-                className="group rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 transition hover:-translate-y-1 hover:shadow-lg"
+                className="soft-card group rounded-3xl bg-white p-6 ring-1 ring-black/5 transition hover:-translate-y-1 hover:shadow-lg"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ff5e79]/10 text-2xl">💬</div>
                 <h2 className="mt-5 text-2xl font-bold">Register a Complaint</h2>
@@ -88,15 +96,17 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <ul className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-black/60">
-              <li>⏱️ Reply within {ACK_HOURS} working hours</li>
-              <li>🔧 Most repairs in 2–3 days</li>
-              <li>📲 Updates on WhatsApp</li>
+            <ul className="mt-6 flex flex-wrap gap-2 text-sm font-semibold text-black/65">
+              {[`⏱️ Reply within ${ACK_HOURS} working hours`, "🔧 Most repairs in 2–3 days", "📲 Updates on WhatsApp"].map((item) => (
+                <li key={item} className="rounded-full bg-white/80 px-3 py-1.5 ring-1 ring-black/5">
+                  {item}
+                </li>
+              ))}
             </ul>
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">
+            <div className="soft-card rounded-3xl bg-white p-6 ring-1 ring-black/5 sm:p-8">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#11b8d0]">Already raised a request?</p>
               <h2 className="mt-2 text-2xl font-bold">Track it here</h2>
               <HomeTrackForm />
@@ -104,7 +114,7 @@ export default function HomePage() {
 
             <Link
               href="/my-warranties"
-              className="group flex items-center justify-between gap-4 rounded-3xl bg-[#11b8d0] p-6 text-white transition hover:opacity-95"
+              className="group flex items-center justify-between gap-4 rounded-3xl bg-gradient-to-br from-[#11b8d0] to-[#0b98ad] p-6 text-white shadow-lg shadow-[#11b8d0]/25 transition hover:-translate-y-0.5"
             >
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/75">Warranty</p>
@@ -117,6 +127,7 @@ export default function HomePage() {
             </Link>
           </div>
         </section>
+        </div>
 
         {/* How it works */}
         <section className="border-y border-black/5 bg-white">
@@ -124,8 +135,16 @@ export default function HomePage() {
             <h2 className="text-2xl font-bold">How it works</h2>
             <ol className="mt-6 grid gap-4 md:grid-cols-3">
               {steps.map((step, index) => (
-                <li key={step.title} className="rounded-3xl bg-[#f7f9fb] p-6">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ff5e79] font-bold text-white">
+                <li key={step.title} className="relative overflow-hidden rounded-3xl bg-[#f7f9fb] p-6">
+                  <span
+                    className="absolute inset-x-0 top-0 h-1"
+                    style={{ backgroundColor: ["#ff5e79", "#8883d7", "#11b8d0"][index] }}
+                    aria-hidden
+                  />
+                  <span
+                    className="flex h-10 w-10 items-center justify-center rounded-2xl font-bold text-white"
+                    style={{ backgroundColor: ["#ff5e79", "#8883d7", "#11b8d0"][index] }}
+                  >
                     {index + 1}
                   </span>
                   <h3 className="mt-4 text-lg font-bold">{step.title}</h3>
@@ -141,10 +160,10 @@ export default function HomePage() {
           <h2 className="text-2xl font-bold">Common questions</h2>
           <div className="mt-6 space-y-3">
             {faqs.map((item) => (
-              <details key={item.q} className="group rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+              <details key={item.q} className="soft-card group rounded-2xl bg-white p-5 ring-1 ring-black/5 open:ring-[#ff5e79]/30">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold">
                   {item.q}
-                  <span className="text-[#ff5e79] transition group-open:rotate-45">+</span>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#ff5e79]/10 text-[#ff5e79] transition group-open:rotate-45">+</span>
                 </summary>
                 <p className="mt-3 text-sm leading-6 text-black/60">{item.a}</p>
               </details>

@@ -20,10 +20,10 @@ export function SlaBadge({ ticket }: { ticket: Ticket }) {
       ? "bg-red-100 text-red-800"
       : sla.state === "due_soon"
         ? "bg-amber-100 text-amber-800"
-        : "bg-black/5 text-black/60";
+        : "bg-black/[0.04] text-black/55";
 
   return (
-    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${colour}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${colour}`}>
       {sla.state === "overdue" ? "⏰ " : ""}
       {sla.label}
       {sla.due && sla.state !== "overdue" ? ` ${formatDateTime(sla.due)}` : ""}
@@ -33,16 +33,16 @@ export function SlaBadge({ ticket }: { ticket: Ticket }) {
 
 export function PriorityBadge({ priority }: { priority: string }) {
   if (priority === "safety")
-    return <span className="inline-flex rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white">⚠ SAFETY</span>;
+    return <span className="inline-flex rounded-full bg-red-600 px-2.5 py-1 text-xs font-bold text-white shadow-sm shadow-red-600/30">⚠ SAFETY</span>;
   if (priority === "high")
-    return <span className="inline-flex rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-800">High</span>;
+    return <span className="inline-flex rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 ring-1 ring-inset ring-orange-600/20">High</span>;
   return null;
 }
 
 export function EscalationBadge({ level }: { level: number }) {
   if (!level) return null;
   return (
-    <span className="inline-flex rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-700 ring-1 ring-red-200">
+    <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-600/20">
       Escalated L{level}
     </span>
   );
@@ -75,42 +75,64 @@ export function FilterTabs({
         <Link
           key={key}
           href={`${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}${store ? `&store=${encodeURIComponent(store)}` : ""}`}
-          className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
-            key === current ? "bg-[#161616] text-white" : "bg-white text-black/60 ring-1 ring-black/5 hover:text-black"
+          className={`rounded-full px-3.5 py-2 text-sm font-semibold transition ${
+            key === current ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/5 hover:text-black hover:ring-black/15"
           }`}
         >
           {FILTER_LABELS[key]}
         </Link>
       ))}
-      <form action={base} className="ml-auto flex gap-2">
+      <form action={base} className="flex w-full gap-2 sm:ml-auto sm:w-auto">
         <input type="hidden" name="filter" value={current} />
         <input
           name="q"
           defaultValue={search}
           placeholder="Number, mobile or name"
-          className="w-52 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[#ff5e79]"
+          className="w-full min-w-0 rounded-full border border-black/10 bg-white px-4 py-2 text-sm outline-none transition focus:border-[#ff5e79] focus:ring-4 focus:ring-[#ff5e79]/10 sm:w-56"
         />
-        <button className="rounded-xl bg-[#ff5e79] px-3 py-2 text-sm font-bold text-white">Search</button>
+        <button className="rounded-full bg-[#ff5e79] px-4 py-2 text-sm font-bold text-white shadow-sm shadow-[#ff5e79]/30">Search</button>
       </form>
     </div>
   );
 }
 
+function rawSlaOf(t: Ticket) {
+  return {
+    status: t.status,
+    acknowledged_at: t.acknowledgedAt,
+    ack_due_at: t.ackDueAt,
+    resolution_due_at: t.resolutionDueAt,
+  };
+}
+
 export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; base: string; emptyText: string }) {
   if (tickets.length === 0) {
     return (
-      <div className="rounded-3xl bg-white p-8 text-center text-sm text-black/55 shadow-sm ring-1 ring-black/5">
+      <div className="rounded-3xl bg-white p-8 text-center text-sm text-black/55 soft-card ring-1 ring-black/5">
         {emptyText}
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+    <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
       <ul className="divide-y divide-black/5">
-        {tickets.map((t) => (
-          <li key={t.id}>
-            <Link href={`${base}/${t.id}`} className="block px-5 py-4 transition hover:bg-[#f7f9fb]">
+        {tickets.map((t) => {
+          const overdue = slaState(rawSlaOf(t)).state === "overdue";
+          const accent =
+            t.priority === "safety" || overdue
+              ? "bg-red-500"
+              : t.priority === "high"
+                ? "bg-orange-400"
+                : ["resolved", "closed", "cancelled"].includes(t.status)
+                  ? "bg-black/10"
+                  : t.status === "open"
+                    ? "bg-amber-400"
+                    : "bg-[#11b8d0]";
+          return (
+          <li key={t.id} className="relative">
+            <span className={`absolute inset-y-3 left-0 w-1 rounded-r-full ${accent}`} aria-hidden />
+            <Link href={`${base}/${t.id}`} className="group block px-5 py-4 pl-6 transition hover:bg-[#f7f9fb]">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-xs font-bold text-black/50">{t.number}</span>
                 <StatusBadge status={t.status} label={statusLabel(t.status)} />
@@ -118,7 +140,7 @@ export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; b
                 <EscalationBadge level={t.escalationLevel} />
                 <SlaBadge ticket={t} />
               </div>
-              <p className="mt-2 font-bold">
+              <p className="mt-2 font-semibold group-hover:text-[#ff5e79]">
                 {t.title}
                 {t.productName ? <span className="font-normal text-black/55"> — {t.productName}</span> : null}
               </p>
@@ -128,7 +150,8 @@ export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; b
               </p>
             </Link>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );

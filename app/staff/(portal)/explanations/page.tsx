@@ -35,7 +35,7 @@ export default async function MyExplanationsPage() {
     <section className="space-y-3">
       <h2 className="text-xl font-bold">{title}</h2>
       {list.length === 0 ? (
-        <p className="rounded-3xl bg-white p-5 text-sm text-black/55 shadow-sm ring-1 ring-black/5">{empty}</p>
+        <p className="rounded-3xl bg-white p-5 text-sm text-black/55 soft-card ring-1 ring-black/5">{empty}</p>
       ) : (
         group(list).map((items) => {
           const first = items[0];

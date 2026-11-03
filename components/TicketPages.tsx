@@ -173,7 +173,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
         ← {TITLE[type]}
       </Link>
 
-      <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+      <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm font-bold text-black/50">{ticket.number}</span>
           <StatusBadge status={ticket.status} label={statusLabel(ticket.status)} />
@@ -216,7 +216,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
-          <dl className="grid gap-4 rounded-3xl bg-white p-5 text-sm shadow-sm ring-1 ring-black/5 sm:grid-cols-2 sm:p-6">
+          <dl className="grid gap-4 rounded-3xl bg-white p-5 text-sm soft-card ring-1 ring-black/5 sm:grid-cols-2 sm:p-6">
             {details
               .filter((d) => d.value)
               .map((d) => (
@@ -227,7 +227,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
               ))}
           </dl>
 
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+          <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
             <h2 className="text-lg font-bold">Timeline</h2>
             <ol className="mt-4 space-y-4 border-l-2 border-black/10 pl-5">
               {[...history].reverse().map((item, index) => (

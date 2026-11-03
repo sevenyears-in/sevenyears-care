@@ -32,7 +32,7 @@ export default async function NotificationSettingsPage() {
 
       <TestAlertButtons hasEmail={Boolean(staff.email)} hasWhatsapp={Boolean(staff.whatsappNumber)} />
 
-      <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         <p className="px-5 pt-5 text-lg font-bold">Last 50 messages</p>
         {(log ?? []).length === 0 ? (
           <p className="p-5 text-sm text-black/55">Nothing sent yet.</p>

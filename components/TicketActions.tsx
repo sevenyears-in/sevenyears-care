@@ -39,6 +39,13 @@ const CONFIG: Record<
     help: "Sets the resolution deadline (SOP time limits).",
     fields: ["severity", "priority", "note"],
   },
+  classify_assign: {
+    label: "Classify & assign",
+    help: "Set the classification and priority (they set the deadline) and choose the technician. The technician gets an alert and the customer is told.",
+    fields: ["severity", "priority", "assignee", "note"],
+    required: ["severity", "assignee"],
+    tone: "primary",
+  },
   assign: { label: "Assign", help: "Give the job to one person. They get an alert.", fields: ["assignee", "note"], required: ["assignee"], tone: "primary" },
   take_ownership: {
     label: "Take ownership & classify",
@@ -82,7 +89,9 @@ export function TicketActions(props: Props) {
   const [customerNote, setCustomerNote] = useState("");
   const [severity, setSeverity] = useState(props.severity ?? "");
   const [priority, setPriority] = useState(props.priority);
-  const [assigneeId, setAssigneeId] = useState(props.currentAssigneeId ?? props.currentStaffId);
+  const [assigneeId, setAssigneeId] = useState(
+    props.currentAssigneeId ?? (props.type === "complaint" ? props.currentStaffId : "")
+  );
   const [resolutionType, setResolutionType] = useState("");
   const [visibility, setVisibility] = useState<"internal" | "customer">("internal");
   const [saving, setSaving] = useState(false);
@@ -137,7 +146,7 @@ export function TicketActions(props: Props) {
 
   return (
     <aside className="space-y-4">
-      <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+      <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
         <h2 className="text-lg font-bold">Next step</h2>
         {visible.length === 0 && props.actions.length <= 1 && (
           <p className="mt-2 text-sm text-black/55">No actions for you on this request right now.</p>
@@ -179,7 +188,7 @@ export function TicketActions(props: Props) {
 
             {CONFIG[open].fields.includes("severity") && (
               <div>
-                <label htmlFor="severity" className={labelClass}>{props.type === "complaint" ? "Severity *" : "Classification"}</label>
+                <label htmlFor="severity" className={labelClass}>{props.type === "complaint" ? "Severity *" : "Classification *"}</label>
                 <select id="severity" value={severity} onChange={(e) => setSeverity(e.target.value)} className={inputClass}>
                   <option value="">{props.type === "complaint" ? "Choose…" : "Not classified"}</option>
                   {props.severities.map((o) => (
@@ -301,11 +310,12 @@ export function TicketActions(props: Props) {
         )}
       </div>
 
-      <div className="rounded-3xl bg-white p-5 text-xs leading-5 text-black/55 shadow-sm ring-1 ring-black/5">
+      <div className="rounded-3xl bg-white p-5 text-xs leading-5 text-black/55 soft-card ring-1 ring-black/5">
         <p className="font-bold text-black/70">Process</p>
         {props.type === "service" ? (
           <p className="mt-1">
-            Acknowledge (2 hrs) → Classify → Assign technician → Start → (Parts / Replacement approval) → Resolve → Close after customer confirms.
+            Acknowledge (2 hrs) → Classify & assign technician → Start → (Parts / Replacement approval) → Resolve → Customer
+            rates the service → Close.
           </p>
         ) : props.complaintKind === "staff" ? (
           <p className="mt-1">

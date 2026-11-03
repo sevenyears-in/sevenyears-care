@@ -251,7 +251,7 @@ export default function RegisterWarrantyStaffPage() {
   if (saved) {
     return (
       <div className="space-y-6">
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">
+        <div className="rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5 sm:p-8">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-2xl">✓</div>
           <h1 className="mt-5 text-2xl font-bold">
             {saved.length} warrant{saved.length === 1 ? "y" : "ies"} saved
@@ -301,7 +301,7 @@ export default function RegisterWarrantyStaffPage() {
 
         <div className="space-y-3">
           {saved.map((w, index) => (
-            <div key={w.id} className="flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5 sm:flex-row sm:items-center sm:justify-between">
+            <div key={w.id} className="flex flex-col gap-3 rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-black/40">
                   Item {index + 1} • {w.warranty_number}
@@ -357,7 +357,7 @@ export default function RegisterWarrantyStaffPage() {
 
       <form
         onSubmit={fetchBill}
-        className="grid gap-4 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-[1fr_200px_auto] sm:items-end"
+        className="grid gap-4 rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:grid-cols-[1fr_200px_auto] sm:items-end"
       >
         <div>
           <label htmlFor="bill" className={labelClass}>Bill Number *</label>
@@ -416,7 +416,7 @@ export default function RegisterWarrantyStaffPage() {
 
           {/* Already registered */}
           {doneRows.length > 0 && (
-            <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+            <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
               <h2 className="font-bold">Already registered on this bill</h2>
               <div className="mt-3 space-y-2">
                 {doneRows.map((row) => (
@@ -456,7 +456,7 @@ export default function RegisterWarrantyStaffPage() {
                 const extendedEnd = addMonths(standardEnd, EXTENDED_WARRANTY.months);
 
                 return (
-                  <section key={row.key} className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+                  <section key={row.key} className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
                     <div className="flex flex-col gap-2 border-b border-black/5 pb-4 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex gap-3">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ff5e79] text-sm font-bold text-white">
@@ -578,7 +578,7 @@ export default function RegisterWarrantyStaffPage() {
             </div>
           ) : (
             lookup.categoriesConfigured && (
-              <div className="rounded-3xl bg-white p-6 text-sm shadow-sm ring-1 ring-black/5">
+              <div className="rounded-3xl bg-white p-6 text-sm soft-card ring-1 ring-black/5">
                 <p className="font-bold">
                   {doneRows.length > 0
                     ? "All warranty-eligible items on this bill are already registered."
@@ -593,7 +593,7 @@ export default function RegisterWarrantyStaffPage() {
 
           {/* Not eligible */}
           {lookup.ineligible.length > 0 && (
-            <details className="rounded-3xl bg-white p-5 text-sm shadow-sm ring-1 ring-black/5">
+            <details className="rounded-3xl bg-white p-5 text-sm soft-card ring-1 ring-black/5">
               <summary className="cursor-pointer font-bold text-black/60">
                 {lookup.ineligible.length} other item{lookup.ineligible.length === 1 ? "" : "s"} on this bill (not eligible for warranty)
               </summary>

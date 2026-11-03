@@ -79,6 +79,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
   return (
     <header className="no-print sticky top-0 z-30 border-b border-black/5 bg-white/95 backdrop-blur" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <LiveAlerts />
+      <div className="brand-stripe h-1 w-full" aria-hidden />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3">
         <Link href="/staff" className="shrink-0">
           <Image
@@ -160,7 +161,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
         </div>
       </div>
 
-      <nav className="mx-auto hidden max-w-6xl gap-1 overflow-x-auto px-4 pb-2 sm:flex sm:px-6">
+      <nav className="no-scrollbar mx-auto hidden max-w-6xl gap-1 overflow-x-auto px-4 pb-2.5 sm:flex sm:px-6">
         {links.map((link) => {
           const active =
             link.href === "/staff" ? pathname === "/staff" : pathname.startsWith(link.href);
@@ -168,8 +169,8 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
             <Link
               key={link.href}
               href={link.href}
-              className={`whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                active ? "bg-[#ff5e79]/10 text-[#ff5e79]" : "text-black/55 hover:bg-[#f7f9fb] hover:text-black"
+              className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition ${
+                active ? "bg-[#161616] text-white shadow-sm" : "text-black/55 hover:bg-[#f7f9fb] hover:text-black"
               }`}
             >
               {link.label}
@@ -178,7 +179,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
         })}
       </nav>
       {/* Phones: the main pages are in the bottom menu; everything else scrolls here. */}
-      <nav className="flex gap-1 overflow-x-auto px-3 pb-2 sm:hidden" aria-label="More pages">
+      <nav className="no-scrollbar flex gap-1.5 overflow-x-auto px-3 pb-2.5 sm:hidden" aria-label="More pages">
         {links
           .filter((l) => !["/staff", "/staff/service", "/staff/complaints", "/staff/register"].includes(l.href))
           .map((link) => {

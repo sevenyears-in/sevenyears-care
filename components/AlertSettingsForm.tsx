@@ -20,7 +20,7 @@ type View = {
   cronReady: boolean;
 };
 
-const sectionClass = "rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5";
+const sectionClass = "rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5";
 
 function Status({ ok, label }: { ok: boolean; label: string }) {
   return (

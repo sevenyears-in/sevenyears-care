@@ -23,7 +23,7 @@ export function TestAlertButtons({ hasEmail, hasWhatsapp }: { hasEmail: boolean;
   };
 
   return (
-    <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+    <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
       <p className="font-bold">Send a test to yourself</p>
       <p className="mt-1 text-sm text-black/55">
         {hasEmail && hasWhatsapp

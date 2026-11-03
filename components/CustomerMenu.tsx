@@ -25,7 +25,7 @@ export function CustomerMenu() {
     return (
       <Link
         href="/account"
-        className="rounded-2xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-black hover:text-white"
+        className="rounded-full bg-[#161616] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#ff5e79]"
       >
         My Account
       </Link>
@@ -36,7 +36,7 @@ export function CustomerMenu() {
     <div className="flex items-center gap-2">
       <Link
         href="/account"
-        className="rounded-2xl bg-[#161616] px-4 py-2 text-sm font-semibold text-white"
+        className="rounded-full bg-[#161616] px-4 py-2 text-sm font-semibold text-white"
       >
         {name ? `Hi, ${name}` : "My Account"}
       </Link>
@@ -48,7 +48,7 @@ export function CustomerMenu() {
           await fetch("/api/account/logout", { method: "POST" }).catch(() => null);
           window.location.assign("/");
         }}
-        className="rounded-2xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/60 transition hover:bg-black hover:text-white disabled:opacity-50"
+        className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/60 transition hover:bg-black hover:text-white disabled:opacity-50"
       >
         {busy ? "..." : "Log out"}
       </button>

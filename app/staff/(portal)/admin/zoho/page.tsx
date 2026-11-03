@@ -145,7 +145,7 @@ export default function ZohoConnectionPage() {
 
       {/* Status */}
       <div
-        className={`rounded-3xl p-5 ${ready ? "bg-green-600 text-white" : "bg-white shadow-sm ring-1 ring-black/5"}`}
+        className={`rounded-3xl p-5 ${ready ? "bg-green-600 text-white" : "bg-white soft-card ring-1 ring-black/5"}`}
       >
         <p className="text-xs font-bold uppercase tracking-wider opacity-70">Status</p>
         <p className="mt-1 text-xl font-bold">
@@ -171,7 +171,7 @@ export default function ZohoConnectionPage() {
       </div>
 
       {/* Step 1 */}
-      <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+      <section className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
         <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Step 1</p>
         <h2 className="mt-1 text-lg font-bold">Paste the Zoho keys</h2>
         <p className="mt-1 text-sm text-black/60">
@@ -208,7 +208,7 @@ export default function ZohoConnectionPage() {
       </section>
 
       {/* Step 2 */}
-      <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+      <section className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
         <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Step 2</p>
         <h2 className="mt-1 text-lg font-bold">Connect to Zoho</h2>
         <p className="mt-1 text-sm text-black/60">
@@ -227,7 +227,7 @@ export default function ZohoConnectionPage() {
 
       {/* Organisation choice */}
       {status?.connected && !status.organizationId && (
-        <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+        <section className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
           <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Step 3</p>
           <h2 className="mt-1 text-lg font-bold">Choose the organisation</h2>
           {status.organizations.length > 0 ? (

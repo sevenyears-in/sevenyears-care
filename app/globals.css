@@ -18,6 +18,36 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-poppins), Poppins, Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(255, 94, 121, 0.22);
+}
+
+/* Thin stripe in the four logo colours (pink · purple · orange · teal). */
+.brand-stripe {
+  background: linear-gradient(90deg, #ff5e79 0 25%, #8883d7 25% 50%, #ffa95a 50% 75%, #11b8d0 75% 100%);
+}
+
+/* Soft colour wash behind page titles and the home hero. */
+.brand-wash {
+  background:
+    radial-gradient(40rem 18rem at 0% 0%, rgba(255, 94, 121, 0.12), transparent 70%),
+    radial-gradient(36rem 18rem at 100% 0%, rgba(17, 184, 208, 0.12), transparent 70%),
+    radial-gradient(30rem 14rem at 55% 100%, rgba(136, 131, 215, 0.10), transparent 70%);
+}
+
+/* Card shadow used across the site. */
+.soft-card {
+  box-shadow: 0 1px 2px rgba(22, 22, 22, 0.04), 0 12px 32px -18px rgba(22, 22, 22, 0.18);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 @media print {

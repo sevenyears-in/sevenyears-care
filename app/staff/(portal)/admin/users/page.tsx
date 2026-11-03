@@ -150,7 +150,7 @@ export default function StaffUsersPage() {
         )}
       </div>
 
-      <form onSubmit={create} className="grid gap-4 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-2 lg:grid-cols-3">
+      <form onSubmit={create} className="grid gap-4 rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label htmlFor="fn" className={labelClass}>Full Name *</label>
           <input id="fn" value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputClass} />
@@ -223,7 +223,7 @@ export default function StaffUsersPage() {
         <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-800">{notice}</div>
       )}
 
-      <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         {loading ? (
           <p className="p-5 text-sm text-black/60">Loading...</p>
         ) : (
@@ -354,7 +354,7 @@ export default function StaffUsersPage() {
         )}
       </div>
 
-      <div className="rounded-3xl bg-white p-5 text-sm shadow-sm ring-1 ring-black/5">
+      <div className="rounded-3xl bg-white p-5 text-sm soft-card ring-1 ring-black/5">
         <p className="font-bold">Who gets what</p>
         <ul className="mt-2 space-y-1 text-black/60">
           {ASSIGNABLE_ROLES.map((r) => (

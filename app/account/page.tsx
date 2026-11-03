@@ -55,7 +55,7 @@ export default async function AccountPage() {
   const rateButton = "rounded-xl bg-amber-400 px-3 py-2 text-xs font-bold text-[#161616]";
 
   const today = todayISO();
-  const card = "rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6";
+  const card = "rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6";
 
   return (
     <PageShell

@@ -89,7 +89,7 @@ export default function CategoriesPage() {
         </p>
       </div>
 
-      <form onSubmit={add} className="grid gap-4 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-[1fr_140px_auto_auto] sm:items-end">
+      <form onSubmit={add} className="grid gap-4 rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:grid-cols-[1fr_140px_auto_auto] sm:items-end">
         <div>
           <label htmlFor="cat" className={labelClass}>Zoho Category Name</label>
           <input id="cat" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="e.g. Strollers" />
@@ -109,7 +109,7 @@ export default function CategoriesPage() {
 
       <ErrorBox message={errorMessage} />
 
-      <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         {loading ? (
           <p className="p-5 text-sm text-black/60">Loading...</p>
         ) : categories.length === 0 ? (

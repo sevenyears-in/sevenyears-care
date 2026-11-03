@@ -73,7 +73,7 @@ export default function StaffLoginPage() {
           <h1 className="mt-1 text-2xl font-bold">Log in</h1>
         </div>
 
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">
+        <div className="rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5 sm:p-8">
           {setupAvailable && (
             <div className="mb-5 rounded-2xl border border-[#11b8d0]/30 bg-[#11b8d0]/5 p-4 text-sm">
               <p className="font-bold">First time here?</p>

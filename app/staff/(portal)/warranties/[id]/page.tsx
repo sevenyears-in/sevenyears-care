@@ -141,7 +141,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
 
       <div className="grid gap-4 md:grid-cols-2">
         {sections.map((section) => (
-          <div key={section.title} className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+          <div key={section.title} className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
             <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">{section.title}</p>
             <dl className="mt-3 space-y-2 text-sm">
               {section.rows.map((row) => (

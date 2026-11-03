@@ -15,7 +15,7 @@ type View = {
   airaBaseUrl: string;
 };
 
-const section = "rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5";
+const section = "rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5";
 
 function Copy({ value }: { value: string }) {
   const [done, setDone] = useState(false);

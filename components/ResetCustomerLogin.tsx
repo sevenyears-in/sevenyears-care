@@ -24,7 +24,7 @@ export function ResetCustomerLogin({ warrantyId }: { warrantyId: string }) {
   };
 
   return (
-    <div className="rounded-3xl bg-white p-5 text-sm shadow-sm ring-1 ring-black/5">
+    <div className="rounded-3xl bg-white p-5 text-sm soft-card ring-1 ring-black/5">
       <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Customer login</p>
       <p className="mt-2 text-black/60">
         User ID is the customer&apos;s mobile number. If they forgot their password, reset it to the last 4 digits of

@@ -68,7 +68,7 @@ export default function ServiceSetupPage() {
         <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-800">{notice}</div>
       )}
 
-      <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         {!data ? (
           <p className="p-5 text-sm text-black/55">Loading...</p>
         ) : data.stores.length === 0 ? (

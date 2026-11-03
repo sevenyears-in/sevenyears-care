@@ -72,7 +72,7 @@ export default function StaffSetupPage() {
           Create the administrator account. The administrator adds the other staff.
         </p>
 
-        <div className="mt-6 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">
+        <div className="mt-6 rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5 sm:p-8">
           {available === null ? (
             <p className="text-sm text-black/60">Checking...</p>
           ) : !available ? (

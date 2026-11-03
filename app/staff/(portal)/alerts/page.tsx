@@ -32,11 +32,11 @@ export default async function AlertsPage() {
       </div>
 
       {alerts.length === 0 ? (
-        <div className="rounded-3xl bg-white p-8 text-center text-sm text-black/55 shadow-sm ring-1 ring-black/5">
+        <div className="rounded-3xl bg-white p-8 text-center text-sm text-black/55 soft-card ring-1 ring-black/5">
           No alerts yet.
         </div>
       ) : (
-        <ul className="divide-y divide-black/5 overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+        <ul className="divide-y divide-black/5 overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
           {alerts.map((a) => {
             const href = a.ticket_id
               ? `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`

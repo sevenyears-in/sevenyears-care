@@ -38,7 +38,7 @@ export function StaffPasswordForm({ canCancel }: { canCancel: boolean }) {
   };
 
   return (
-    <form onSubmit={submit} className="mt-5 space-y-5 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5">
+    <form onSubmit={submit} className="mt-5 space-y-5 rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5">
       <div>
         <label htmlFor="cur" className={labelClass}>Current password</label>
         <input id="cur" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />

@@ -483,6 +483,7 @@ export type ActionName =
   | "take_ownership"
   | "triage"
   | "assign"
+  | "classify_assign"
   | "start"
   | "awaiting_parts"
   | "request_approval"
@@ -530,7 +531,7 @@ export function availableActions(staff: StaffUser, t: Ticket): ActionName[] {
 
   if (t.type === "service") {
     const active = activeStatuses("service").includes(s);
-    if (active && manager) list.push("triage", "assign");
+    if (active && manager) list.push("classify_assign"); // classification + priority + technician in one step
     if (["acknowledged", "assigned", "awaiting_parts"].includes(s) && worker) list.push("start");
     if (["assigned", "in_progress"].includes(s) && worker) list.push("awaiting_parts");
     if (["assigned", "in_progress", "awaiting_parts"].includes(s) && worker) list.push("request_approval");
@@ -637,6 +638,49 @@ function planAction(
             : severity === "critical" && t.severity !== "critical"
               ? { roles: ["store_manager"], title: "CRITICAL complaint", summary: `${t.title} — resolve within 24 hours` }
               : undefined,
+      };
+    }
+
+    case "classify_assign": {
+      const severity = input.severity || t.severity || "";
+      const priority = input.priority || t.priority;
+      if (!SERVICE_SEVERITIES.some((x) => x.value === severity)) return "Choose the classification.";
+      if (!PRIORITIES.some((p) => p.value === priority)) return "Choose a valid priority.";
+      const techId = input.assigneeId || t.assigneeId;
+      if (!techId) return "Choose the technician.";
+      const techName = assigneeName ?? t.assigneeName ?? "technician";
+      const due = addHours(t.createdAt, resolutionHours("service", severity, priority));
+      const newStatus = ["open", "acknowledged"].includes(t.status) ? "assigned" : t.status;
+      const changedTech = techId !== t.assigneeId;
+      const dueText = new Date(due).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+      return {
+        update: {
+          ...ackFields,
+          severity,
+          priority,
+          resolution_due_at: due,
+          assigned_technician_id: techId,
+          status: newStatus,
+        },
+        status: newStatus,
+        history: [
+          {
+            note: `Classified as ${severity}, priority ${priority}; technician ${techName}; resolve by ${dueText}.${note ? ` ${note}` : ""}`,
+            visibility: "internal",
+          },
+          ...(newStatus !== t.status || changedTech
+            ? [{ note: "A technician has been assigned to your request.", visibility: "customer" as const }]
+            : []),
+        ],
+        customerMessage:
+          newStatus !== t.status ? "A technician has been assigned to your request. We will contact you shortly." : undefined,
+        staffAlert: changedTech
+          ? {
+              ids: [techId],
+              title: priority === "safety" ? "SAFETY job assigned to you" : "Job assigned to you",
+              summary: `${t.title} — ${t.productName ?? t.contactName ?? ""} · resolve by ${dueText}`.trim(),
+            }
+          : undefined,
       };
     }
 
@@ -851,7 +895,9 @@ export async function runAction(
     assigneeName = chosen?.fullName ?? ticket.assigneeName;
     assigneeRole = chosen?.role ?? null;
   }
-  if (input.action === "assign") {
+  if (input.action === "classify_assign" && input.assigneeId === ticket.assigneeId) {
+    assigneeName = ticket.assigneeName; // keeping the same technician
+  } else if (input.action === "assign" || input.action === "classify_assign") {
     const options = await assignableStaff(type, ticket.storeName, ticket.title);
     const chosen = options.find((o) => o.id === input.assigneeId);
     if (!chosen) return fail("Choose a valid person to assign.");

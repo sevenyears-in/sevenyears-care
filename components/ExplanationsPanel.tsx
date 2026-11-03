@@ -61,7 +61,7 @@ export function ExplanationsPanel({ type, ticketId, currentStaffId, canAsk, expl
   };
 
   return (
-    <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6">
+    <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6">
       <h2 className="text-lg font-bold">Staff explanations</h2>
       <p className="mt-1 text-xs text-black/50">Staff only — the customer does not see these.</p>
 

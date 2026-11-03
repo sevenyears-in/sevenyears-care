@@ -9,6 +9,7 @@ const ACTIONS: ActionName[] = [
   "acknowledge",
   "triage",
   "assign",
+  "classify_assign",
   "start",
   "awaiting_parts",
   "request_approval",

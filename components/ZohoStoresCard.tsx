@@ -65,7 +65,7 @@ export function ZohoStoresCard({ onChange }: { onChange?: () => void } = {}) {
   };
 
   return (
-    <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+    <section className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-lg font-bold">Stores</p>

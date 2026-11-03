@@ -79,7 +79,7 @@ export default function StaffWarrantiesPage() {
 
       <ErrorBox message={errorMessage} />
 
-      <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+      <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         {loading ? (
           <p className="p-5 text-sm text-black/60">Loading...</p>
         ) : warranties.length === 0 ? (

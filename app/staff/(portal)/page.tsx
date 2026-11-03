@@ -38,13 +38,13 @@ export default async function StaffDashboard() {
   return (
     <div className="space-y-8">
       <InstallAppCard />
-      <div>
-        <p className="text-sm font-semibold text-[#ff5e79]">Welcome back</p>
-        <h1 className="mt-1 text-3xl font-bold">{staff.fullName}</h1>
-        <p className="mt-1 text-sm text-black/50">
-          {ROLE_LABELS[staff.role]}
-          {staff.storeName ? ` · ${staff.storeName}` : ""}
-        </p>
+      <div className="brand-wash soft-card relative overflow-hidden rounded-3xl bg-white px-6 py-6 ring-1 ring-black/5 sm:px-8 sm:py-8">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Welcome back</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">{staff.fullName}</h1>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full bg-[#8883d7]/15 px-3 py-1 text-[#5c57b0]">{ROLE_LABELS[staff.role]}</span>
+          {staff.storeName && <span className="rounded-full bg-[#11b8d0]/15 px-3 py-1 text-[#0b7f90]">{staff.storeName}</span>}
+        </div>
       </div>
 
       {demo && isAdmin(staff.role) && (
@@ -127,7 +127,7 @@ export default async function StaffDashboard() {
             </p>
             <span className="mt-5 inline-block rounded-2xl bg-[#ff5e79] px-5 py-3 text-sm font-bold">Start →</span>
           </Link>
-          <Link href="/staff/warranties" className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 transition hover:shadow-md">
+          <Link href="/staff/warranties" className="rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5 transition hover:shadow-md">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-black/40">Look up</p>
             <h3 className="mt-2 text-2xl font-bold">Find a Warranty</h3>
             <p className="mt-2 text-sm text-black/55">
@@ -204,17 +204,17 @@ function StoreBreakdown({ service, complaints }: { service: Ticket[] | null; com
   };
 
   return (
-    <section className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+    <section className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/5 bg-gradient-to-r from-[#8883d7]/10 via-[#ff5e79]/5 to-[#11b8d0]/10 px-5 py-5 sm:px-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8883d7]">All stores</p>
           <h2 className="mt-1 text-xl font-bold">Store-wise status</h2>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-black/5">
+          <span className="rounded-full bg-white px-3 py-1.5 soft-card ring-1 ring-black/5">
             {rows.length} {rows.length === 1 ? "store" : "stores"}
           </span>
-          <span className="rounded-full bg-white px-3 py-1.5 shadow-sm ring-1 ring-black/5">{total.open} open</span>
+          <span className="rounded-full bg-white px-3 py-1.5 soft-card ring-1 ring-black/5">{total.open} open</span>
           <span
             className={`rounded-full px-3 py-1.5 shadow-sm ring-1 ${
               total.overdue ? "bg-red-50 text-red-700 ring-red-200" : "bg-green-50 text-green-700 ring-green-200"
@@ -320,12 +320,18 @@ function Stat({
 }) {
   const body = (
     <div
-      className={`h-full rounded-3xl p-5 shadow-sm ring-1 transition ${
+      className={`soft-card relative h-full overflow-hidden rounded-3xl p-5 ring-1 transition ${
         danger ? "bg-red-50 ring-red-200" : highlight ? "bg-[#ff5e79]/5 ring-[#ff5e79]/30" : "bg-white ring-black/5"
-      } ${href ? "hover:shadow-md" : ""}`}
+      } ${href ? "hover:-translate-y-0.5 hover:shadow-md" : ""}`}
     >
-      <p className="text-xs font-semibold uppercase tracking-wider text-black/40">{label}</p>
-      <p className={`mt-2 text-3xl font-bold ${danger ? "text-red-700" : ""}`}>{value}</p>
+      <span
+        className={`absolute inset-x-0 top-0 h-1 ${danger ? "bg-red-500" : highlight ? "bg-[#ff5e79]" : "bg-transparent"}`}
+        aria-hidden
+      />
+      <p className="text-xs font-semibold uppercase tracking-wider text-black/45">{label}</p>
+      <p className={`mt-2 text-3xl font-bold tracking-tight ${danger ? "text-red-700" : highlight ? "text-[#ff5e79]" : ""}`}>
+        {value}
+      </p>
     </div>
   );
   return href ? <Link href={href}>{body}</Link> : body;

@@ -89,7 +89,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
   );
   const openFollowups = rows.filter((r) => r.needs_followup && !r.followup_done_at).length;
 
-  const card = "rounded-3xl bg-white shadow-sm ring-1 ring-black/5";
+  const card = "rounded-3xl bg-white soft-card ring-1 ring-black/5";
 
   return (
     <div className="space-y-6">
