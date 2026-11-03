@@ -23,6 +23,7 @@ export const metadata: Metadata = {
   },
   description:
     "Register your Seven Years product warranty, view certificates, request service, raise complaints and track support.",
+  manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "SY Care", statusBarStyle: "default" },
 };
 

@@ -1,9 +1,10 @@
-import type { MetadataRoute } from "next";
+// Customer app manifest (installs Seven Years Care from care.sevenyears.in).
+// Staff pages link their own manifest (/staff-app.webmanifest) so both apps install separately.
 
-// Customer app: install Seven Years Care from care.sevenyears.in (Android, iPhone, desktop).
-// The staff app has its own manifest (/staff-app.webmanifest) so both can be installed separately.
-export default function manifest(): MetadataRoute.Manifest {
-  return {
+export const dynamic = "force-static";
+
+export function GET() {
+  const manifest = {
     name: "Seven Years Care",
     short_name: "SY Care",
     description: "Your Seven Years warranties, service requests, complaints and feedback in one place.",
@@ -25,4 +26,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { name: "My Account", url: "/account", icons: [{ src: "/app-icon-192.png", sizes: "192x192" }] },
     ],
   };
+  return new Response(JSON.stringify(manifest), {
+    headers: { "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" },
+  });
 }
