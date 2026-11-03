@@ -8,6 +8,8 @@ import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
 import {
   COMPLAINT_RESOLUTIONS,
   COMPLAINT_SEVERITIES,
+  complaintKind,
+  HR_RESOLUTIONS,
   PRIORITIES,
   SERVICE_RESOLUTIONS,
   SERVICE_SEVERITIES,
@@ -20,6 +22,7 @@ import {
   getHistory,
   getTicket,
   listTickets,
+  seesAllStores,
 } from "@/lib/tickets";
 import { StatusBadge } from "@/components/SiteChrome";
 import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, TicketTable } from "@/components/TicketUI";
@@ -41,16 +44,18 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
   const params = await searchParams;
   const filter = parseFilter(params.filter);
   const search = typeof params.q === "string" ? params.q.slice(0, 60) : "";
-  const tickets = await listTickets(staff, type, filter, search);
-
-  const storeScoped =
-    staff.role === "store_manager" ||
-    staff.role === "csa" ||
-    staff.role === "floor_incharge" ||
-    (type === "service" && staff.role === "technician");
+  const storeFilter = typeof params.store === "string" ? params.store.slice(0, 80) : "";
+  const all = await listTickets(staff, type, filter, search);
+  const storeScoped = !seesAllStores(staff, type);
+  const tickets =
+    storeFilter && !storeScoped
+      ? all.filter((t) => (t.storeName ?? "").trim().toLowerCase() === storeFilter.trim().toLowerCase())
+      : all;
   const scope = storeScoped
     ? `Showing ${staff.storeName ?? "your store"} and anything assigned to you.`
-    : "Showing all stores.";
+    : storeFilter
+      ? `Showing ${storeFilter} only.`
+      : "Showing all stores.";
 
   return (
     <div className="space-y-6">
@@ -65,7 +70,15 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
           </p>
         )}
       </div>
-      <FilterTabs base={BASE[type]} current={filter} search={search} />
+      {storeFilter && !storeScoped && (
+        <Link
+          href={`${BASE[type]}?filter=${filter}`}
+          className="inline-flex items-center gap-2 rounded-full bg-[#161616] px-3 py-1.5 text-xs font-bold text-white"
+        >
+          Store: {storeFilter} <span aria-hidden>✕</span>
+        </Link>
+      )}
+      <FilterTabs base={BASE[type]} current={filter} search={search} store={storeScoped ? "" : storeFilter} />
       <TicketTable
         tickets={tickets}
         base={BASE[type]}
@@ -84,13 +97,15 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   if (!ticket) notFound();
   const explanations = await explanationsForTicket(type, id);
   // Staff asked to explain can open the request even if it isn't theirs to handle.
-  const askedToExplain = explanations.some((e) => e.staffId === staff.id);
+  // (Not for staff behaviour complaints — those stay confidential; they reply from My Explanations.)
+  const askedToExplain =
+    explanations.some((e) => e.staffId === staff.id) && !(type === "complaint" && complaintKind(ticket.title) === "staff");
   if (!canViewTicket(staff, type, ticket) && !askedToExplain) notFound();
 
   const canAsk = canRequestExplanation(staff.role);
   const [history, people, everyone] = await Promise.all([
     getHistory(type, id),
-    assignableStaff(type, ticket.storeName),
+    assignableStaff(type, ticket.storeName, ticket.title),
     canAsk
       ? supabaseAdmin.from("staff_users").select("id, full_name, role, store_name").eq("is_active", true).order("full_name")
       : Promise.resolve({ data: [] as { id: string; full_name: string; role: string; store_name: string | null }[] }),
@@ -127,7 +142,18 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
       label: "Coverage",
       value: ticket.underWarranty === null || ticket.underWarranty === undefined ? null : ticket.underWarranty ? "Under warranty" : "Out of warranty (chargeable)",
     },
-    { label: "Classification", value: ticket.severity ? statusLabel(ticket.severity) : "Not classified yet" },
+    { label: type === "complaint" ? "Severity" : "Classification", value: ticket.severity ? statusLabel(ticket.severity) : "Not classified yet" },
+    {
+      label: "Complaint type",
+      value:
+        type === "complaint"
+          ? complaintKind(ticket.title) === "staff"
+            ? "Staff behaviour — confidential (HR)"
+            : complaintKind(ticket.title) === "service"
+              ? "Delivery / service — Store Manager, CRE, Technician, Service Head"
+              : "Store — CRE, Store Manager"
+          : null,
+    },
     { label: type === "service" ? "Technician" : "Owner", value: ticket.assigneeName ?? "Not assigned" },
     { label: "Raised", value: formatDateTime(ticket.createdAt) },
     { label: "Acknowledged", value: ticket.acknowledgedAt ? formatDateTime(ticket.acknowledgedAt) : "Not yet" },
@@ -256,11 +282,19 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
             label: `${p.fullName} — ${ROLE_LABELS[p.role]}${p.storeName ? `, ${p.storeName}` : ""}`,
           }))}
           currentAssigneeId={ticket.assigneeId}
+          currentStaffId={staff.id}
+          complaintKind={type === "complaint" ? complaintKind(ticket.title) : null}
           severity={ticket.severity}
           priority={ticket.priority}
           severities={type === "service" ? SERVICE_SEVERITIES : COMPLAINT_SEVERITIES}
           priorities={PRIORITIES}
-          resolutions={type === "service" ? SERVICE_RESOLUTIONS : COMPLAINT_RESOLUTIONS}
+          resolutions={
+            type === "service"
+              ? SERVICE_RESOLUTIONS
+              : complaintKind(ticket.title) === "staff"
+                ? HR_RESOLUTIONS
+                : COMPLAINT_RESOLUTIONS
+          }
         />
       </div>
     </div>

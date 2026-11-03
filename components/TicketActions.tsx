@@ -13,6 +13,8 @@ type Props = {
   actions: ActionName[];
   people: { id: string; label: string }[];
   currentAssigneeId: string | null;
+  currentStaffId: string;
+  complaintKind?: "store" | "service" | "staff" | null;
   severity: string | null;
   priority: string;
   severities: Option[];
@@ -38,6 +40,13 @@ const CONFIG: Record<
     fields: ["severity", "priority", "note"],
   },
   assign: { label: "Assign", help: "Give the job to one person. They get an alert.", fields: ["assignee", "note"], required: ["assignee"], tone: "primary" },
+  take_ownership: {
+    label: "Take ownership & classify",
+    help: "Set the severity (it sets the deadline) and confirm or change the owner. This also acknowledges the complaint — the customer is told who is looking into it.",
+    fields: ["severity", "assignee", "note"],
+    required: ["severity"],
+    tone: "primary",
+  },
   start: { label: "Start work", help: "Customer sees the status change.", fields: ["customerNote"] },
   awaiting_parts: {
     label: "Waiting for parts",
@@ -55,7 +64,7 @@ const CONFIG: Record<
   reject: { label: "Don't approve", help: "Explain why; the technician continues the repair.", fields: ["note"], required: ["note"], tone: "danger" },
   resolve: {
     label: "Mark resolved",
-    help: "Customer is told what was done and can ask to reopen.",
+    help: "Customer is told what was done and asked to confirm it's solved (“No” reopens it; no reply closes it after 3 days).",
     fields: ["resolution", "customerNote", "note"],
     required: ["resolution", "customerNote"],
     tone: "primary",
@@ -73,7 +82,7 @@ export function TicketActions(props: Props) {
   const [customerNote, setCustomerNote] = useState("");
   const [severity, setSeverity] = useState(props.severity ?? "");
   const [priority, setPriority] = useState(props.priority);
-  const [assigneeId, setAssigneeId] = useState(props.currentAssigneeId ?? "");
+  const [assigneeId, setAssigneeId] = useState(props.currentAssigneeId ?? props.currentStaffId);
   const [resolutionType, setResolutionType] = useState("");
   const [visibility, setVisibility] = useState<"internal" | "customer">("internal");
   const [saving, setSaving] = useState(false);
@@ -170,9 +179,9 @@ export function TicketActions(props: Props) {
 
             {CONFIG[open].fields.includes("severity") && (
               <div>
-                <label htmlFor="severity" className={labelClass}>Classification</label>
+                <label htmlFor="severity" className={labelClass}>{props.type === "complaint" ? "Severity *" : "Classification"}</label>
                 <select id="severity" value={severity} onChange={(e) => setSeverity(e.target.value)} className={inputClass}>
-                  <option value="">Not classified</option>
+                  <option value="">{props.type === "complaint" ? "Choose…" : "Not classified"}</option>
                   {props.severities.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
@@ -198,6 +207,9 @@ export function TicketActions(props: Props) {
                 </label>
                 <select id="assignee" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputClass}>
                   <option value="">Choose…</option>
+                  {open === "take_ownership" && !props.people.some((p) => p.id === props.currentStaffId) && (
+                    <option value={props.currentStaffId}>Me</option>
+                  )}
                   {props.people.map((p) => (
                     <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
@@ -238,7 +250,12 @@ export function TicketActions(props: Props) {
             {CONFIG[open].fields.includes("customerNote") && (
               <div>
                 <label htmlFor="customerNote" className={labelClass}>
-                  Message to customer{CONFIG[open].required?.includes("customerNote") ? " *" : " (optional)"}
+                  Message to customer
+                  {open === "resolve" && props.complaintKind === "staff"
+                    ? " (optional — a standard HR message is sent if left blank; never mention disciplinary details)"
+                    : CONFIG[open].required?.includes("customerNote")
+                      ? " *"
+                      : " (optional)"}
                 </label>
                 <textarea
                   id="customerNote"
@@ -290,9 +307,16 @@ export function TicketActions(props: Props) {
           <p className="mt-1">
             Acknowledge (2 hrs) → Classify → Assign technician → Start → (Parts / Replacement approval) → Resolve → Close after customer confirms.
           </p>
+        ) : props.complaintKind === "staff" ? (
+          <p className="mt-1">
+            Confidential. Received → HR takes ownership & sets severity (within 2 hrs) → Explanation from the staff member → HR
+            decision → Customer is told action has been taken → Customer confirms (or auto-closes after 3 days). Critical 24 h ·
+            High 48 h · Normal 72 h.
+          </p>
         ) : (
           <p className="mt-1">
-            Acknowledge (2 hrs) → Classify → Assign owner → Investigate → Resolve → Close after customer confirms. Staff behaviour complaints are led by HR.
+            Received (owner set automatically) → Take ownership & classify (within 2 hrs) → Action in progress → Resolve →
+            Customer confirms “solved” (or auto-closes after 3 days). Critical 24 h · High 48 h · Normal 72 h.
           </p>
         )}
       </div>

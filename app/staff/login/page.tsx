@@ -70,7 +70,7 @@ export default function StaffLoginPage() {
             priority
           />
           <p className="mt-5 text-sm font-semibold text-[#ff5e79]">Seven Years Care</p>
-          <h1 className="mt-1 text-2xl font-bold">Staff Login</h1>
+          <h1 className="mt-1 text-2xl font-bold">Log in</h1>
         </div>
 
         <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5 sm:p-8">

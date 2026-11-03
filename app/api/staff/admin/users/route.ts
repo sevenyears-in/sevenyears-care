@@ -141,7 +141,8 @@ export async function POST(request: Request) {
       full_name: fullName,
       password_hash: hashPassword(password),
       role,
-      store_name: storeName || (role === "director" ? directorStores.value[0] ?? null : null),
+      // Directors belong to the Corporate Office; the stores they look after are in director_stores.
+      store_name: role === "director" ? CORPORATE_OFFICE : storeName || null,
       director_stores: role === "director" ? directorStores.value : [],
       must_change_password: true,
       email: email || null,
@@ -190,14 +191,13 @@ export async function PATCH(request: Request) {
     if (typeof body.storeName === "string") {
       const store = await storeValue(body.storeName);
       if (store.error) return NextResponse.json({ error: store.error }, { status: 400 });
-      update.store_name = store.value;
+      update.store_name = target.role === "director" ? CORPORATE_OFFICE : store.value;
     }
 
     if (Array.isArray(body.directorStores)) {
       const ds = await directorStoresValue(body.directorStores);
       if (ds.error) return NextResponse.json({ error: ds.error }, { status: 400 });
       update.director_stores = ds.value;
-      if (ds.value.length > 0) update.store_name = ds.value[0];
     }
 
     if (typeof body.email === "string") {
@@ -229,6 +229,7 @@ export async function PATCH(request: Request) {
       }
       update.role = body.role;
       update.session_version = target.session_version + 1; // new permissions on next login
+      if (body.role === "director") update.store_name = CORPORATE_OFFICE;
     }
 
     if (typeof body.isActive === "boolean") {

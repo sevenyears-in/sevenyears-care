@@ -174,7 +174,7 @@ export default function StaffUsersPage() {
         </div>
         <div>
           <label htmlFor="store" className={labelClass}>
-            {role === "director" ? "Stores" : "Store"}{STORE_ROLES.includes(role) ? " *" : ""}
+            {role === "director" ? "CORPORATE OFFICE · looks after" : "Store"}{STORE_ROLES.includes(role) ? " *" : ""}
           </label>
           {role === "director" ? (
             <div className="space-y-1 rounded-2xl border border-black/10 bg-white p-3 text-sm">
@@ -383,7 +383,8 @@ function DirectorStores({
   const [list, setList] = useState<string[]>(current);
   return (
     <div className="max-w-[240px] text-xs">
-      <p className="font-semibold">{current.length ? current.join(", ") : "All stores"}</p>
+      <p className="font-bold">CORPORATE OFFICE</p>
+      <p className="text-black/60">Looks after: {current.length ? current.join(", ") : "all stores"}</p>
       {!disabled && (
         <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[#11b8d0] hover:underline">
           {open ? "Close" : "Change stores"}

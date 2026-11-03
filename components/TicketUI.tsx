@@ -58,13 +58,23 @@ const FILTER_LABELS: Record<ListFilter, string> = {
   all: "Everything",
 };
 
-export function FilterTabs({ base, current, search }: { base: string; current: ListFilter; search: string }) {
+export function FilterTabs({
+  base,
+  current,
+  search,
+  store = "",
+}: {
+  base: string;
+  current: ListFilter;
+  search: string;
+  store?: string;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {(Object.keys(FILTER_LABELS) as ListFilter[]).map((key) => (
         <Link
           key={key}
-          href={`${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}`}
+          href={`${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}${store ? `&store=${encodeURIComponent(store)}` : ""}`}
           className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
             key === current ? "bg-[#161616] text-white" : "bg-white text-black/60 ring-1 ring-black/5 hover:text-black"
           }`}

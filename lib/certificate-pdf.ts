@@ -6,6 +6,7 @@ import path from "node:path";
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import { formatDate } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
+import { qrMatrix } from "@/lib/qr";
 
 export type CertificateData = {
   warranty_number: string;
@@ -209,17 +210,39 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
     ty -= lines.length * 11 + 4;
   });
 
-  // ---------------- Footer ----------------
+  // ---------------- Footer (with QR code to verify online) ----------------
   const verifyUrl = `${siteUrl.replace(/\/$/, "")}/warranty/${w.verification_token}`;
-  page.drawLine({ start: { x: M, y: 70 }, end: { x: width - M, y: 70 }, thickness: 1, color: LINE });
-  text(page, "Verify this certificate online:", M, 54, 8, regular, GREY);
-  text(page, verifyUrl, M, 42, 8, bold, TEAL);
+  const qrSize = 84;
+  const qrX = width - M - qrSize;
+  const qrY = 12;
+  try {
+    const matrix = qrMatrix(verifyUrl);
+    const cell = qrSize / matrix.length;
+    page.drawRectangle({ x: qrX - 3, y: qrY - 3, width: qrSize + 6, height: qrSize + 6, color: WHITE });
+    matrix.forEach((row, r) =>
+      row.forEach((dark, c) => {
+        if (dark) {
+          page.drawRectangle({
+            x: qrX + c * cell,
+            y: qrY + qrSize - (r + 1) * cell,
+            width: cell + 0.05,
+            height: cell + 0.05,
+            color: DARK,
+          });
+        }
+      })
+    );
+  } catch (error) {
+    console.warn("QR code skipped:", error);
+  }
+
+  const rightEdge = qrX - 12;
+  page.drawLine({ start: { x: M, y: 104 }, end: { x: width - M, y: 104 }, thickness: 1, color: LINE });
+  text(page, "Scan the QR code or open this link to verify:", M, 82, 8, regular, GREY);
+  text(page, verifyUrl, M, 68, 8, bold, TEAL);
+  text(page, `Issued ${formatDate(w.created_at)}  -  Seven Years Care - Warranty & Service`, M, 50, 8, regular, GREY);
   const accountLine = `My account: ${siteUrl.replace(/\/$/, "")}/account  |  User ID: your mobile number  |  First password: last 4 digits of your bill number`;
-  text(page, accountLine, M, 22, 7.5, regular, GREY);
-  const issued = `Issued ${formatDate(w.created_at)}`;
-  text(page, issued, width - M - regular.widthOfTextAtSize(issued, 8), 54, 8, regular, GREY);
-  const footer = "Seven Years Care - Warranty & Service";
-  text(page, footer, width - M - regular.widthOfTextAtSize(footer, 8), 42, 8, regular, GREY);
+  wrap(accountLine, regular, 7, rightEdge - M).forEach((line, i) => text(page, line, M, 34 - i * 9, 7, regular, GREY));
   page.drawRectangle({ x: 0, y: 0, width, height: 6, color: TEAL });
 
   return pdf.save();

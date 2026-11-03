@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       full_name: fullName,
       password_hash: hashPassword(password),
       role,
-      store_name: store,
+      store_name: role === "director" ? CORPORATE_OFFICE : store,
       director_stores: role === "director" ? (stores.length ? stores : store ? [store] : []) : [],
       email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
       whatsapp_number: isValidMobile(whatsapp) ? whatsapp : null,

@@ -10,7 +10,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { Role } from "@/lib/roles";
-import { activeStatuses, type TicketType } from "@/lib/sla";
+import { activeStatuses, complaintKind, type TicketType } from "@/lib/sla";
 import { findDirectors, findRecipients, notifyStaff } from "@/lib/notify";
 
 const LEVEL_ROLES: Record<TicketType, Record<number, Role[]>> = {
@@ -19,9 +19,10 @@ const LEVEL_ROLES: Record<TicketType, Record<number, Role[]>> = {
     2: ["operations_manager", "service_head"],
     3: ["super_admin"],
   },
+  // Complaints: 1 = not acknowledged in time, 2 = deadline missed, 3 = still open 24 h after the deadline.
   complaint: {
-    1: ["store_manager", "operations_manager"],
-    2: ["operations_manager", "hr_head"],
+    1: ["store_manager"],
+    2: ["store_manager"],
     3: ["super_admin"],
   },
 };
@@ -29,7 +30,7 @@ const LEVEL_ROLES: Record<TicketType, Record<number, Role[]>> = {
 const HOUR = 60 * 60 * 1000;
 
 export async function runEscalations() {
-  const summary = { checked: 0, escalated: 0 };
+  const summary = { checked: 0, escalated: 0, autoClosed: 0 };
 
   for (const type of ["service", "complaint"] as TicketType[]) {
     const table = type === "service" ? "service_requests" : "complaints";
@@ -58,9 +59,15 @@ export async function runEscalations() {
       const lateBy = due ? now - due : -1;
 
       let level = 0;
-      if (ackLate || lateBy > 0) level = 1;
-      if (lateBy > 24 * HOUR) level = 2;
-      if (lateBy > 48 * HOUR) level = 3;
+      if (type === "complaint") {
+        if (ackLate) level = 1;
+        if (lateBy > 0) level = 2;
+        if (lateBy > 24 * HOUR) level = 3;
+      } else {
+        if (ackLate || lateBy > 0) level = 1;
+        if (lateBy > 24 * HOUR) level = 2;
+        if (lateBy > 48 * HOUR) level = 3;
+      }
       if (level <= current) continue;
 
       const reason = lateBy > 0 ? "Resolution time missed" : "Not acknowledged within 2 hours";
@@ -84,10 +91,9 @@ export async function runEscalations() {
 
       const storeName = (row.store_name as string | null) ?? null;
       // Every SOP violation also goes to the Directors of that store.
-      const recipients = [
-        ...(await findRecipients(LEVEL_ROLES[type][level], storeName)),
-        ...(await findDirectors(storeName)),
-      ];
+      const staffComplaint = type === "complaint" && complaintKind(String(row[titleCol] ?? "")) === "staff";
+      const roles: Role[] = [...LEVEL_ROLES[type][level], ...(staffComplaint && level >= 2 ? (["hr_head"] as Role[]) : [])];
+      const recipients = [...(await findRecipients(roles, storeName)), ...(await findDirectors(storeName))];
       await notifyStaff(recipients, {
         ticketType: type,
         ticketId: String(row.id),
@@ -99,6 +105,34 @@ export async function runEscalations() {
       });
       summary.escalated++;
     }
+  }
+
+  // Resolved complaints the customer didn't answer within 3 days are closed automatically.
+  const cutoff = new Date(Date.now() - 3 * 24 * HOUR).toISOString();
+  const { data: stale } = await supabaseAdmin
+    .from("complaints")
+    .select("id")
+    .eq("status", "resolved")
+    .lt("resolved_at", cutoff)
+    .limit(500);
+  for (const row of stale ?? []) {
+    const { data: closed } = await supabaseAdmin
+      .from("complaints")
+      .update({ status: "closed", closed_at: new Date().toISOString() })
+      .eq("id", row.id)
+      .eq("status", "resolved")
+      .select("id");
+    if (!closed?.length) continue;
+    await supabaseAdmin.from("ticket_status_history").insert({
+      ticket_type: "complaint",
+      ticket_id: row.id,
+      status: "closed",
+      note: "Closed automatically — no reply from the customer within 3 days of the resolution.",
+      action: "auto_close",
+      actor_name: "System",
+      visibility: "customer",
+    });
+    summary.autoClosed++;
   }
 
   return summary;

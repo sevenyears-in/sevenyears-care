@@ -271,7 +271,12 @@ export async function findRecipients(roles: Role[], storeName: string | null): P
 
   return (data ?? [])
     .map((row) => ({ ...row, role: asRole(row.role) }) as Recipient)
-    .filter((row) => !STORE_SCOPED_ROLES.includes(row.role) || sameStore(row.store_name, storeName));
+    // Store teams only hear about their own store; corporate office staff hear about every store.
+    .filter((row) => {
+      if (sameStore(row.store_name, storeName)) return true;
+      if (STORE_SCOPED_ROLES.includes(row.role)) return false;
+      return !row.store_name || sameStore(row.store_name, "CORPORATE OFFICE");
+    });
 }
 
 /** Directors who look after this store (a Director with no stores set looks after all stores). */
@@ -387,8 +392,10 @@ export async function notifyCustomer(input: {
   email?: string | null;
   ticketNumber: string;
   message: string;
+  /** Link to send instead of the track page (e.g. feedback / confirm link). */
+  link?: string;
 }) {
-  const link = customerTrackLink(input.ticketNumber);
+  const link = input.link || customerTrackLink(input.ticketNumber);
   const meta = { audience: "customer" as const, ticketNumber: input.ticketNumber };
   const name = input.name?.trim() || "Customer";
   const jobs: Promise<unknown>[] = [];

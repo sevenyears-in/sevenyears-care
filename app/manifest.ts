@@ -14,8 +14,9 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#f7f9fb",
     theme_color: "#8883d7",
     icons: [
-      { src: "/app-icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/app-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      // Round icons for desktop / Android launchers; the square "maskable" one lets phones shape it themselves.
+      { src: "/app-icon-round-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/app-icon-round-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/app-icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };

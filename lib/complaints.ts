@@ -6,6 +6,7 @@ import { COMPLAINT_CATEGORIES } from "@/lib/site-config";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 import { getStores, matchStore } from "@/lib/stores";
 import { resolveComplaintReference } from "@/lib/complaint-reference";
+import { complaintKind } from "@/lib/sla";
 import { requestExplanation } from "@/lib/explanations";
 
 export type ComplaintSource = "web" | "whatsapp" | "aira";
@@ -128,7 +129,10 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
         ticketId: created.id,
         ticketNumber: created.complaint_number,
         staffId: ref.staffId,
-        reason: `Customer complaint (${category}) about bill ${ref.billNumber}: ${description.slice(0, 300)}`,
+        reason:
+          complaintKind(category) === "staff"
+            ? `Confidential — a customer complained about staff behaviour on bill ${ref.billNumber}: ${description.slice(0, 300)}`
+            : `Customer complaint (${category}) about bill ${ref.billNumber}: ${description.slice(0, 300)}`,
         requestedBy: null,
       }).catch((error) => console.error("Auto explanation request failed:", error));
     }

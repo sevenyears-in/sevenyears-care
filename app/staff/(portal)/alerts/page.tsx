@@ -40,7 +40,9 @@ export default async function AlertsPage() {
           {alerts.map((a) => {
             const href = a.ticket_id
               ? `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`
-              : "/staff";
+              : /feedback/i.test(a.title)
+                ? "/staff/feedback"
+                : "/staff";
             return (
               <li key={a.id}>
                 <Link href={href} className={`block px-5 py-4 transition hover:bg-[#f7f9fb] ${a.read_at ? "opacity-60" : ""}`}>

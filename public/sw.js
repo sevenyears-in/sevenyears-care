@@ -2,7 +2,7 @@
 // Keeps the app installable and shows a friendly page when there is no internet.
 // Pages and data always come fresh from the server (nothing private is cached).
 
-const CACHE = "sy-care-v1";
+const CACHE = "sy-care-v2";
 const OFFLINE_URL = "/offline.html";
 const SHELL = [OFFLINE_URL, "/app-icon-192.png", "/seven-years-logo.png"];
 
@@ -33,4 +33,21 @@ self.addEventListener("fetch", (event) => {
   if (url.origin === self.location.origin && SHELL.includes(url.pathname)) {
     event.respondWith(caches.match(request).then((hit) => hit || fetch(request)));
   }
+});
+
+// Tapping an alert notification opens (or focuses) the app on that request.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || "/staff", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.startsWith(self.location.origin) && "focus" in client) {
+          client.navigate(target).catch(() => null);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
 });

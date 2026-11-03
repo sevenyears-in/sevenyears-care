@@ -16,11 +16,16 @@ export const SERVICE_TAT_HOURS: Record<string, number> = {
   unclassified: 72,
 };
 
+/** Complaints: the worse it is, the faster it must be resolved. */
 export const COMPLAINT_TAT_HOURS: Record<string, number> = {
-  minor: 48,
-  moderate: 72,
-  major: 168,
+  critical: 24,
+  high: 48,
+  normal: 72,
   unclassified: 72,
+  // older classifications
+  major: 24,
+  moderate: 48,
+  minor: 72,
 };
 
 /** Safety issues on baby gear (brakes, frames, locks) get top priority and 24 h. */
@@ -34,10 +39,53 @@ export const SERVICE_SEVERITIES = [
 ];
 
 export const COMPLAINT_SEVERITIES = [
-  { value: "minor", label: "Minor (2 days)" },
-  { value: "moderate", label: "Moderate (3 days)" },
-  { value: "major", label: "Major (7 days)" },
+  { value: "critical", label: "Critical — child safety, legal / social media threat, repeat complaint (24 h)" },
+  { value: "high", label: "High — product not usable, wrong bill / overcharge, rude behaviour (48 h)" },
+  { value: "normal", label: "Normal — small defect, delay, general unhappiness (72 h)" },
 ];
+
+// ------------------------------------------------------------------
+// Complaint types → which team handles them
+// ------------------------------------------------------------------
+
+export type ComplaintKind = "store" | "service" | "staff";
+
+export const STAFF_BEHAVIOUR_CATEGORY = "Staff behaviour";
+export const SERVICE_COMPLAINT_CATEGORIES = ["Delivery or installation", "Warranty or service delay"];
+
+export function complaintKind(category: string | null | undefined): ComplaintKind {
+  const c = String(category ?? "").trim().toLowerCase();
+  if (c === STAFF_BEHAVIOUR_CATEGORY.toLowerCase()) return "staff";
+  if (SERVICE_COMPLAINT_CATEGORIES.some((s) => s.toLowerCase() === c)) return "service";
+  return "store";
+}
+
+/** Outcomes for staff behaviour complaints (HR decision — never shown to the customer). */
+export const HR_RESOLUTIONS = [
+  { value: "hr_no_action", label: "No action needed (complaint not upheld)" },
+  { value: "hr_counselling", label: "Counselling / coaching given" },
+  { value: "hr_warning", label: "Warning issued" },
+  { value: "hr_other", label: "Other action" },
+];
+
+/** What the customer sees for each complaint status. */
+export function customerComplaintStatus(status: string, kind: ComplaintKind) {
+  switch (status) {
+    case "open":
+      return "Received";
+    case "acknowledged":
+    case "under_review":
+      return kind === "staff" ? "Our HR team is reviewing this" : "Being looked into";
+    case "in_progress":
+      return "Action in progress";
+    case "resolved":
+      return "Resolved – please confirm";
+    case "closed":
+      return "Closed";
+    default:
+      return status;
+  }
+}
 
 export const PRIORITIES = [
   { value: "normal", label: "Normal" },
@@ -69,6 +117,7 @@ export const COMPLAINT_RESOLUTIONS = [
 export const SAFETY_ISSUE_TYPES = ["Wheel, brake or frame issue"];
 
 export function resolutionHours(type: TicketType, severity: string | null, priority: string) {
+  if (type === "complaint") return COMPLAINT_TAT_HOURS[severity ?? "unclassified"] ?? COMPLAINT_TAT_HOURS.unclassified;
   if (priority === "safety") return SAFETY_TAT_HOURS;
   const table = type === "service" ? SERVICE_TAT_HOURS : COMPLAINT_TAT_HOURS;
   return table[severity ?? "unclassified"] ?? table.unclassified;

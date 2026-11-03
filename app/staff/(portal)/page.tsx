@@ -3,9 +3,9 @@ import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
-import { canSeeComplaints, canSeeService, isAdmin, ROLE_LABELS } from "@/lib/roles";
+import { canSeeComplaints, canSeeService, isAdmin, isCorporateStaff, ROLE_LABELS } from "@/lib/roles";
 import { slaState } from "@/lib/sla";
-import { listTickets, needsActionFrom, rawSla, type Ticket } from "@/lib/tickets";
+import { listTickets, needsActionFrom, rawSla, seesAllStores, type Ticket } from "@/lib/tickets";
 import type { StaffUser } from "@/lib/auth";
 import { TicketTable } from "@/components/TicketUI";
 import { InstallAppCard } from "@/components/InstallApp";
@@ -79,6 +79,13 @@ export default async function StaffDashboard() {
         </div>
       )}
 
+      {(isCorporateStaff(staff) || seesAllStores(staff, "service")) && (showService || showComplaints) && (
+        <StoreBreakdown
+          service={showService ? serviceTickets : null}
+          complaints={showComplaints ? complaintTickets : null}
+        />
+      )}
+
       {showService && (
         <QueueSection
           title="Service Requests"
@@ -130,6 +137,93 @@ export default async function StaffDashboard() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** Store-wise open / overdue counts (Corporate Office, Directors, Service Head). */
+function StoreBreakdown({ service, complaints }: { service: Ticket[] | null; complaints: Ticket[] | null }) {
+  const stores = new Map<string, { s: number; so: number; c: number; co: number }>();
+  const bump = (t: Ticket, kind: "s" | "c") => {
+    const key = t.storeName?.trim() || "Not specified";
+    const row = stores.get(key) ?? { s: 0, so: 0, c: 0, co: 0 };
+    const overdue = slaState(rawSla(t)).state === "overdue";
+    if (kind === "s") {
+      row.s++;
+      if (overdue) row.so++;
+    } else {
+      row.c++;
+      if (overdue) row.co++;
+    }
+    stores.set(key, row);
+  };
+  (service ?? []).forEach((t) => bump(t, "s"));
+  (complaints ?? []).forEach((t) => bump(t, "c"));
+  const rows = [...stores.entries()].sort((a, b) => b[1].so + b[1].co - (a[1].so + a[1].co) || a[0].localeCompare(b[0]));
+  const totals = rows.reduce(
+    (acc, [, r]) => ({ s: acc.s + r.s, so: acc.so + r.so, c: acc.c + r.c, co: acc.co + r.co }),
+    { s: 0, so: 0, c: 0, co: 0 }
+  );
+  const cell = (value: number, href: string | null, danger = false) => (
+    <td className={`px-3 py-3 text-right ${danger && value > 0 ? "font-bold text-red-700" : value ? "font-semibold" : "text-black/30"}`}>
+      {href && value ? (
+        <Link href={href} className="hover:underline">
+          {value}
+        </Link>
+      ) : (
+        value
+      )}
+    </td>
+  );
+  const link = (base: string, filter: string, store: string) =>
+    store === "Not specified" ? null : `${base}?filter=${filter}&store=${encodeURIComponent(store)}`;
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-xl font-bold">Store-wise</h2>
+      <div className="overflow-x-auto rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead className="bg-[#f7f9fb] text-xs uppercase tracking-wider text-black/45">
+            <tr>
+              <th className="px-4 py-3 text-left">Store</th>
+              {service && <th className="px-3 py-3 text-right">Service open</th>}
+              {service && <th className="px-3 py-3 text-right">Service overdue</th>}
+              {complaints && <th className="px-3 py-3 text-right">Complaints open</th>}
+              {complaints && <th className="px-3 py-3 text-right">Complaints overdue</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/5">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-black/50">
+                  Nothing open in any store. 🎉
+                </td>
+              </tr>
+            ) : (
+              rows.map(([store, r]) => (
+                <tr key={store}>
+                  <td className="px-4 py-3 font-semibold">{store}</td>
+                  {service && cell(r.s, link("/staff/service", "active", store))}
+                  {service && cell(r.so, link("/staff/service", "overdue", store), true)}
+                  {complaints && cell(r.c, link("/staff/complaints", "active", store))}
+                  {complaints && cell(r.co, link("/staff/complaints", "overdue", store), true)}
+                </tr>
+              ))
+            )}
+          </tbody>
+          {rows.length > 1 && (
+            <tfoot className="border-t border-black/10 bg-[#f7f9fb]">
+              <tr>
+                <td className="px-4 py-3 font-bold">All stores</td>
+                {service && cell(totals.s, null)}
+                {service && cell(totals.so, null, true)}
+                {complaints && cell(totals.c, null)}
+                {complaints && cell(totals.co, null, true)}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
   );
 }
 

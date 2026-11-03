@@ -5,6 +5,8 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { PageShell, StatusBadge } from "@/components/SiteChrome";
 import { CustomerLogoutButton } from "@/components/CustomerLogoutButton";
 import { formatDate, formatDateTime, statusLabel, todayISO } from "@/lib/helpers";
+import { feedbackLink } from "@/lib/feedback-token";
+import { complaintKind, customerComplaintStatus } from "@/lib/sla";
 
 export const metadata = { title: "My Account" };
 
@@ -13,7 +15,7 @@ export default async function AccountPage() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect("/account/login");
 
-  const [warranties, services, complaints] = await Promise.all([
+  const [warranties, services, complaints, feedback] = await Promise.all([
     supabaseAdmin
       .from("warranties")
       .select(
@@ -31,7 +33,26 @@ export default async function AccountPage() {
       .select("id, complaint_number, category, status, resolution_notes, created_at, updated_at, reference_number, store_name, involved_staff_name")
       .eq("contact_mobile", customer.mobile)
       .order("created_at", { ascending: false }),
+    supabaseAdmin.from("customer_feedback").select("kind, ref_id, ref_number, resolved, answers").eq("mobile", customer.mobile),
   ]);
+
+  // Feedback already given (the table may not exist yet — then everything is "not rated").
+  const given = feedback.data ?? [];
+  const rated = (kind: string, id: string, number?: string) =>
+    given.some(
+      (f) =>
+        f.kind === kind &&
+        (kind === "sales" ? f.ref_number === number : f.ref_id === id) &&
+        Object.keys((f.answers ?? {}) as object).length > 0
+    );
+  const confirmedComplaint = (id: string) => given.some((f) => f.kind === "complaint" && f.ref_id === id && f.resolved);
+  const bills = new Set<string>();
+  const salesLink = (w: { id: string; bill_number: string }) => {
+    if (bills.has(w.bill_number)) return null; // one sales feedback per bill
+    bills.add(w.bill_number);
+    return rated("sales", w.id, w.bill_number) ? null : feedbackLink("sales", w.id);
+  };
+  const rateButton = "rounded-xl bg-amber-400 px-3 py-2 text-xs font-bold text-[#161616]";
 
   const today = todayISO();
   const card = "rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:p-6";
@@ -62,6 +83,7 @@ export default async function AccountPage() {
         ) : (
           (warranties.data ?? []).map((w) => {
             const status = w.status !== "active" ? "void" : w.warranty_expiry_date < today ? "expired" : "active";
+            const rateLink = salesLink(w);
             return (
               <div key={w.id} className={card}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -109,6 +131,11 @@ export default async function AccountPage() {
                   >
                     Complaint about this purchase
                   </Link>
+                  {rateLink && (
+                    <a href={rateLink} className={rateButton}>
+                      ★ Rate your purchase
+                    </a>
+                  )}
                 </div>
               </div>
             );
@@ -132,6 +159,11 @@ export default async function AccountPage() {
                 <StatusBadge status={r.status} label={statusLabel(r.status)} />
               </div>
               {r.resolution_notes && <p className="mt-3 rounded-2xl bg-[#f7f9fb] p-3 text-sm">{r.resolution_notes}</p>}
+              {["resolved", "closed"].includes(r.status) && !rated("service", r.id) && (
+                <a href={feedbackLink("service", r.id)} className={`mt-3 inline-block ${rateButton}`}>
+                  ★ Rate service
+                </a>
+              )}
               <p className="mt-3 text-xs text-black/45">
                 Raised {formatDateTime(r.created_at)} · Updated {formatDateTime(r.updated_at)} ·{" "}
                 <Link href={`/track-request?ticket=${encodeURIComponent(r.request_number)}`} className="font-bold text-[#11b8d0]">
@@ -160,9 +192,21 @@ export default async function AccountPage() {
                       .join(" · ")}
                   </p>
                 </div>
-                <StatusBadge status={c.status} label={statusLabel(c.status)} />
+                <StatusBadge status={c.status} label={customerComplaintStatus(c.status, complaintKind(c.category))} />
               </div>
               {c.resolution_notes && <p className="mt-3 rounded-2xl bg-[#f7f9fb] p-3 text-sm">{c.resolution_notes}</p>}
+              {c.status === "resolved" && !confirmedComplaint(c.id) ? (
+                <a href={feedbackLink("complaint", c.id)} className="mt-3 inline-block rounded-xl bg-[#ff5e79] px-3 py-2 text-xs font-bold text-white">
+                  Is it solved? Confirm &amp; rate
+                </a>
+              ) : (
+                ["resolved", "closed"].includes(c.status) &&
+                !rated("complaint", c.id) && (
+                  <a href={feedbackLink("complaint", c.id)} className={`mt-3 inline-block ${rateButton}`}>
+                    ★ Rate how we handled it
+                  </a>
+                )
+              )}
               <p className="mt-3 text-xs text-black/45">
                 Raised {formatDateTime(c.created_at)} · Updated {formatDateTime(c.updated_at)} ·{" "}
                 <Link href={`/track-request?ticket=${encodeURIComponent(c.complaint_number)}`} className="font-bold text-[#11b8d0]">

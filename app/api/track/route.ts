@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { cleanMobile, isValidMobile, one } from "@/lib/helpers";
+import { pendingFeedbackLink } from "@/lib/feedback";
+import { complaintKind } from "@/lib/sla";
+import { asRole, ROLE_LABELS } from "@/lib/roles";
 
 // POST /api/track  { ticketNumber, mobileNumber }
 // Works for service requests (SY-SRV-…) and complaints (SY-CMP-…).
@@ -64,6 +67,7 @@ export async function POST(request: Request) {
           },
         ],
         history: await loadHistory("service", row.id),
+        feedbackUrl: await pendingFeedbackLink("service", row.id, row.status).catch(() => null),
       });
     }
 
@@ -71,13 +75,20 @@ export async function POST(request: Request) {
       const { data: row, error } = await supabaseAdmin
         .from("complaints")
         .select(
-          "id, complaint_number, contact_mobile, category, description, reference_number, store_name, involved_staff_name, status, resolution_notes, created_at, updated_at"
+          "id, complaint_number, contact_mobile, category, description, reference_number, store_name, involved_staff_name, owner_id, status, resolution_notes, created_at, updated_at"
         )
         .eq("complaint_number", ticketNumber)
         .maybeSingle();
 
       if (error) throw error;
       if (!row || row.contact_mobile !== mobile) return notFound;
+
+      // "Being looked into by Anu (CRE)" — first name and role of the owner (not for HR cases).
+      let owner: string | null = null;
+      if (row.owner_id && complaintKind(row.category) !== "staff") {
+        const { data: o } = await supabaseAdmin.from("staff_users").select("full_name, role").eq("id", row.owner_id).maybeSingle();
+        if (o) owner = `${String(o.full_name).split(" ")[0]} (${ROLE_LABELS[asRole(o.role)]})`;
+      }
 
       return NextResponse.json({
         type: "complaint",
@@ -92,9 +103,11 @@ export async function POST(request: Request) {
           { label: "Category", value: row.category },
           { label: "Store", value: row.store_name ?? null },
           { label: "Bill / Warranty No.", value: row.reference_number },
-          { label: "Staff", value: row.involved_staff_name ?? null },
+          { label: "Staff", value: complaintKind(row.category) === "staff" ? null : row.involved_staff_name ?? null },
+          { label: "Looked into by", value: complaintKind(row.category) === "staff" ? "Our HR team" : owner },
         ],
         history: await loadHistory("complaint", row.id),
+        feedbackUrl: await pendingFeedbackLink("complaint", row.id, row.status).catch(() => null),
       });
     }
 

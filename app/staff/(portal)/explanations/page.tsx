@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { explanationsForStaff } from "@/lib/explanations";
 import { ExplanationsPanel } from "@/components/ExplanationsPanel";
+import { supabaseAdmin } from "@/lib/supabase/server";
+import { complaintKind } from "@/lib/sla";
 
 // Every staff member: explanations asked from me (complaints about my sales, delays, SOP issues).
 export default async function MyExplanationsPage() {
@@ -10,6 +12,13 @@ export default async function MyExplanationsPage() {
   if (!staff) redirect("/staff/login");
 
   const all = await explanationsForStaff(staff.id);
+
+  // Staff behaviour complaints are confidential: the person it's about can reply but not open the complaint.
+  const complaintIds = [...new Set(all.filter((e) => e.ticketType === "complaint").map((e) => e.ticketId))];
+  const { data: cats } = complaintIds.length
+    ? await supabaseAdmin.from("complaints").select("id, category").in("id", complaintIds)
+    : { data: [] as { id: string; category: string }[] };
+  const confidential = new Set((cats ?? []).filter((c) => complaintKind(c.category) === "staff").map((c) => String(c.id)));
   const pending = all.filter((e) => !e.explainedAt);
   const done = all.filter((e) => e.explainedAt);
 
@@ -33,9 +42,13 @@ export default async function MyExplanationsPage() {
           const href = `/staff/${first.ticketType === "service" ? "service" : "complaints"}/${first.ticketId}`;
           return (
             <div key={`${first.ticketType}:${first.ticketId}`} className="space-y-2">
-              <Link href={href} className="font-mono text-sm font-bold text-[#11b8d0] hover:underline">
-                {first.ticketNumber} — open the {first.ticketType === "service" ? "service request" : "complaint"} →
-              </Link>
+              {confidential.has(first.ticketId) ? (
+                <p className="font-mono text-sm font-bold text-black/60">{first.ticketNumber} — staff behaviour complaint (confidential, handled by HR)</p>
+              ) : (
+                <Link href={href} className="font-mono text-sm font-bold text-[#11b8d0] hover:underline">
+                  {first.ticketNumber} — open the {first.ticketType === "service" ? "service request" : "complaint"} →
+                </Link>
+              )}
               <ExplanationsPanel
                 type={first.ticketType}
                 ticketId={first.ticketId}

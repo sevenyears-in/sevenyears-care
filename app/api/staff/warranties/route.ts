@@ -1,4 +1,6 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { feedbackLink } from "@/lib/feedback-token";
+import { notifyCustomer } from "@/lib/notify";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/auth";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
@@ -204,6 +206,22 @@ export async function POST(request: Request) {
         created: result.created,
         password: result.created ? billPassword(bill.billNumber) : null,
       });
+    }
+
+    // Sales feedback (one short form per bill) — sent once the items are handed over and registered.
+    const first = (created ?? [])[0];
+    if (first) {
+      const firstRecord = records[0];
+      after(() =>
+        notifyCustomer({
+          name: String(firstRecord.customer_name),
+          mobile: String(firstRecord.customer_mobile),
+          ticketNumber: bill.billNumber,
+          message:
+            "Thank you for shopping with Seven Years! Your warranty is registered. How was your shopping experience? Please rate us (1 minute):",
+          link: feedbackLink("sales", first.id),
+        }).catch((error) => console.error("Sales feedback message failed:", error))
+      );
     }
 
     return NextResponse.json({ success: true, warranties: created ?? [], accounts }, { status: 201 });

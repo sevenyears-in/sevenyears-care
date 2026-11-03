@@ -3,13 +3,24 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { StaffUser } from "@/lib/auth";
-import { asRole, isAdmin, type Role, sameStore } from "@/lib/roles";
+import {
+  asRole,
+  canSeeComplaints,
+  canSeeService,
+  isCorporateStaff,
+  ROLE_LABELS,
+  type Role,
+  sameStore,
+  STAFF_COMPLAINT_ROLES,
+} from "@/lib/roles";
 import {
   ACK_HOURS,
   activeStatuses,
   addHours,
   COMPLAINT_RESOLUTIONS,
   COMPLAINT_SEVERITIES,
+  complaintKind,
+  HR_RESOLUTIONS,
   PRIORITIES,
   resolutionHours,
   SERVICE_RESOLUTIONS,
@@ -17,7 +28,8 @@ import {
   slaState,
   type TicketType,
 } from "@/lib/sla";
-import { findRecipients, findStaffByIds, notifyCustomer, notifyStaff, type StaffAlert } from "@/lib/notify";
+import { findDirectors, findRecipients, findStaffByIds, notifyCustomer, notifyStaff, type StaffAlert } from "@/lib/notify";
+import { feedbackLink } from "@/lib/feedback-token";
 
 // ------------------------------------------------------------------
 // Shapes
@@ -140,27 +152,47 @@ async function staffNames(ids: (string | null)[]) {
 // Who can see what
 // ------------------------------------------------------------------
 
-export function canViewTicket(staff: StaffUser, type: TicketType, t: { storeName: string | null; assigneeId: string | null }) {
-  if (isAdmin(staff.role) || staff.role === "cre" || staff.role === "director") return true;
+type Viewable = { storeName: string | null; assigneeId: string | null; title?: string | null };
+
+/**
+ * Corporate staff (Super Admin, Admin, Directors, anyone at CORPORATE OFFICE) see every store;
+ * store teams see their own store, plus anything assigned to them.
+ * Staff behaviour complaints are confidential: HR, the store's Store Manager, Directors and admins only.
+ */
+export function canViewTicket(staff: StaffUser, type: TicketType, t: Viewable) {
   if (t.assigneeId === staff.id) return true;
-  if (staff.role === "store_manager" || staff.role === "csa" || staff.role === "floor_incharge")
-    return sameStore(staff.storeName, t.storeName);
-  if (type === "service") {
-    if (staff.role === "service_head") return true;
-    if (staff.role === "technician") return sameStore(staff.storeName, t.storeName);
-    return false;
+  if (type === "complaint") {
+    const kind = complaintKind(t.title);
+    if (kind === "staff") {
+      if (!STAFF_COMPLAINT_ROLES.includes(staff.role)) return false;
+      if (staff.role === "store_manager") return sameStore(staff.storeName, t.storeName);
+      return true;
+    }
+    if (staff.role === "hr_executive") return false; // HR Executive: staff behaviour complaints only
+    if (staff.role === "service_head") return kind === "service"; // delivery / warranty-service complaints
   }
-  if (staff.role === "hr_head" || staff.role === "operations_manager") return true;
+  if (type === "service" ? !canSeeService(staff.role) : !canSeeComplaints(staff.role)) return false;
+  if (seesAllStores(staff, type)) return true;
+  return sameStore(staff.storeName, t.storeName);
+}
+
+/** Corporate staff see every store; so do the Service Head (service) and HR Head / Operations Manager (complaints). */
+export function seesAllStores(staff: StaffUser, type: TicketType) {
+  if (isCorporateStaff(staff)) return true;
+  if (staff.role === "service_head") return true;
+  if (type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager")) return true;
   return false;
 }
 
-/** Can triage, assign, close and reopen (not just work on assigned jobs). */
-export function isTicketManager(staff: StaffUser, type: TicketType) {
-  const managers: Role[] =
-    type === "service"
-      ? ["super_admin", "admin", "service_head", "store_manager"]
-      : ["super_admin", "admin", "hr_head", "operations_manager", "store_manager", "cre"];
-  return managers.includes(staff.role);
+/** Can classify, assign, close and reopen (not just work on their own jobs). */
+export function isTicketManager(staff: StaffUser, type: TicketType, t?: Viewable) {
+  if (staff.role === "director") return false; // Directors watch and ask; they don't change tickets
+  if (type === "service") return (["super_admin", "admin", "service_head", "store_manager"] as Role[]).includes(staff.role);
+  const kind = complaintKind(t?.title);
+  if (kind === "staff") return (["super_admin", "admin", "hr_head", "hr_executive"] as Role[]).includes(staff.role);
+  if (kind === "service")
+    return (["super_admin", "admin", "store_manager", "service_head", "cre", "operations_manager"] as Role[]).includes(staff.role);
+  return (["super_admin", "admin", "store_manager", "cre", "operations_manager"] as Role[]).includes(staff.role);
 }
 
 function quote(value: string) {
@@ -181,28 +213,12 @@ export async function listTickets(
 ): Promise<Ticket[]> {
   let query = supabaseAdmin.from(TABLE[type]).select(SELECT[type]).order("created_at", { ascending: false }).limit(300);
 
-  // Scope to what this person may see.
-  if (!isAdmin(staff.role) && staff.role !== "cre" && staff.role !== "director") {
+  // Scope to what this person may see (exact rules applied again below).
+  if (!seesAllStores(staff, type)) {
     const store = staff.storeName?.trim() ?? "";
-    const allStores =
-      (type === "service" && staff.role === "service_head") ||
-      (type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager"));
-    const storeScoped =
-      staff.role === "store_manager" ||
-      staff.role === "csa" ||
-      staff.role === "floor_incharge" ||
-      (type === "service" && staff.role === "technician");
-
-    if (allStores) {
-      // sees every store
-    } else if (storeScoped) {
-      // their store, plus anything assigned to them
-      query = store
-        ? query.or(`store_name.ilike.${quote(escapeLike(store))},${ASSIGNEE_COL[type]}.eq.${staff.id}`)
-        : query.eq(ASSIGNEE_COL[type], staff.id);
-    } else {
-      query = query.eq(ASSIGNEE_COL[type], staff.id);
-    }
+    query = store
+      ? query.or(`store_name.ilike.${quote(escapeLike(store))},${ASSIGNEE_COL[type]}.eq.${staff.id}`)
+      : query.eq(ASSIGNEE_COL[type], staff.id);
   }
 
   const active = activeStatuses(type);
@@ -231,7 +247,7 @@ export async function listTickets(
 
   const rows = (data ?? []) as unknown as Row[];
   const names = await staffNames(rows.map((r) => str(r[ASSIGNEE_COL[type]])));
-  let tickets = rows.map((r) => toTicket(type, r, names));
+  let tickets = rows.map((r) => toTicket(type, r, names)).filter((t) => canViewTicket(staff, type, t));
 
   if (filter === "overdue") tickets = tickets.filter((t) => slaState(rawSla(t)).state === "overdue");
   if (filter === "action") tickets = tickets.filter((t) => needsActionFrom(staff, t));
@@ -255,9 +271,9 @@ export function needsActionFrom(staff: StaffUser, t: Ticket) {
   if (staff.role === "director") return t.escalationLevel > 0 || slaState(rawSla(t)).state === "overdue";
   if (t.status === "open") return true; // everyone who can see it should acknowledge
   if (t.assigneeId === staff.id) return true;
-  if (!t.assigneeId && isTicketManager(staff, t.type)) return true; // still needs an owner
+  if (!t.assigneeId && isTicketManager(staff, t.type, t)) return true; // still needs an owner
   if (t.status === "awaiting_approval" && ["service_head", "super_admin"].includes(staff.role)) return true;
-  if (slaState(rawSla(t)).state === "overdue" && isTicketManager(staff, t.type)) return true;
+  if (slaState(rawSla(t)).state === "overdue" && isTicketManager(staff, t.type, t)) return true;
   return false;
 }
 
@@ -313,12 +329,17 @@ export async function getHistory(type: TicketType, id: string): Promise<HistoryE
   }));
 }
 
-/** People who can be given the job: technicians (service) or complaint owners. */
-export async function assignableStaff(type: TicketType, storeName: string | null) {
+/** People who can be given the job: technicians (service) or complaint owners (by complaint type). */
+export async function assignableStaff(type: TicketType, storeName: string | null, title?: string | null) {
+  const kind = type === "complaint" ? complaintKind(title) : null;
   const roles: Role[] =
     type === "service"
       ? ["technician", "service_head"]
-      : ["store_manager", "hr_head", "operations_manager", "cre", "super_admin"];
+      : kind === "staff"
+        ? ["hr_head", "hr_executive"]
+        : kind === "service"
+          ? ["store_manager", "cre", "service_head", "technician", "operations_manager"]
+          : ["cre", "store_manager", "operations_manager"];
 
   const { data } = await supabaseAdmin
     .from("staff_users")
@@ -327,15 +348,42 @@ export async function assignableStaff(type: TicketType, storeName: string | null
     .in("role", roles)
     .order("full_name");
 
-  return (data ?? [])
-    .map((s) => ({
-      id: String(s.id),
-      fullName: String(s.full_name),
-      role: asRole(s.role),
-      storeName: str(s.store_name),
-      sameStore: sameStore(str(s.store_name), storeName),
-    }))
+  const people = (data ?? []).map((s) => ({
+    id: String(s.id),
+    fullName: String(s.full_name),
+    role: asRole(s.role),
+    storeName: str(s.store_name),
+    sameStore: sameStore(str(s.store_name), storeName),
+    corporate: sameStore(str(s.store_name), "CORPORATE OFFICE") || !s.store_name,
+  }));
+
+  return people
+    // store teams only for their own store; corporate people for any store
+    .filter((p) => kind === "staff" || type === "service" || p.sameStore || p.corporate)
     .sort((a, b) => Number(b.sameStore) - Number(a.sameStore));
+}
+
+/** Default owner for a new complaint (automatic routing). */
+async function defaultComplaintOwner(category: string, storeName: string | null) {
+  const kind = complaintKind(category);
+  const order: Role[] =
+    kind === "staff" ? ["hr_head", "hr_executive"] : kind === "service" ? ["store_manager", "cre"] : ["cre", "store_manager"];
+  const people = await assignableStaff("complaint", storeName, category);
+  for (const role of order) {
+    const match =
+      people.find((p) => p.role === role && p.sameStore) ??
+      (kind === "staff" ? people.find((p) => p.role === role) : undefined);
+    if (match) return match;
+  }
+  return null;
+}
+
+/** Who is told about a new complaint, by complaint type. */
+function complaintTeamRoles(category: string): Role[] {
+  const kind = complaintKind(category);
+  if (kind === "staff") return ["hr_head", "hr_executive", "store_manager"];
+  if (kind === "service") return ["cre", "store_manager", "technician", "service_head"];
+  return ["cre", "store_manager"];
 }
 
 // ------------------------------------------------------------------
@@ -360,15 +408,47 @@ export async function announceNewTicket(input: {
   priority: string;
   customer: { name: string | null; mobile: string | null; email?: string | null };
 }) {
-  const recipients = await findRecipients(
-    input.type === "service" ? ["store_manager", "technician", "service_head"] : ["store_manager", "hr_head", "operations_manager", "cre"],
-    input.storeName
-  );
+  const kind = input.type === "complaint" ? complaintKind(input.title) : null;
+
+  // Complaints: give it an owner straight away (CRE / Store Manager / HR).
+  let ownerNote: string | null = null;
+  if (input.type === "complaint") {
+    const owner = await defaultComplaintOwner(input.title, input.storeName);
+    if (owner) {
+      const { error } = await supabaseAdmin
+        .from("complaints")
+        .update({ owner_id: owner.id })
+        .eq("id", input.id)
+        .is("owner_id", null);
+      if (!error) {
+        ownerNote = `Owner: ${owner.fullName} (${ROLE_LABELS[owner.role]})`;
+        await supabaseAdmin.from("ticket_status_history").insert({
+          ticket_type: "complaint",
+          ticket_id: input.id,
+          status: "open",
+          note: `Assigned automatically to ${owner.fullName} (${ROLE_LABELS[owner.role]}).`,
+          action: "assign",
+          actor_name: "System",
+          visibility: "internal",
+        });
+      }
+    }
+  }
+
+  const recipients = [
+    ...(await findRecipients(
+      input.type === "service" ? ["store_manager", "technician", "service_head"] : complaintTeamRoles(input.title),
+      input.storeName
+    )),
+    ...(input.type === "complaint" ? await findDirectors(input.storeName) : []),
+  ];
 
   const headline =
     input.priority === "safety"
       ? `SAFETY ${input.type === "service" ? "service request" : "complaint"}`
-      : `New ${input.type === "service" ? "service request" : "complaint"}`;
+      : kind === "staff"
+        ? "New staff behaviour complaint (confidential)"
+        : `New ${input.type === "service" ? "service request" : "complaint"}`;
 
   await notifyStaff(recipients, {
     ticketType: input.type,
@@ -376,7 +456,7 @@ export async function announceNewTicket(input: {
     ticketNumber: input.number,
     title: headline,
     summary: input.summary,
-    details: [...input.details, `Please acknowledge within ${ACK_HOURS} hours.`],
+    details: [...input.details, ...(ownerNote ? [ownerNote] : []), `Please acknowledge within ${ACK_HOURS} hours.`],
     storeName: input.storeName,
   });
 
@@ -388,7 +468,9 @@ export async function announceNewTicket(input: {
     message:
       input.type === "service"
         ? `We have received your service request. Our team will contact you within ${ACK_HOURS} working hours.`
-        : `We have received your complaint and we are sorry for the trouble. Our team will contact you within ${ACK_HOURS} working hours.`,
+        : kind === "staff"
+          ? `We have received your complaint and we are sorry for your experience. Our HR team will review it and contact you within ${ACK_HOURS} working hours.`
+          : `We have received your complaint and we are sorry for the trouble. Our team will contact you within ${ACK_HOURS} working hours.`,
   });
 }
 
@@ -398,6 +480,7 @@ export async function announceNewTicket(input: {
 
 export type ActionName =
   | "acknowledge"
+  | "take_ownership"
   | "triage"
   | "assign"
   | "start"
@@ -427,6 +510,8 @@ type Plan = {
   status: string;
   history: { note: string | null; visibility: "customer" | "internal" }[];
   customerMessage?: string;
+  /** Link sent with the customer message (default: track page). */
+  customerLink?: string;
   staffAlert?: { ids?: string[]; roles?: Role[]; title: string; summary: string };
 };
 
@@ -435,13 +520,13 @@ export type ActionResult = { ok: true } | { ok: false; error: string; status?: n
 /** Which actions this person can take on this ticket right now. */
 export function availableActions(staff: StaffUser, t: Ticket): ActionName[] {
   if (!canViewTicket(staff, t.type, t)) return [];
-  const manager = isTicketManager(staff, t.type);
+  const manager = isTicketManager(staff, t.type, t);
   const assignee = t.assigneeId === staff.id;
   const worker = manager || assignee;
   const s = t.status;
   const list: ActionName[] = [];
 
-  if (s === "open" && staff.role !== "director") list.push("acknowledge");
+  if (t.type === "service" && s === "open" && staff.role !== "director") list.push("acknowledge");
 
   if (t.type === "service") {
     const active = activeStatuses("service").includes(s);
@@ -455,8 +540,9 @@ export function availableActions(staff: StaffUser, t: Ticket): ActionName[] {
     if (["resolved", "closed"].includes(s) && manager) list.push("reopen");
     if (active && ["service_head", "super_admin", "admin"].includes(staff.role)) list.push("cancel");
   } else {
+    // Received → Take ownership (severity + owner, = acknowledge) → Action in progress → Resolve → customer confirms → Closed
     const active = activeStatuses("complaint").includes(s);
-    if (active && manager) list.push("triage", "assign");
+    if (active && worker) list.push("take_ownership");
     if (["acknowledged", "under_review"].includes(s) && worker) list.push("start");
     if (["acknowledged", "under_review", "in_progress"].includes(s) && worker) list.push("resolve");
     if (s === "resolved" && manager) list.push("close");
@@ -471,7 +557,13 @@ function fail(error: string, status = 400): ActionResult {
   return { ok: false, error, status };
 }
 
-function planAction(staff: StaffUser, t: Ticket, input: ActionInput, assigneeName: string | null): Plan | string {
+function planAction(
+  staff: StaffUser,
+  t: Ticket,
+  input: ActionInput,
+  assigneeName: string | null,
+  assigneeRole: Role | null = null
+): Plan | string {
   const now = new Date().toISOString();
   const note = input.note?.trim() || "";
   const customerNote = input.customerNote?.trim() || "";
@@ -503,6 +595,48 @@ function planAction(staff: StaffUser, t: Ticket, input: ActionInput, assigneeNam
             visibility: "internal",
           },
         ],
+      };
+    }
+
+    case "take_ownership": {
+      const ckind = complaintKind(t.title);
+      const severity = input.severity || t.severity || "";
+      if (!COMPLAINT_SEVERITIES.some((x) => x.value === severity)) return "Choose the severity.";
+      const ownerId = input.assigneeId || t.assigneeId || staff.id;
+      const ownerName = assigneeName ?? (ownerId === staff.id ? staff.fullName : t.assigneeName) ?? "staff";
+      const ownerRole = assigneeRole ?? (ownerId === staff.id ? staff.role : null);
+      const due = addHours(t.createdAt, resolutionHours("complaint", severity, severity));
+      const firstTime = ["open", "acknowledged"].includes(t.status);
+      const newStatus = firstTime ? "under_review" : t.status;
+      const firstName = ownerName.split(" ")[0];
+      const lookedAfter =
+        ckind === "staff"
+          ? "Our HR team is reviewing your complaint."
+          : `Your complaint is being looked into by ${firstName}${ownerRole ? ` (${ROLE_LABELS[ownerRole]})` : ""}.`;
+      return {
+        update: {
+          ...ackFields,
+          severity,
+          priority: severity === "critical" ? "safety" : severity === "high" ? "high" : "normal",
+          resolution_due_at: due,
+          owner_id: ownerId,
+          status: newStatus,
+        },
+        status: newStatus,
+        history: [
+          {
+            note: `Severity ${severity}; owner ${ownerName}; resolve by ${new Date(due).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}.${note ? ` ${note}` : ""}`,
+            visibility: "internal",
+          },
+          ...(firstTime || ownerId !== t.assigneeId ? [{ note: lookedAfter, visibility: "customer" as const }] : []),
+        ],
+        customerMessage: firstTime ? lookedAfter : undefined,
+        staffAlert:
+          ownerId !== staff.id && ownerId !== t.assigneeId
+            ? { ids: [ownerId], title: "Complaint assigned to you", summary: `${t.title} — ${t.contactName ?? ""}`.trim() }
+            : severity === "critical" && t.severity !== "critical"
+              ? { roles: ["store_manager"], title: "CRITICAL complaint", summary: `${t.title} — resolve within 24 hours` }
+              : undefined,
       };
     }
 
@@ -602,9 +736,33 @@ function planAction(staff: StaffUser, t: Ticket, input: ActionInput, assigneeNam
       };
 
     case "resolve": {
-      const types = (t.type === "service" ? SERVICE_RESOLUTIONS : COMPLAINT_RESOLUTIONS).map((r) => r.value);
+      const staffKind = t.type === "complaint" && complaintKind(t.title) === "staff";
+      const types = (t.type === "service" ? SERVICE_RESOLUTIONS : staffKind ? HR_RESOLUTIONS : COMPLAINT_RESOLUTIONS).map(
+        (r) => r.value
+      );
       if (!input.resolutionType || !types.includes(input.resolutionType)) return "Choose how it was resolved.";
-      if (!customerNote) return "Write the message the customer will see (what was done).";
+      const message =
+        customerNote ||
+        (staffKind ? "Our HR team has reviewed your complaint and taken appropriate action. Thank you for telling us." : "");
+      if (!message) return "Write the message the customer will see (what was done).";
+      if (t.type === "complaint") {
+        return {
+          update: {
+            ...ackFields,
+            status: "resolved",
+            resolved_at: now,
+            resolution_type: input.resolutionType,
+            resolution_notes: message,
+          },
+          status: "resolved",
+          history: [
+            { note: message, visibility: "customer" },
+            ...(note ? [{ note, visibility: "internal" as const }] : []),
+          ],
+          customerMessage: `${message} Please tell us if your complaint is solved (it closes automatically in 3 days):`,
+          customerLink: feedbackLink("complaint", t.id),
+        };
+      }
       return {
         update: {
           ...ackFields,
@@ -618,7 +776,8 @@ function planAction(staff: StaffUser, t: Ticket, input: ActionInput, assigneeNam
           { note: customerNote, visibility: "customer" },
           ...(note ? [{ note, visibility: "internal" as const }] : []),
         ],
-        customerMessage: `${customerNote} If anything is still not right, please reply or call us and we will reopen it.`,
+        customerMessage: `${customerNote} Please rate our service (1 minute). If anything is still not right, tell us there:`,
+        customerLink: feedbackLink("service", t.id),
       };
     }
 
@@ -684,8 +843,16 @@ export async function runAction(
 
   // Validate the person being assigned.
   let assigneeName: string | null = null;
+  let assigneeRole: Role | null = null;
+  if (input.action === "take_ownership" && input.assigneeId && input.assigneeId !== staff.id) {
+    const options = await assignableStaff(type, ticket.storeName, ticket.title);
+    const chosen = options.find((o) => o.id === input.assigneeId);
+    if (!chosen && input.assigneeId !== ticket.assigneeId) return fail("Choose a valid owner.");
+    assigneeName = chosen?.fullName ?? ticket.assigneeName;
+    assigneeRole = chosen?.role ?? null;
+  }
   if (input.action === "assign") {
-    const options = await assignableStaff(type, ticket.storeName);
+    const options = await assignableStaff(type, ticket.storeName, ticket.title);
     const chosen = options.find((o) => o.id === input.assigneeId);
     if (!chosen) return fail("Choose a valid person to assign.");
     if (staff.role === "store_manager" && type === "service" && chosen.role === "technician" && !chosen.sameStore) {
@@ -694,7 +861,7 @@ export async function runAction(
     assigneeName = chosen.fullName;
   }
 
-  const plan = planAction(staff, ticket, input, assigneeName);
+  const plan = planAction(staff, ticket, input, assigneeName, assigneeRole);
   if (typeof plan === "string") return fail(plan);
 
   if (Object.keys(plan.update).length > 0) {
@@ -736,6 +903,7 @@ export async function runAction(
         email: ticket.contactEmail,
         ticketNumber: ticket.number,
         message: plan.customerMessage,
+        link: plan.customerLink,
       });
     }
     if (plan.staffAlert) {

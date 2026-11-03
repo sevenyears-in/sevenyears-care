@@ -12,9 +12,10 @@ import {
   StatusBadge,
 } from "@/components/SiteChrome";
 import { formatDate, formatDateTime } from "@/lib/helpers";
-import { CUSTOMER_STATUS_LABELS } from "@/lib/sla";
+import { complaintKind, CUSTOMER_STATUS_LABELS, customerComplaintStatus } from "@/lib/sla";
 
-function label(status: string) {
+function label(status: string, complaintCategory?: string | null) {
+  if (complaintCategory !== undefined) return customerComplaintStatus(status, complaintKind(complaintCategory));
   return CUSTOMER_STATUS_LABELS[status] ?? status.replace(/_/g, " ");
 }
 
@@ -32,10 +33,11 @@ type TrackResult = {
   updatedAt: string;
   details: Detail[];
   history: HistoryItem[];
+  feedbackUrl?: string | null;
 };
 
 const serviceSteps = ["open", "acknowledged", "assigned", "in_progress", "resolved", "closed"];
-const complaintSteps = ["open", "acknowledged", "under_review", "in_progress", "resolved", "closed"];
+const complaintSteps = ["open", "under_review", "in_progress", "resolved", "closed"];
 
 export default function TrackRequestPage() {
   const [ticketNumber, setTicketNumber] = useState("");
@@ -174,8 +176,13 @@ function TrackResultCard({ result }: { result: TrackResult }) {
   const steps = result.type === "service" ? serviceSteps : complaintSteps;
   const stoppedEarly = result.status === "cancelled";
   const currentIndex = steps.indexOf(
-    ["awaiting_parts", "awaiting_approval"].includes(result.status) ? "in_progress" : result.status
+    ["awaiting_parts", "awaiting_approval"].includes(result.status)
+      ? "in_progress"
+      : result.type === "complaint" && result.status === "acknowledged"
+        ? "under_review"
+        : result.status
   );
+  const cat = result.type === "complaint" ? result.title : undefined;
 
   return (
     <div className={`${cardClass} mt-6`}>
@@ -190,11 +197,11 @@ function TrackResultCard({ result }: { result: TrackResult }) {
             Raised {formatDateTime(result.createdAt)}
           </p>
         </div>
-        <StatusBadge status={result.status} label={label(result.status)} />
+        <StatusBadge status={result.status} label={label(result.status, cat)} />
       </div>
 
       {!stoppedEarly && (
-        <ol className="mt-6 grid grid-cols-6 gap-1" aria-label="Progress">
+        <ol className={`mt-6 grid gap-1 ${steps.length === 5 ? "grid-cols-5" : "grid-cols-6"}`} aria-label="Progress">
           {steps.map((step, index) => {
             const done = index <= currentIndex;
             return (
@@ -207,12 +214,23 @@ function TrackResultCard({ result }: { result: TrackResult }) {
                     done ? "text-black" : "text-black/40"
                   }`}
                 >
-                  {label(step)}
+                  {label(step, cat)}
                 </p>
               </li>
             );
           })}
         </ol>
+      )}
+
+      {result.feedbackUrl && (
+        <a
+          href={result.feedbackUrl}
+          className="mt-6 block rounded-2xl bg-[#ff5e79] px-5 py-4 text-center font-bold text-white"
+        >
+          {result.type === "complaint" && result.status === "resolved"
+            ? "Is it solved? Confirm & rate us"
+            : "Rate our service"}
+        </a>
       )}
 
       {result.notes && (
@@ -257,7 +275,7 @@ function TrackResultCard({ result }: { result: TrackResult }) {
             {[...result.history].reverse().map((item, index) => (
               <li key={`${item.createdAt}-${index}`} className="relative">
                 <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full bg-[#ff5e79] ring-4 ring-white" />
-                <p className="text-sm font-bold">{label(item.status)}</p>
+                <p className="text-sm font-bold">{label(item.status, cat)}</p>
                 <p className="text-xs text-black/50">{formatDateTime(item.createdAt)}</p>
                 {item.note && <p className="mt-1 text-sm text-black/70">{item.note}</p>}
               </li>
