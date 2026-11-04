@@ -76,6 +76,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
           { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
           { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
           { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
+          { href: "/staff/admin/zoho-import", label: "Import Warranties from Zoho", icon: "📥" },
           { href: "/staff/admin/extended-warranty", label: "Extended Warranty & Payments", icon: "💳" },
         ]
       : []),

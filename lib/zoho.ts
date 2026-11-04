@@ -231,12 +231,17 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
     );
   }
 
+  return billFromInvoice(match);
+}
+
+/** Full bill (lines, categories, customer) for one invoice from the Zoho list. */
+async function billFromInvoice(match: Obj, categoryCache?: Map<string, string>): Promise<Bill> {
   const detail = obj((await zohoGet(`invoices/${str(match.invoice_id)}`)).invoice);
   const lineItems = arr(detail.line_items);
 
   // Item categories are not on the bill lines, so look the items up.
   const itemIds = [...new Set(lineItems.map((l) => str(l.item_id)).filter(Boolean))];
-  const categories = await fetchItemCategories(itemIds);
+  const categories = await fetchItemCategories(itemIds, categoryCache);
 
   // Customer mobile / address
   let mobile = "";
@@ -285,6 +290,37 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
   };
 }
 
+// ------------------------------------------------------------------
+// Bulk import: list bills in a date range, then read each one
+// ------------------------------------------------------------------
+
+export type InvoiceListItem = { invoiceId: string; billNumber: string; billDate: string; status: string; raw: Obj };
+
+/** One page (200) of bills between two dates, oldest first. */
+export async function listInvoices(from: string, to: string, page: number) {
+  const data = await zohoGet("invoices", {
+    date_start: from,
+    date_end: to,
+    per_page: "200",
+    page: String(page),
+    sort_column: "date",
+    sort_order: "A",
+  });
+  const invoices: InvoiceListItem[] = arr(data.invoices).map((inv) => ({
+    invoiceId: str(inv.invoice_id),
+    billNumber: str(inv.invoice_number),
+    billDate: str(inv.date),
+    status: str(inv.status).toLowerCase(),
+    raw: inv,
+  }));
+  return { invoices, hasMore: Boolean(obj(data.page_context).has_more_page) };
+}
+
+/** Full bill for an invoice from listInvoices (categoryCache saves repeat item lookups). */
+export async function fetchBillFromList(inv: InvoiceListItem, categoryCache: Map<string, string>) {
+  return billFromInvoice(inv.raw, categoryCache);
+}
+
 export type InvoiceSummary = {
   billNumber: string;
   billDate: string;
@@ -325,8 +361,10 @@ export async function fetchInvoiceByNumber(billNumber: string): Promise<InvoiceS
   };
 }
 
-async function fetchItemCategories(itemIds: string[]) {
+async function fetchItemCategories(allIds: string[], cache?: Map<string, string>) {
   const result = new Map<string, string>();
+  if (cache) for (const id of allIds) if (cache.has(id)) result.set(id, cache.get(id)!);
+  const itemIds = allIds.filter((id) => !result.has(id));
   if (itemIds.length === 0) return result;
 
   const readCategory = (item: Obj) =>
@@ -352,6 +390,7 @@ async function fetchItemCategories(itemIds: string[]) {
     }
   }
 
+  if (cache) for (const id of itemIds) cache.set(id, result.get(id) ?? "");
   return result;
 }
 

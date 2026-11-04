@@ -4,6 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/SiteChrome";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
+import { CompleteWarrantyDetails } from "@/components/CompleteWarrantyDetails";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
 
 // Staff: full details of one warranty (opened from Warranties → View).
@@ -140,6 +141,14 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
+        {(w.serial_number === "Not recorded" || w.customer_address === "Not recorded") && (
+          <CompleteWarrantyDetails
+            id={w.id}
+            model={w.model_number}
+            needsSerial={w.serial_number === "Not recorded"}
+            needsAddress={w.customer_address === "Not recorded"}
+          />
+        )}
         {sections.map((section) => (
           <div key={section.title} className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
             <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">{section.title}</p>
