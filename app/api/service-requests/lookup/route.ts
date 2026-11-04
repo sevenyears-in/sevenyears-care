@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       warrantyNumber: w.warranty_number,
       productName: w.product_name,
       model: w.model_number,
-      serialEnd: String(w.serial_number ?? "").slice(-4),
+      serialEnd: w.serial_number && w.serial_number !== "Not recorded" ? String(w.serial_number).slice(-4) : "",
       store: w.store_name,
       billDate: w.bill_date,
       active: w.status === "active",

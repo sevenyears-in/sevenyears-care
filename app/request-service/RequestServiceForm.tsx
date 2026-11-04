@@ -385,7 +385,7 @@ export default function RequestServiceForm({
                       <span>
                         <span className="font-bold">{i.productName}</span>
                         <span className="block text-xs text-black/55">
-                          Model {i.model} · Serial …{i.serialEnd}
+                          Model {i.model}{i.serialEnd ? ` · Serial …${i.serialEnd}` : ""}
                           {i.store ? ` · ${i.store}` : ""} ·{" "}
                           {i.active ? (i.underWarranty ? "Under warranty" : "Warranty ended (chargeable)") : "Not active"}
                         </span>
