@@ -21,6 +21,7 @@ const POLL_MS = 30_000;
 
 function alertHref(a: LiveAlert) {
   if (/explanation is needed/i.test(a.title)) return "/staff/explanations";
+  if (/extended warranty/i.test(a.title)) return "/staff/extended-warranty";
   if (a.ticket_id) return `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`;
   return /feedback/i.test(a.title) ? "/staff/feedback" : "/staff/alerts";
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { extendedSettings } from "@/lib/extended-warranty";
 import { requireStaff } from "@/lib/auth";
 import { isISODate } from "@/lib/helpers";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       rows,
       ineligible,
       categoriesConfigured,
+      extended: await extendedSettings().then((x) => ({ price: x.price, months: x.months })),
     });
   } catch (error) {
     if (error instanceof ZohoError) {

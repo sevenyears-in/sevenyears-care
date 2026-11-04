@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDate, todayISO } from "@/lib/helpers";
-import { EXTENDED_WARRANTY } from "@/lib/site-config";
+import { eligibility, extendedSettings, rupees, warrantyByToken } from "@/lib/extended-warranty";
 import { WARRANTY_TERMS } from "@/lib/certificate-pdf";
 
 type PageProps = {
@@ -26,6 +26,11 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
 
   if (error) console.error("Warranty certificate error:", error);
   if (!w) notFound();
+
+  // Offer the extended warranty when it can still be bought.
+  const settings = await extendedSettings();
+  const full = await warrantyByToken(token);
+  const offer = full ? await eligibility(full, settings).catch(() => null) : null;
 
   const today = todayISO();
   const expired = w.warranty_expiry_date < today;
@@ -116,7 +121,15 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
                       : "Not purchased"}
                   </p>
                   {w.extended_warranty_purchased && (
-                    <p className="mt-1 text-xs text-black/50">{EXTENDED_WARRANTY.feeLabel} plan</p>
+                    <p className="mt-1 text-xs text-black/50">+{settings.months} months plan</p>
+                  )}
+                  {!w.extended_warranty_purchased && offer?.ok && (
+                    <Link
+                      href={`/extend/${w.verification_token}`}
+                      className="mt-3 inline-flex rounded-xl bg-[#ff5e79] px-4 py-2 text-sm font-bold text-white shadow-sm shadow-[#ff5e79]/30"
+                    >
+                      Add +{settings.months} months · {rupees(offer.price)} →
+                    </Link>
                   )}
                 </div>
               </div>

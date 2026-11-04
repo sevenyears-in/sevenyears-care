@@ -6,7 +6,6 @@ import path from "node:path";
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import { embedPoppins } from "@/lib/pdf-fonts";
 import { formatDate } from "@/lib/helpers";
-import { EXTENDED_WARRANTY } from "@/lib/site-config";
 import { qrMatrix } from "@/lib/qr";
 
 export type CertificateData = {
@@ -189,7 +188,7 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
     [
       "Extended Warranty",
       w.extended_warranty_purchased
-        ? `${formatDate(w.extended_warranty_start_date)} to ${formatDate(w.extended_warranty_expiry_date)} (${safe(EXTENDED_WARRANTY.feeLabel)})`
+        ? `${formatDate(w.extended_warranty_start_date)} to ${formatDate(w.extended_warranty_expiry_date)}`
         : "Not purchased",
     ],
     ["Status", w.status === "active" ? "Active" : "Void"],

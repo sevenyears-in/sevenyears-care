@@ -60,6 +60,9 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
     ...(seesFeedback ? [{ href: "/staff/feedback", label: "Feedback" }] : []),
     { href: "/staff/register", label: "Register Warranty" },
     { href: "/staff/warranties", label: "Warranties" },
+    ...(["super_admin", "admin", "director", "service_head", "store_manager", "technician", "cre"].includes(role)
+      ? [{ href: "/staff/extended-warranty", label: "Ext. Warranty" }]
+      : []),
   ];
 
   // Admin pages live under one "Settings" menu so the top bar stays short.
@@ -76,6 +79,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
           { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
           { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
           { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
+          { href: "/staff/admin/extended-warranty", label: "Extended Warranty & Payments", icon: "💳" },
         ]
       : []),
   ];

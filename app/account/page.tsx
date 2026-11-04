@@ -136,6 +136,14 @@ export default async function AccountPage() {
                   >
                     Complaint about this purchase
                   </Link>
+                  {status === "active" && !w.extended_warranty_purchased && (
+                    <Link
+                      href={`/extend/${w.verification_token}`}
+                      className="rounded-xl bg-[#8883d7] px-3 py-2 text-xs font-bold text-white"
+                    >
+                      + Extended warranty
+                    </Link>
+                  )}
                   {rateLink && (
                     <a href={rateLink} className={rateButton}>
                       ★ Rate your purchase

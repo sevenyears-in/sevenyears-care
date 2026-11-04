@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/auth";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
 import { addMonths, cleanMobile, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
-import { EXTENDED_WARRANTY } from "@/lib/site-config";
+import { extendedSettings } from "@/lib/extended-warranty";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
 import { fetchBill, ZohoError } from "@/lib/zoho";
 
@@ -117,6 +117,7 @@ export async function POST(request: Request) {
 
     // ---------------- Build records ----------------
     const startDate = bill.billDate;
+    const ext = await extendedSettings(); // current price / months (Super Admin settings)
     const records = [];
     const usedNumbers = new Set<string>();
 
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
       const standardExpiry = addMonths(startDate, row.standardMonths);
       const extendedStart = item.extended ? standardExpiry : null;
       const extendedExpiry = item.extended
-        ? addMonths(standardExpiry, EXTENDED_WARRANTY.months)
+        ? addMonths(standardExpiry, ext.months)
         : null;
 
       let number = warrantyNumber();
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
         warranty_start_date: startDate,
         standard_warranty_expiry_date: standardExpiry,
         extended_warranty_purchased: item.extended,
-        extended_warranty_fee: item.extended ? EXTENDED_WARRANTY.fee : 0,
+        extended_warranty_fee: item.extended ? ext.price : 0,
         extended_warranty_start_date: extendedStart,
         extended_warranty_expiry_date: extendedExpiry,
         warranty_expiry_date: extendedExpiry ?? standardExpiry,

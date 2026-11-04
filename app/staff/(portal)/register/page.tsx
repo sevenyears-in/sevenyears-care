@@ -6,6 +6,11 @@ import { ErrorBox, inputClass, labelClass, phoneInputClass } from "@/components/
 import { addMonths, formatDate, todayISO } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
 
+const extInfo = (l: { extended?: { price: number; months: number } }) => ({
+  months: l.extended?.months ?? EXTENDED_WARRANTY.months,
+  label: `₹${(l.extended?.price ?? EXTENDED_WARRANTY.fee).toLocaleString("en-IN")}`,
+});
+
 type Row = {
   key: string;
   lineItemId: string;
@@ -38,6 +43,7 @@ type Lookup = {
   };
   rows: Row[];
   ineligible: Ineligible[];
+  extended?: { price: number; months: number };
   categoriesConfigured: boolean;
 };
 
@@ -453,7 +459,7 @@ export default function RegisterWarrantyStaffPage() {
               {pendingRows.map((row, index) => {
                 const e = entries[row.key];
                 const standardEnd = addMonths(lookup.bill.billDate, row.standardMonths);
-                const extendedEnd = addMonths(standardEnd, EXTENDED_WARRANTY.months);
+                const extendedEnd = addMonths(standardEnd, extInfo(lookup).months);
 
                 return (
                   <section key={row.key} className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
@@ -527,7 +533,7 @@ export default function RegisterWarrantyStaffPage() {
                             className="h-4 w-4 accent-[#ff5e79]"
                           />
                           <span>
-                            <b>Extended Warranty</b> +{EXTENDED_WARRANTY.months} months ({EXTENDED_WARRANTY.feeLabel})
+                            <b>Extended Warranty</b> +{extInfo(lookup).months} months ({extInfo(lookup).label})
                             {e.extended && (
                               <span className="text-black/55"> — covered until {formatDate(extendedEnd)}</span>
                             )}

@@ -36,8 +36,9 @@ export const COMPLAINT_CATEGORIES = [
 ];
 
 /** Extended warranty sold per item at the counter. */
+// Defaults only — the live price is set by the Super Admin (Settings → Extended Warranty).
 export const EXTENDED_WARRANTY = {
   months: 6,
-  fee: 1200,
-  feeLabel: "₹1,200",
+  fee: 1499,
+  feeLabel: "₹1,499",
 };

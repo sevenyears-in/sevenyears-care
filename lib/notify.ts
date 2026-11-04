@@ -314,8 +314,9 @@ export async function findStaffByIds(ids: (string | null | undefined)[]): Promis
 }
 
 export type StaffAlert = {
-  ticketType: TicketType;
-  ticketId: string;
+  /** null for alerts that are not about a service request / complaint (they use `link`). */
+  ticketType: TicketType | null;
+  ticketId: string | null;
   ticketNumber: string;
   /** Short headline, e.g. "New service request" */
   title: string;
@@ -335,7 +336,9 @@ export async function notifyStaff(recipients: Recipient[], alert: StaffAlert, ex
   const list = [...unique.values()];
   if (list.length === 0) return;
 
-  const link = alert.link || staffTicketLink(alert.ticketType, alert.ticketId);
+  const link =
+    alert.link ||
+    (alert.ticketType && alert.ticketId ? staffTicketLink(alert.ticketType, alert.ticketId) : `${siteUrl()}/staff/alerts`);
   const body = [alert.summary, ...(alert.details ?? [])].filter(Boolean).join("\n");
 
   try {
