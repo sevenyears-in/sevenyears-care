@@ -94,6 +94,38 @@ async function writeCache(value: Cache) {
   }
 }
 
+let refreshing: Promise<unknown> | null = null;
+
+function refreshInBackground(cache: Cache) {
+  if (!refreshing) {
+    refreshing = refreshFromZoho(cache)
+      .catch(() => null)
+      .finally(() => {
+        refreshing = null;
+      });
+  }
+  return refreshing;
+}
+
+async function refreshFromZoho(cache: Cache | null) {
+  try {
+    const stores = await fetchZohoStores();
+    const fetchedAt = new Date().toISOString();
+    await writeCache({ fetchedAt, stores, lastError: null });
+    return { stores, fetchedAt, error: null as string | null };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error("Zoho store list refresh failed:", error);
+    // Keep the last good list; try again in a few minutes.
+    await writeCache({
+      fetchedAt: cache?.fetchedAt ?? new Date(Date.now() - REFRESH_MS + 5 * 60 * 1000).toISOString(),
+      stores: cache?.stores ?? [],
+      lastError: error,
+    });
+    return { stores: cache?.stores ?? [], fetchedAt: cache?.fetchedAt ?? null, error };
+  }
+}
+
 /** Old stores table — used only until Zoho POS is connected. */
 async function legacyStores(): Promise<ZohoStore[]> {
   try {
@@ -135,22 +167,16 @@ export async function getStores(force = false): Promise<StoreList> {
   let fetchedAt = cache?.fetchedAt ?? null;
   let error: string | null = cache?.lastError ?? null;
 
-  if (force || !fresh) {
-    try {
-      stores = await fetchZohoStores();
-      fetchedAt = new Date().toISOString();
-      error = null;
-      await writeCache({ fetchedAt, stores, lastError: null });
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-      console.error("Zoho store list refresh failed:", error);
-      // Keep the last good list; try again in a few minutes.
-      await writeCache({
-        fetchedAt: cache?.fetchedAt ?? new Date(Date.now() - REFRESH_MS + 5 * 60 * 1000).toISOString(),
-        stores,
-        lastError: error,
-      });
-    }
+  if (force || !cache) {
+    // Asked to refresh now (Zoho POS page), or nothing saved yet: wait for Zoho.
+    const result = await refreshFromZoho(cache);
+    stores = result.stores;
+    fetchedAt = result.fetchedAt;
+    error = result.error;
+  } else if (!fresh) {
+    // Use the saved list straight away and refresh it in the background,
+    // so nobody waits for Zoho POS (reading it can take several seconds).
+    void refreshInBackground(cache);
   }
 
   return {

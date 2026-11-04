@@ -124,6 +124,9 @@ async function accessToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
     cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => {
+    throw new ZohoError("Could not reach Zoho POS (sign-in). Please try again.");
   });
 
   const data = (await response.json().catch(() => ({}))) as {
@@ -154,9 +157,17 @@ async function zohoGet(path: string, query: Record<string, string> = {}): Promis
   url.searchParams.set("organization_id", config.organizationId);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
 
+  // Never let a slow Zoho POS hold a page for long.
   const response = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${await accessToken()}` },
     cache: "no-store",
+    signal: AbortSignal.timeout(12_000),
+  }).catch((error) => {
+    throw new ZohoError(
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Zoho POS is taking too long to answer. Please try again."
+        : "Could not reach Zoho POS. Please try again."
+    );
   });
 
   const data = (await response.json().catch(() => ({}))) as ZohoJson;

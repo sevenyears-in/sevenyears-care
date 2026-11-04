@@ -17,7 +17,8 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     try {
       const response = await fetch(input, {
         ...init,
-        signal: init?.signal ?? AbortSignal.timeout(safe ? 15_000 : 25_000),
+        // A normal read takes well under a second: give up on a stuck one quickly and retry.
+        signal: init?.signal ?? AbortSignal.timeout(safe ? 6_000 : 20_000),
       });
       if (safe && attempt < attempts && [502, 503, 504].includes(response.status)) {
         await new Promise((r) => setTimeout(r, 250 * attempt));
