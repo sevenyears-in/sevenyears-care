@@ -9,6 +9,8 @@ import { listTickets, needsActionFrom, rawSla, seesAllStores, type Ticket } from
 import type { StaffUser } from "@/lib/auth";
 import { TicketTable } from "@/components/TicketUI";
 import { InstallAppCard } from "@/components/InstallApp";
+import { ExtendedWarrantySection } from "@/components/ExtendedWarrantySection";
+import { canSeeExtensions } from "@/lib/extended-access";
 
 export default async function StaffDashboard() {
   const staff = await getCurrentStaff();
@@ -111,6 +113,8 @@ export default async function StaffDashboard() {
           extra={{ label: "Not assigned", value: complaintTickets.filter((t) => !t.assigneeId).length }}
         />
       )}
+
+      {canSeeExtensions(staff.role) && <ExtendedWarrantySection staff={staff} />}
 
       <section className="space-y-4">
         <h2 className="text-xl font-bold">Warranties</h2>
