@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { feedbackLink } from "@/lib/feedback-token";
-import { notifyCustomer } from "@/lib/notify";
+import { notifyCustomer, siteUrl } from "@/lib/notify";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/auth";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       if (customerAddress.length < 5) errors.push(`${label}: customer address is required.`);
       if (alternateMobile && !isValidMobile(alternateMobile)) errors.push(`${label}: the alternate mobile number is not valid.`);
       if (alternateMobile && alternateMobile === customerMobile) errors.push(`${label}: the alternate mobile is the same as the customer's.`);
-      if (alternateMobile && !alternateName) errors.push(`${label}: enter the alternate contact's name.`);
+      if (alternateMobile && !alternateName) errors.push(`${label}: enter the product user's name.`);
       if ([modelNumber, serialNumber, customerName, customerAddress].some((v) => NON_ENGLISH.test(v)))
         errors.push(`${label}: please type details in English letters (needed for the PDF certificate).`);
       if (extended && row && !row.extendedAllowed)
@@ -202,13 +202,12 @@ export async function POST(request: Request) {
     // Customer login: User ID = mobile, first password = last 4 digits of the bill number.
     const accounts: { mobile: string; name: string; created: boolean; password: string | null }[] = [];
     const seen = new Set<string>();
-    // The gift user (alternate contact) gets a login too, so they can see the warranty in My Account.
-    const people = records.flatMap((r) => [
-      { mobile: String(r.customer_mobile), name: String(r.customer_name) },
-      ...("alternate_mobile" in r && r.alternate_mobile
-        ? [{ mobile: String(r.alternate_mobile), name: String(r.alternate_name ?? "") }]
-        : []),
-    ]);
+    // Login goes to the product's contact: the user when it's a gift, otherwise the buyer.
+    const people = records.map((r) =>
+      "alternate_mobile" in r && r.alternate_mobile
+        ? { mobile: String(r.alternate_mobile), name: String(r.alternate_name ?? "") }
+        : { mobile: String(r.customer_mobile), name: String(r.customer_name) }
+    );
     for (const p of people) {
       const mobile = p.mobile;
       if (seen.has(mobile)) continue;
@@ -222,6 +221,36 @@ export async function POST(request: Request) {
         created: result.created,
         password: result.created ? billPassword(bill.billNumber) : null,
       });
+    }
+
+    // Gift: tell the product user their warranty is registered, with their login.
+    const userMessages = new Map<string, { name: string; products: string[]; token: string }>();
+    for (const r of records) {
+      if (!("alternate_mobile" in r) || !r.alternate_mobile) continue;
+      const c = (created ?? []).find((x) => x.warranty_number === r.warranty_number);
+      const entry = userMessages.get(String(r.alternate_mobile)) ?? {
+        name: String(r.alternate_name ?? ""),
+        products: [] as string[],
+        token: c?.verification_token ?? "",
+      };
+      entry.products.push(String(r.product_name));
+      userMessages.set(String(r.alternate_mobile), entry);
+    }
+    for (const [mobile, u] of userMessages) {
+      const login = accounts.find((a) => a.mobile === mobile);
+      after(() =>
+        notifyCustomer({
+          name: u.name,
+          mobile,
+          ticketNumber: bill.billNumber,
+          message: `Your Seven Years warranty is registered for: ${u.products.join(", ")}. For service, use your mobile number and bill no. ${bill.billNumber}.${
+            login?.created && login.password
+              ? ` My Account login — User ID: ${mobile}, password: ${login.password}.`
+              : ""
+          } Your warranty certificate:`,
+          link: u.token ? `${siteUrl()}/warranty/${u.token}` : `${siteUrl()}/account`,
+        }).catch((error) => console.error("Product user message failed:", error))
+      );
     }
 
     // Sales feedback (one short form per bill) — sent once the items are handed over and registered.

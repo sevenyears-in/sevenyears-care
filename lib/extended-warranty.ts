@@ -123,6 +123,9 @@ export type WarrantyForExtension = {
   serial_number: string;
   customer_name: string;
   customer_mobile: string;
+  /** The buyer, when the product user (gift) is different — customer_* then holds the user. */
+  buyer_name?: string;
+  buyer_mobile?: string;
   standard_warranty_expiry_date: string;
   extended_warranty_purchased: boolean;
   warranty_expiry_date: string;
@@ -130,17 +133,34 @@ export type WarrantyForExtension = {
 };
 
 const W_COLS =
-  "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, category_name, serial_number, customer_name, customer_mobile, standard_warranty_expiry_date, extended_warranty_purchased, warranty_expiry_date, status";
+  "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, category_name, serial_number, customer_name, customer_mobile, alternate_name, alternate_mobile, standard_warranty_expiry_date, extended_warranty_purchased, warranty_expiry_date, status";
+
+/** Messages about the warranty go to the product user when one was given (gift), else the buyer. */
+function asContact(row: unknown): WarrantyForExtension | null {
+  if (!row) return null;
+  const { alternate_name, alternate_mobile, ...w } = row as WarrantyForExtension & {
+    alternate_name: string | null;
+    alternate_mobile: string | null;
+  };
+  if (!alternate_mobile) return w;
+  return {
+    ...w,
+    buyer_name: w.customer_name,
+    buyer_mobile: w.customer_mobile,
+    customer_name: alternate_name || w.customer_name,
+    customer_mobile: alternate_mobile,
+  };
+}
 
 export async function warrantyByToken(token: string) {
   if (!/^[a-f0-9]{16,64}$/i.test(token)) return null;
   const { data } = await supabaseAdmin.from("warranties").select(W_COLS).eq("verification_token", token).maybeSingle();
-  return (data as WarrantyForExtension | null) ?? null;
+  return asContact(data);
 }
 
 export async function warrantyById(id: string) {
   const { data } = await supabaseAdmin.from("warranties").select(W_COLS).eq("id", id).maybeSingle();
-  return (data as WarrantyForExtension | null) ?? null;
+  return asContact(data);
 }
 
 export type ExtensionRequest = {

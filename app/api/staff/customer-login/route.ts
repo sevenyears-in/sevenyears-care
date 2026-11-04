@@ -26,10 +26,15 @@ export async function POST(request: Request) {
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Warranty not found." }, { status: 404 });
     const { data } = await supabaseAdmin
       .from("warranties")
-      .select("customer_mobile, customer_name, bill_number")
+      .select("customer_mobile, customer_name, alternate_name, alternate_mobile, bill_number")
       .eq("id", id)
       .maybeSingle();
-    w = data ?? null;
+    // Gift: the login belongs to the product user.
+    w = data
+      ? data.alternate_mobile
+        ? { customer_mobile: data.alternate_mobile, customer_name: data.alternate_name, bill_number: data.bill_number }
+        : { customer_mobile: data.customer_mobile, customer_name: data.customer_name, bill_number: data.bill_number }
+      : null;
   }
   if (!w) return NextResponse.json({ error: "Warranty not found." }, { status: 404 });
 

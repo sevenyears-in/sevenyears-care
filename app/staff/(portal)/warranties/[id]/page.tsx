@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { StatusBadge } from "@/components/SiteChrome";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { CompleteWarrantyDetails } from "@/components/CompleteWarrantyDetails";
+import { ProductUserEditor } from "@/components/ProductUserEditor";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
 
 // Staff: full details of one warranty (opened from Warranties → View).
@@ -62,15 +63,11 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
 
   const sections: { title: string; rows: { label: string; value: string | null }[] }[] = [
     {
-      title: "Customer",
+      title: "Buyer",
       rows: [
         { label: "Name", value: w.customer_name },
         { label: "Mobile", value: w.customer_mobile ? `+91 ${w.customer_mobile}` : null },
         { label: "Address", value: w.customer_address },
-        {
-          label: "User / alternate",
-          value: w.alternate_mobile ? `${w.alternate_name ?? ""} · +91 ${w.alternate_mobile}` : null,
-        },
       ],
     },
     {
@@ -168,6 +165,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
             </dl>
           </div>
         ))}
+        <ProductUserEditor id={w.id} name={w.alternate_name} mobile={w.alternate_mobile} />
         <ResetCustomerLogin warrantyId={w.id} />
       </div>
     </div>

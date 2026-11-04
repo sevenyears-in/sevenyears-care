@@ -53,6 +53,7 @@ type Entry = {
   customerName: string;
   customerMobile: string;
   customerAddress: string;
+  userSame: boolean; // the person who will use it is the buyer
   alternateName: string;
   alternateMobile: string;
   extended: boolean;
@@ -131,6 +132,7 @@ export default function RegisterWarrantyStaffPage() {
           customerName: result.bill.customer.name,
           customerMobile: result.bill.customer.mobile,
           customerAddress: result.bill.customer.address,
+          userSame: true,
           alternateName: "",
           alternateMobile: "",
           extended: false,
@@ -160,6 +162,7 @@ export default function RegisterWarrantyStaffPage() {
           customerName: source.customerName,
           customerMobile: source.customerMobile,
           customerAddress: source.customerAddress,
+          userSame: source.userSame,
           alternateName: source.alternateName,
           alternateMobile: source.alternateMobile,
         };
@@ -184,11 +187,13 @@ export default function RegisterWarrantyStaffPage() {
       if (!/^[6-9]\d{9}$/.test(e.customerMobile.replace(/\D/g, "")))
         problems.push(`${label}: enter a valid 10-digit mobile number.`);
       if (e.customerAddress.trim().length < 5) problems.push(`${label}: enter the customer address.`);
-      const altMobile = e.alternateMobile.replace(/\D/g, "");
-      if (altMobile && !/^[6-9]\d{9}$/.test(altMobile)) problems.push(`${label}: the alternate mobile number is not valid.`);
-      if (altMobile && altMobile === e.customerMobile.replace(/\D/g, ""))
-        problems.push(`${label}: the alternate mobile is the same as the customer's.`);
-      if (altMobile && !e.alternateName.trim()) problems.push(`${label}: enter the alternate contact's name.`);
+      if (!e.userSame) {
+        const altMobile = e.alternateMobile.replace(/\D/g, "");
+        if (!e.alternateName.trim()) problems.push(`${label}: enter the product user's name.`);
+        if (!/^[6-9]\d{9}$/.test(altMobile)) problems.push(`${label}: enter the product user's 10-digit mobile number.`);
+        else if (altMobile === e.customerMobile.replace(/\D/g, ""))
+          problems.push(`${label}: the user's mobile is the same as the buyer's — tick "User is same as buyer".`);
+      }
       if ([e.modelNumber, e.serialNumber, e.customerName, e.customerAddress, e.alternateName].some((v) => /[^\x20-\x7E\xA0-\xFF\r\n\t]/.test(v)))
         problems.push(`${label}: type all details in English letters (needed for the PDF certificate).`);
     });
@@ -207,7 +212,10 @@ export default function RegisterWarrantyStaffPage() {
         body: JSON.stringify({
           billNumber: lookup.bill.billNumber,
           billDate: lookup.bill.billDate,
-          items: pendingRows.map((row) => ({ key: row.key, ...entries[row.key] })),
+          items: pendingRows.map((row) => {
+            const { userSame, ...e } = entries[row.key];
+            return { key: row.key, ...e, ...(userSame ? { alternateName: "", alternateMobile: "" } : {}) };
+          }),
         }),
       });
       const data = await response.json();
@@ -502,10 +510,10 @@ export default function RegisterWarrantyStaffPage() {
                       <Field label="Serial Number *">
                         <input value={e.serialNumber} onChange={(ev) => setField(row.key, "serialNumber", ev.target.value)} className={smallInput} />
                       </Field>
-                      <Field label="Customer Name *">
+                      <Field label="Buyer Name *">
                         <input value={e.customerName} onChange={(ev) => setField(row.key, "customerName", ev.target.value)} className={smallInput} />
                       </Field>
-                      <Field label="Mobile Number *">
+                      <Field label="Buyer Mobile *">
                         <div className="flex">
                           <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-3 text-xs font-semibold">+91</span>
                           <input
@@ -519,7 +527,7 @@ export default function RegisterWarrantyStaffPage() {
                         </div>
                       </Field>
                       <div className="sm:col-span-2 lg:col-span-4">
-                        <Field label="Customer Address *">
+                        <Field label="Address *">
                           <textarea
                             rows={2}
                             value={e.customerAddress}
@@ -529,31 +537,46 @@ export default function RegisterWarrantyStaffPage() {
                         </Field>
                       </div>
                       <div className="rounded-2xl bg-[#f7f9fb] p-3 sm:col-span-2 lg:col-span-4">
-                        <p className="text-xs font-bold text-black/60">
-                          🎁 Gift? Who will use this product? <span className="font-normal text-black/45">(optional — they can also request service with their own number)</span>
-                        </p>
-                        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                          <Field label="User / alternate contact name">
-                            <input
-                              value={e.alternateName}
-                              onChange={(ev) => setField(row.key, "alternateName", ev.target.value)}
-                              className={smallInput}
-                            />
-                          </Field>
-                          <Field label="Their mobile number">
-                            <div className="flex">
-                              <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-white px-3 text-xs font-semibold">+91</span>
-                              <input
-                                type="tel"
-                                inputMode="numeric"
-                                maxLength={10}
-                                value={e.alternateMobile}
-                                onChange={(ev) => setField(row.key, "alternateMobile", ev.target.value.replace(/\D/g, ""))}
-                                className={smallPhone}
-                              />
+                        <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={e.userSame}
+                            onChange={(ev) => setField(row.key, "userSame", ev.target.checked)}
+                            className="h-4 w-4 accent-[#11b8d0]"
+                          />
+                          User is same as buyer
+                          <span className="text-xs font-normal text-black/45">— untick if it is a gift</span>
+                        </label>
+                        {!e.userSame && (
+                          <>
+                            <p className="mt-2 text-xs text-black/55">
+                              🎁 The user&apos;s number becomes the contact number for this product: their login (User ID = their
+                              mobile, password = last 4 digits of the bill), service updates and warranty messages go to them.
+                            </p>
+                            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                              <Field label="Product user's name *">
+                                <input
+                                  value={e.alternateName}
+                                  onChange={(ev) => setField(row.key, "alternateName", ev.target.value)}
+                                  className={smallInput}
+                                />
+                              </Field>
+                              <Field label="Product user's mobile *">
+                                <div className="flex">
+                                  <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-white px-3 text-xs font-semibold">+91</span>
+                                  <input
+                                    type="tel"
+                                    inputMode="numeric"
+                                    maxLength={10}
+                                    value={e.alternateMobile}
+                                    onChange={(ev) => setField(row.key, "alternateMobile", ev.target.value.replace(/\D/g, ""))}
+                                    className={smallPhone}
+                                  />
+                                </div>
+                              </Field>
                             </div>
-                          </Field>
-                        </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -587,7 +610,7 @@ export default function RegisterWarrantyStaffPage() {
                           onClick={() => copyCustomerToAll(row.key)}
                           className="text-xs font-bold text-[#11b8d0] hover:underline"
                         >
-                          Use this customer for all items
+                          Use these buyer / user details for all items
                         </button>
                       )}
                     </div>

@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     const altName = String(body.altName ?? "").trim().slice(0, 120);
     const altMobile = cleanMobile(body.altMobile);
     const warrantyNumber = String(body.warrantyNumber ?? "").trim().toUpperCase();
+    const ownerMobile = cleanMobile(body.ownerMobile);
     const issueType = String(body.issueType ?? "").trim();
     const description = String(body.description ?? "").trim();
     const serviceMode = String(body.serviceMode ?? "store_visit");
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     const { data: warranty, error: warrantyError } = await supabaseAdmin
       .from("warranties")
       .select(
-        "id, warranty_number, warranty_expiry_date, status, customer_name, customer_mobile, customer_address, product_name, store_name"
+        "id, warranty_number, warranty_expiry_date, status, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, product_name, store_name"
       )
       .eq("warranty_number", warrantyNumber)
       .maybeSingle();
@@ -87,6 +88,18 @@ export async function POST(request: Request) {
           error: "We couldn't find this warranty. Please check the bill / warranty number and try again.",
         },
         { status: 404 }
+      );
+    }
+
+    // Proof: the buyer's or the product user's mobile (or logged in as one of them).
+    const owners = [warranty.customer_mobile, warranty.alternate_mobile].filter(Boolean);
+    if (![ownerMobile, mobile, customer?.mobile].some((m) => m && owners.includes(m))) {
+      return NextResponse.json(
+        {
+          error:
+            "This mobile number doesn't match the one given at the store for this product. Use the buyer's or the product user's number.",
+        },
+        { status: 403 }
       );
     }
 
@@ -193,6 +206,10 @@ export async function POST(request: Request) {
         title: issueType,
         summary: `${warranty.product_name} — ${issueType} · Contact: ${contactName} (${mobile})${
           warranty.customer_mobile !== mobile ? ` · Bought by ${warranty.customer_name} (${warranty.customer_mobile})` : ""
+        }${
+          warranty.alternate_mobile && warranty.alternate_mobile !== mobile
+            ? ` · User ${warranty.alternate_name ?? ""} (${warranty.alternate_mobile})`
+            : ""
         }`,
         details: [
           `Problem: ${description}`,
@@ -205,14 +222,17 @@ export async function POST(request: Request) {
       }).catch((error) => console.error("New service request alerts failed:", error))
     );
 
-    // The buyer gets a copy when someone else raised it (e.g. a gift).
-    if (warranty.customer_mobile && warranty.customer_mobile !== mobile) {
+    // The product's contact (the user if one was given, else the buyer) gets a copy when someone else raised it.
+    const ownerContact = warranty.alternate_mobile
+      ? { name: String(warranty.alternate_name ?? ""), mobile: String(warranty.alternate_mobile) }
+      : { name: warranty.customer_name, mobile: warranty.customer_mobile };
+    if (ownerContact.mobile && ownerContact.mobile !== mobile) {
       after(() =>
         notifyCustomer({
-          name: warranty.customer_name,
-          mobile: warranty.customer_mobile,
+          name: ownerContact.name,
+          mobile: ownerContact.mobile,
           ticketNumber: created.request_number,
-          message: `A service request was raised for the ${warranty.product_name} you bought, by ${contactName}. Our team will contact them directly.`,
+          message: `A service request was raised for your ${warranty.product_name} by ${contactName}. Our team will contact them directly.`,
         }).catch((error) => console.error("Buyer copy failed:", error))
       );
     }

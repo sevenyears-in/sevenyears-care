@@ -41,8 +41,9 @@ export default function RequestServiceForm({
   const [altName, setAltName] = useState("");
   const [altMobile, setAltMobile] = useState("");
   const [warrantyNumber, setWarrantyNumber] = useState(initialWarrantyNumber);
-  // Find the product by mobile, bill or warranty number (it may be a gift, so any of these works).
+  // Find the product: mobile number (buyer's or the product user's) + bill or warranty number.
   const [reference, setReference] = useState(initialWarrantyNumber);
+  const [lookupMobile, setLookupMobile] = useState("");
   const [items, setItems] = useState<LookupItem[] | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState("");
@@ -94,15 +95,20 @@ export default function RequestServiceForm({
     setLookupError("");
     setItems(null);
     setWarrantyNumber("");
+    const ownerMobile = lookupMobile.replace(/\D/g, "");
+    if (!/^[6-9]\d{9}$/.test(ownerMobile)) {
+      setLookupError("Enter the 10-digit mobile number given at the store.");
+      return;
+    }
     if (reference.trim().length < 4) {
-      setLookupError("Enter the mobile number, bill number or warranty number.");
+      setLookupError("Enter the bill number or warranty number.");
       return;
     }
     setLookupBusy(true);
     const r = await fetch("/api/service-requests/lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference }),
+      body: JSON.stringify({ reference, mobile: ownerMobile }),
     }).catch(() => null);
     const d = r ? await r.json().catch(() => ({})) : {};
     setLookupBusy(false);
@@ -114,18 +120,9 @@ export default function RequestServiceForm({
     setItems(list);
     const usable = list.filter((i) => i.active);
     if (usable.length === 1) setWarrantyNumber(usable[0].warrantyNumber);
-    // Found by their own mobile number → use it as the contact number too.
-    const typed = reference.replace(/\D/g, "").slice(-10);
-    if (/^[6-9]\d{9}$/.test(typed) && reference.replace(/[\s+\-]/g, "").replace(/^(91|0)/, "").length === 10) {
-      setMobileNumber((m) => m || typed);
-    }
+    setMobileNumber((m) => m || ownerMobile); // usually the same person to contact
   };
 
-  // Opened with ?warranty=…: look it up straight away.
-  useEffect(() => {
-    if (initialWarrantyNumber) void lookup();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const captureLocation = () => {
     if (!navigator.geolocation) {
@@ -193,6 +190,7 @@ export default function RequestServiceForm({
           altName,
           altMobile: altMobile.replace(/\D/g, ""),
           warrantyNumber,
+          ownerMobile: lookupMobile.replace(/\D/g, ""),
           issueType,
           description,
           serviceMode,
@@ -324,8 +322,30 @@ export default function RequestServiceForm({
             </div>
           ) : (
             <div className="mt-4 space-y-3">
+              <label htmlFor="owner-mobile" className={labelClass}>
+                Mobile number given at the store *
+              </label>
+              <div className="flex">
+                <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-4 text-sm font-semibold">
+                  +91
+                </span>
+                <input
+                  id="owner-mobile"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={lookupMobile}
+                  onChange={(e) => {
+                    setLookupMobile(e.target.value.replace(/\D/g, ""));
+                    setItems(null);
+                    setWarrantyNumber("");
+                  }}
+                  className={phoneInputClass}
+                  placeholder="Buyer's or product user's mobile"
+                />
+              </div>
               <label htmlFor="reference" className={labelClass}>
-                Mobile number, Bill number or Warranty number *
+                Bill number or Warranty number *
               </label>
               <div className="flex gap-2">
                 <input
@@ -344,7 +364,7 @@ export default function RequestServiceForm({
                     }
                   }}
                   className={inputClass}
-                  placeholder="e.g. 9876543210, VDK26-SI1-8504 or SY-WAR-2026-123456"
+                  placeholder="e.g. VDK26-SI1-8504 or SY-WAR-2026-123456"
                 />
                 <button
                   type="button"
@@ -356,8 +376,9 @@ export default function RequestServiceForm({
                 </button>
               </div>
               <p className="text-xs text-black/50">
-                Use the buyer&apos;s mobile, the gift receiver&apos;s mobile (if given at the store), or the number printed on
-                the bill or warranty certificate. The product may have been bought by someone else (a gift) — that&apos;s fine.
+                Use the mobile number of the buyer or of the product user (given at the store when the warranty was
+                registered), and the number printed on the bill or warranty certificate. Number not matching? Call the store
+                or raise a complaint and our team will update it.
               </p>
               <ErrorBox message={lookupError} />
               {items && (
