@@ -249,3 +249,73 @@ export const getCurrentCustomer = cache(async (): Promise<Customer | null> => {
     email: data.email ? String(data.email) : null,
   };
 });
+
+
+/**
+ * "Forgot password": the customer proves the mobile is theirs with a number we
+ * gave them (bill, warranty, service request or complaint number) and picks a new password.
+ */
+export async function resetCustomerPasswordWithProof(mobile: string, proof: string, next: string) {
+  if (!isValidMobile(mobile)) return { ok: false as const, error: "Enter your 10-digit mobile number.", status: 400 };
+  const problem = customerPasswordProblem(next);
+  if (problem) return { ok: false as const, error: problem, status: 400 };
+
+  const mem = memoryFailures.get(`reset:${mobile}`);
+  if (mem && mem.until > Date.now()) {
+    return { ok: false as const, error: `Too many wrong attempts. Try again in ${LOCK_MINUTES} minutes.`, status: 429 };
+  }
+
+  const ref = proof.toUpperCase().replace(/[^A-Z0-9\-/]/g, "").slice(0, 60);
+  let name: string | null = null;
+  let matched = false;
+  if (ref) {
+    const [w, sr, c] = await Promise.all([
+      supabaseAdmin
+        .from("warranties")
+        .select("customer_name")
+        .eq("customer_mobile", mobile)
+        .or(`bill_number.ilike.${ref},warranty_number.eq.${ref}`)
+        .limit(1),
+      supabaseAdmin.from("service_requests").select("contact_name").eq("contact_mobile", mobile).eq("request_number", ref).limit(1),
+      supabaseAdmin.from("complaints").select("contact_name").eq("contact_mobile", mobile).eq("complaint_number", ref).limit(1),
+    ]);
+    const hit = w.data?.[0]?.customer_name ?? sr.data?.[0]?.contact_name ?? c.data?.[0]?.contact_name;
+    matched = Boolean(w.data?.length || sr.data?.length || c.data?.length);
+    name = hit ? String(hit) : null;
+  }
+
+  if (!matched) {
+    const count = (mem && mem.until <= Date.now() ? 0 : mem?.count ?? 0) + 1;
+    memoryFailures.set(`reset:${mobile}`, { count, until: count >= MAX_FAILURES ? Date.now() + LOCK_MINUTES * 60_000 : 0 });
+    return {
+      ok: false as const,
+      error:
+        "This number doesn't match your mobile. Use a bill number, warranty number (SY-WAR-…), service request (SY-SRV-…) or complaint number (SY-CMP-…) registered with this mobile.",
+      status: 401,
+    };
+  }
+  memoryFailures.delete(`reset:${mobile}`);
+
+  const { data: existing } = await supabaseAdmin
+    .from("customer_accounts")
+    .select("session_version")
+    .eq("mobile", mobile)
+    .maybeSingle();
+  const { error } = existing
+    ? await supabaseAdmin
+        .from("customer_accounts")
+        .update({
+          password_hash: hashPassword(next),
+          session_version: (existing.session_version ?? 1) + 1,
+          failed_attempts: 0,
+          locked_until: null,
+        })
+        .eq("mobile", mobile)
+    : await supabaseAdmin.from("customer_accounts").insert({ mobile, full_name: name, password_hash: hashPassword(next) });
+  if (error) {
+    console.error("Customer password reset error:", error);
+    return { ok: false as const, error: "Unable to save. Please try again.", status: 500 };
+  }
+  memoryFailures.delete(mobile);
+  return { ok: true as const };
+}

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { siteUrl } from "@/lib/notify";
+import { iciciPaymentUrl, paytmInitiate } from "@/lib/payment-gateways";
 import {
   canPayNow,
   createRazorpayOrder,
@@ -59,13 +61,36 @@ export async function POST(request: Request) {
       requestId = data.id;
     }
 
+    const site = siteUrl();
+    if (s.gateway === "paytm") {
+      // Paytm order ids: letters/digits only, unique per attempt.
+      const orderId = `SYEXT${String(requestId).replace(/-/g, "").slice(0, 12)}${Date.now().toString(36)}`.toUpperCase();
+      const page = await paytmInitiate(s, {
+        orderId,
+        amount: price,
+        customerId: `CUST${w.customer_mobile}`,
+        mobile: w.customer_mobile,
+        callbackUrl: `${site}/api/payments/paytm/callback`,
+      });
+      await supabaseAdmin.from("warranty_extensions").update({ razorpay_order_id: orderId, gateway: "paytm", price }).eq("id", requestId);
+      return NextResponse.json({ provider: "paytm", action: page.action, fields: page.fields });
+    }
+
+    if (s.gateway === "icici") {
+      const referenceNo = `SYEXT${String(requestId).replace(/-/g, "").slice(0, 12)}${Date.now().toString(36)}`.toUpperCase();
+      const url = iciciPaymentUrl(s, { referenceNo, amount: price, returnUrl: `${site}/api/payments/icici/return` });
+      await supabaseAdmin.from("warranty_extensions").update({ razorpay_order_id: referenceNo, gateway: "icici", price }).eq("id", requestId);
+      return NextResponse.json({ provider: "icici", url });
+    }
+
     const orderId = await createRazorpayOrder(s, price, `EXT-${w.warranty_number}`, {
       warranty: w.warranty_number,
       request: String(requestId),
     });
-    await supabaseAdmin.from("warranty_extensions").update({ razorpay_order_id: orderId, price }).eq("id", requestId);
+    await supabaseAdmin.from("warranty_extensions").update({ razorpay_order_id: orderId, gateway: "razorpay", price }).eq("id", requestId);
 
     return NextResponse.json({
+      provider: "razorpay",
       keyId: s.razorpayKeyId,
       orderId,
       amount: Math.round(price * 100),

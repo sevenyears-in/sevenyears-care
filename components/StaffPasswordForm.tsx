@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { ErrorBox, inputClass, labelClass, primaryButtonClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export function StaffPasswordForm({ canCancel }: { canCancel: boolean }) {
   const [current, setCurrent] = useState("");
@@ -41,16 +42,16 @@ export function StaffPasswordForm({ canCancel }: { canCancel: boolean }) {
     <form onSubmit={submit} className="mt-5 space-y-5 rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5">
       <div>
         <label htmlFor="cur" className={labelClass}>Current password</label>
-        <input id="cur" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />
+        <PasswordInput id="cur" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />
       </div>
       <div>
         <label htmlFor="new" className={labelClass}>New password</label>
-        <input id="new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={inputClass} />
+        <PasswordInput id="new" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={inputClass} />
         <p className="mt-1 text-xs text-black/50">At least 8 characters, with letters and numbers.</p>
       </div>
       <div>
         <label htmlFor="confirm" className={labelClass}>New password again</label>
-        <input id="confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
+        <PasswordInput id="confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
       </div>
       <ErrorBox message={error} />
       <button type="submit" disabled={busy} className={primaryButtonClass}>

@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 type View = {
   smtpHost: string;
@@ -148,9 +149,9 @@ export function AlertSettingsForm() {
           </div>
           <div>
             <label htmlFor="smtpPass" className={labelClass}>Mailbox password</label>
-            <input
+            <PasswordInput
               id="smtpPass"
-              type="password"
+             
               autoComplete="new-password"
               value={form.smtpPass}
               onChange={set("smtpPass")}
@@ -178,9 +179,9 @@ export function AlertSettingsForm() {
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="sm:col-span-2">
             <label htmlFor="waToken" className={labelClass}>Permanent access token</label>
-            <input
+            <PasswordInput
               id="waToken"
-              type="password"
+             
               autoComplete="new-password"
               value={form.waToken}
               onChange={set("waToken")}

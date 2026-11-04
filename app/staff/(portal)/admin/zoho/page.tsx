@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
 import { ZohoStoresCard } from "@/components/ZohoStoresCard";
+import { PasswordInput } from "@/components/PasswordInput";
 
 type Status = {
   usingEnvFile: boolean;
@@ -191,7 +192,7 @@ export default function ZohoConnectionPage() {
           </div>
           <div>
             <label htmlFor="csec" className={labelClass}>Client Secret</label>
-            <input id="csec" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value.trim())} className={inputClass} autoComplete="off" />
+            <PasswordInput id="csec" value={clientSecret} onChange={(e) => setClientSecret(e.target.value.trim())} className={inputClass} autoComplete="off" />
           </div>
           <div className="sm:col-span-2">
             <button type="submit" disabled={saving || !clientId || !clientSecret} className="rounded-2xl bg-[#161616] px-6 py-3 font-bold text-white disabled:opacity-40">

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ErrorBox, inputClass, labelClass, primaryButtonClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export default function StaffLoginPage() {
   const [userId, setUserId] = useState("");
@@ -104,9 +105,9 @@ export default function StaffLoginPage() {
               <label htmlFor="password" className={labelClass}>
                 Password
               </label>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
+               
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

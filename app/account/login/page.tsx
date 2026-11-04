@@ -10,6 +10,7 @@ import {
   phoneInputClass,
   primaryButtonClass,
 } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export default function CustomerLoginPage() {
   const [mobile, setMobile] = useState("");
@@ -77,9 +78,8 @@ export default function CustomerLoginPage() {
         </div>
         <div>
           <label htmlFor="password" className={labelClass}>Password</label>
-          <input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -87,7 +87,10 @@ export default function CustomerLoginPage() {
             placeholder="e.g. last 4 digits of your bill number"
           />
           <p className="mt-2 text-xs text-black/50">
-            Bill VDK26-SI1-8504 → first password 8504. Forgot a password you changed? Contact your Seven Years store.
+            Bill VDK26-SI1-8504 → first password 8504.{" "}
+            <a href="/account/forgot" className="font-bold text-[#0fa8bf]">
+              Forgot password?
+            </a>
           </p>
         </div>
         <ErrorBox message={error} />

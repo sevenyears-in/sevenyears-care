@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 type View = {
   waEnabled: boolean;
@@ -164,9 +165,9 @@ export default function ChannelsPage() {
           <div>
             <label htmlFor="secret" className={labelClass}>App secret {view.waAppSecretSaved && <span className="text-green-700">(saved)</span>}</label>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <input
+              <PasswordInput
                 id="secret"
-                type="password"
+               
                 autoComplete="off"
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}

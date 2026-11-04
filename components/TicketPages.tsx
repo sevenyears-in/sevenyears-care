@@ -29,6 +29,7 @@ import {
 import { StatusBadge } from "@/components/SiteChrome";
 import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, TicketTable } from "@/components/TicketUI";
 import { TicketActions } from "@/components/TicketActions";
+import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { ExplanationsPanel } from "@/components/ExplanationsPanel";
 import { canRequestExplanation, explanationsForTicket } from "@/lib/explanations";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -267,6 +268,10 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
               ))}
             </ol>
           </div>
+
+          {ticket.contactMobile && !(type === "complaint" && complaintKind(ticket.title) === "staff" && !["super_admin", "admin", "hr_head", "hr_executive"].includes(staff.role)) && (
+            <ResetCustomerLogin ticketType={type} ticketId={ticket.id} />
+          )}
 
           <ExplanationsPanel
             type={type}

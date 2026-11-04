@@ -36,3 +36,7 @@ alter table public.warranty_extensions enable row level security;
 insert into public.app_settings (key, value, updated_at)
 values ('extended_warranty', '{"price": 1499, "months": 6, "windowDays": 10, "onlineEnabled": false}'::jsonb, now())
 on conflict (key) do nothing;
+
+-- Which payment company handled the payment (razorpay / paytm / icici).
+-- (razorpay_order_id holds the order / reference number for all three.)
+alter table public.warranty_extensions add column if not exists gateway text;

@@ -8,6 +8,7 @@ import {
   canPayNow,
   eligibility,
   extendedSettings,
+  GATEWAY_LABELS,
   isApprovedInspection,
   onlinePaymentsReady,
   rupees,
@@ -17,8 +18,15 @@ import {
 export const metadata: Metadata = { title: "Extended Warranty", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
-export default async function ExtendPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function ExtendPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ payment?: string }>;
+}) {
   const { token } = await params;
+  const { payment } = await searchParams;
   const w = await warrantyByToken(token);
   if (!w) notFound();
   const s = await extendedSettings();
@@ -42,6 +50,24 @@ export default async function ExtendPage({ params }: { params: Promise<{ token: 
       title={`Extend your warranty by ${s.months} months`}
       intro={`${w.product_name} · ${w.warranty_number}`}
     >
+      {payment === "success" && (
+        <p className="mb-4 rounded-2xl bg-green-50 p-4 text-sm font-bold text-green-800 ring-1 ring-green-200">
+          Payment received — your extended warranty is active! 🎉{" "}
+          <Link href={`/warranty/${token}`} className="underline">
+            View your certificate
+          </Link>
+        </p>
+      )}
+      {payment === "failed" && (
+        <p className="mb-4 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-800 ring-1 ring-red-200">
+          The payment did not go through. No money was taken — please try again.
+        </p>
+      )}
+      {payment === "check" && (
+        <p className="mb-4 rounded-2xl bg-amber-50 p-4 text-sm font-semibold text-amber-900 ring-1 ring-amber-200">
+          We couldn&apos;t confirm the payment yet. If money was deducted, please contact the store with your warranty number.
+        </p>
+      )}
       <div className={cardClass}>
         <div className="grid gap-4 sm:grid-cols-3">
           <Info label="Price" value={rupees(e.ok ? e.price : s.price)} big />
@@ -74,6 +100,7 @@ export default async function ExtendPage({ params }: { params: Promise<{ token: 
               priceLabel={rupees(e.price)}
               directUntil={formatDate(e.directUntil)}
               windowDays={s.windowDays}
+              gatewayLabel={GATEWAY_LABELS[s.gateway]}
             />
           )}
         </div>

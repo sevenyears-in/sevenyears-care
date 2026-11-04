@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { cardClass, ErrorBox, inputClass, labelClass, PageShell, primaryButtonClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export default function ChangePasswordPage() {
   const [current, setCurrent] = useState("");
@@ -51,15 +52,15 @@ export default function ChangePasswordPage() {
         <form onSubmit={submit} className={`${cardClass} space-y-5`}>
           <div>
             <label htmlFor="cur" className={labelClass}>Current password</label>
-            <input id="cur" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />
+            <PasswordInput id="cur" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputClass} />
           </div>
           <div>
             <label htmlFor="new" className={labelClass}>New password</label>
-            <input id="new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={inputClass} />
+            <PasswordInput id="new" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} className={inputClass} />
           </div>
           <div>
             <label htmlFor="confirm" className={labelClass}>New password again</label>
-            <input id="confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
+            <PasswordInput id="confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
           </div>
           <ErrorBox message={error} />
           <button type="submit" disabled={busy} className={primaryButtonClass}>

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ErrorBox, inputClass, labelClass, primaryButtonClass } from "@/components/SiteChrome";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export default function StaffSetupPage() {
   const router = useRouter();
@@ -99,11 +100,11 @@ export default function StaffSetupPage() {
               </div>
               <div>
                 <label htmlFor="pw" className={labelClass}>Password *</label>
-                <input id="pw" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} placeholder="At least 8 characters, letters and numbers" />
+                <PasswordInput id="pw" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} placeholder="At least 8 characters, letters and numbers" />
               </div>
               <div>
                 <label htmlFor="pw2" className={labelClass}>Confirm Password *</label>
-                <input id="pw2" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
+                <PasswordInput id="pw2" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputClass} />
               </div>
 
               <ErrorBox message={errorMessage} />

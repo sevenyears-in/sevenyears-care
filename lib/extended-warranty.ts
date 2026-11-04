@@ -11,14 +11,26 @@ import { addMonths, todayISO } from "@/lib/helpers";
 
 const KEY = "extended_warranty";
 
+export type Gateway = "razorpay" | "paytm" | "icici";
+
 export type ExtendedSettings = {
   price: number;
   months: number;
   windowDays: number;
   onlineEnabled: boolean;
+  /** Which payment company customers pay through. */
+  gateway: Gateway;
   razorpayKeyId: string;
   razorpayKeySecret: string;
   razorpayWebhookSecret: string;
+  paytmMid: string;
+  paytmKey: string;
+  paytmWebsite: string;
+  paytmStaging: boolean;
+  iciciMerchantId: string;
+  iciciSubMerchantId: string;
+  iciciAesKey: string;
+  iciciPaymode: string;
 };
 
 export const DEFAULT_EXTENDED: ExtendedSettings = {
@@ -26,9 +38,18 @@ export const DEFAULT_EXTENDED: ExtendedSettings = {
   months: 6,
   windowDays: 10,
   onlineEnabled: false,
+  gateway: "razorpay",
   razorpayKeyId: "",
   razorpayKeySecret: "",
   razorpayWebhookSecret: "",
+  paytmMid: "",
+  paytmKey: "",
+  paytmWebsite: "DEFAULT",
+  paytmStaging: false,
+  iciciMerchantId: "",
+  iciciSubMerchantId: "",
+  iciciAesKey: "",
+  iciciPaymode: "9",
 };
 
 export async function extendedSettings(): Promise<ExtendedSettings> {
@@ -40,9 +61,18 @@ export async function extendedSettings(): Promise<ExtendedSettings> {
       months: Number(v.months) > 0 ? Number(v.months) : DEFAULT_EXTENDED.months,
       windowDays: Number(v.windowDays) > 0 ? Number(v.windowDays) : DEFAULT_EXTENDED.windowDays,
       onlineEnabled: Boolean(v.onlineEnabled),
+      gateway: v.gateway === "paytm" || v.gateway === "icici" ? v.gateway : "razorpay",
       razorpayKeyId: String(v.razorpayKeyId ?? ""),
       razorpayKeySecret: String(v.razorpayKeySecret ?? ""),
       razorpayWebhookSecret: String(v.razorpayWebhookSecret ?? ""),
+      paytmMid: String(v.paytmMid ?? ""),
+      paytmKey: String(v.paytmKey ?? ""),
+      paytmWebsite: String(v.paytmWebsite ?? "DEFAULT") || "DEFAULT",
+      paytmStaging: Boolean(v.paytmStaging),
+      iciciMerchantId: String(v.iciciMerchantId ?? ""),
+      iciciSubMerchantId: String(v.iciciSubMerchantId ?? ""),
+      iciciAesKey: String(v.iciciAesKey ?? ""),
+      iciciPaymode: String(v.iciciPaymode ?? "9") || "9",
     };
   } catch {
     return DEFAULT_EXTENDED;
@@ -56,9 +86,22 @@ export async function saveExtendedSettings(value: ExtendedSettings) {
   if (error) throw error;
 }
 
-export function onlinePaymentsReady(s: ExtendedSettings) {
-  return s.onlineEnabled && Boolean(s.razorpayKeyId && s.razorpayKeySecret);
+/** Are the keys of this payment company filled in? */
+export function gatewayConfigured(s: ExtendedSettings, g: Gateway = s.gateway) {
+  if (g === "paytm") return Boolean(s.paytmMid && s.paytmKey);
+  if (g === "icici") return Boolean(s.iciciMerchantId && s.iciciSubMerchantId && s.iciciAesKey);
+  return Boolean(s.razorpayKeyId && s.razorpayKeySecret);
 }
+
+export function onlinePaymentsReady(s: ExtendedSettings) {
+  return s.onlineEnabled && gatewayConfigured(s);
+}
+
+export const GATEWAY_LABELS: Record<Gateway, string> = {
+  razorpay: "Razorpay",
+  paytm: "Paytm",
+  icici: "ICICI Bank (Eazypay)",
+};
 
 export function rupees(amount: number) {
   return `₹${Number(amount).toLocaleString("en-IN")}`;

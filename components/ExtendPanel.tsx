@@ -26,6 +26,7 @@ export function ExtendPanel({
   priceLabel,
   directUntil,
   windowDays,
+  gatewayLabel = "Razorpay",
 }: {
   token: string;
   mode: "pay" | "inspection";
@@ -34,6 +35,7 @@ export function ExtendPanel({
   priceLabel: string;
   directUntil: string;
   windowDays: number;
+  gatewayLabel?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,6 +56,27 @@ export function ExtendPanel({
       setError(order.error || "Unable to start the payment.");
       return;
     }
+    // Paytm / ICICI: go to the bank's own payment page; it sends the customer back here.
+    if (order.provider === "paytm") {
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = order.action;
+      for (const [k, v] of Object.entries(order.fields as Record<string, string>)) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      form.submit();
+      return;
+    }
+    if (order.provider === "icici") {
+      window.location.assign(order.url);
+      return;
+    }
+
     const Razorpay = await loadCheckout();
     if (!Razorpay) {
       setBusy(false);
@@ -134,7 +157,7 @@ export function ExtendPanel({
             Online payment is coming soon. Please pay {priceLabel} at any Seven Years store — staff will add it to your warranty.
           </p>
         )}
-        <p className="text-center text-xs text-black/40">UPI · Cards · Net banking — secure payment by Razorpay</p>
+        <p className="text-center text-xs text-black/40">UPI · Cards · Net banking — secure payment by {gatewayLabel}</p>
         <ErrorBox message={error} />
       </div>
     );
