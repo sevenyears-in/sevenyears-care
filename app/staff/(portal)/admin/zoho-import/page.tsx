@@ -78,8 +78,9 @@ export default function ZohoImportPage() {
 
   const stats = state
     ? [
+        { label: "Warranty items in Zoho", value: state.itemIds?.length ?? 0 },
+        { label: "Bills with those items", value: state.queue?.length ?? 0 },
         { label: "Bills checked", value: state.bills },
-        { label: "Bills with warranty items", value: state.billsWithItems },
         { label: "Warranties added", value: state.created, strong: true },
         { label: "Already registered", value: state.alreadyThere },
         { label: "Skipped — no mobile in Zoho", value: state.noMobile },
@@ -147,9 +148,29 @@ export default function ZohoImportPage() {
               ))}
           </div>
 
+          {!state.done && (
+            <p className="mt-4 text-sm font-semibold">
+              {state.phase === "items"
+                ? `Step 1 of 3 — finding items in warranty categories (Zoho page ${state.page})`
+                : state.phase === "bills"
+                  ? `Step 2 of 3 — finding their bills (item ${Math.min(state.itemCursor + 1, state.itemIds.length)} of ${state.itemIds.length})`
+                  : `Step 3 of 3 — adding warranties (bill ${Math.min(state.index, state.queue.length)} of ${state.queue.length})`}
+            </p>
+          )}
           {running && (
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/5">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-[#11b8d0]" />
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/5">
+              <div
+                className="h-full rounded-full bg-[#11b8d0] transition-all"
+                style={{
+                  width: `${
+                    state.phase === "process" && state.queue.length
+                      ? 66 + (34 * state.index) / state.queue.length
+                      : state.phase === "bills" && state.itemIds.length
+                        ? 10 + (56 * state.itemCursor) / state.itemIds.length
+                        : 5
+                  }%`,
+                }}
+              />
             </div>
           )}
           {note && <p className="mt-3 text-xs text-amber-700">{note}</p>}

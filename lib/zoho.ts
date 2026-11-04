@@ -316,19 +316,39 @@ export async function listInvoices(from: string, to: string, page: number) {
   return { invoices, hasMore: Boolean(obj(data.page_context).has_more_page) };
 }
 
-/** Diagnostic: does Zoho filter invoices by item, and do items carry a category? */
-export async function probeItemFilter(itemId: string, from: string, to: string) {
-  const all = await zohoGet("invoices", { date_start: from, date_end: to, per_page: "200" });
-  const byItem = await zohoGet("invoices", { date_start: from, date_end: to, per_page: "200", item_id: itemId });
-  const items = await zohoGet("items", { per_page: "5" });
-  const first = arr(items.items)[0] ?? {};
-  return {
-    allCount: arr(all.invoices).length,
-    byItemCount: arr(byItem.invoices).length,
-    byItemBills: arr(byItem.invoices).map((i) => str(i.invoice_number)).slice(0, 10),
-    itemKeys: Object.keys(first),
-    itemCategory: str(first.category_name),
-  };
+/** One page (200) of all items with their category (for the bulk import). */
+export async function listItems(page: number) {
+  const data = await zohoGet("items", { per_page: "200", page: String(page) });
+  const items = arr(data.items).map((i) => ({
+    itemId: str(i.item_id),
+    category: str(i.category_name) || str(i.group_name),
+  }));
+  return { items, hasMore: Boolean(obj(data.page_context).has_more_page) };
+}
+
+/** Bills between two dates that contain one item. */
+export async function listInvoicesForItem(itemId: string, from: string, to: string, page: number) {
+  const data = await zohoGet("invoices", {
+    item_id: itemId,
+    date_start: from,
+    date_end: to,
+    per_page: "200",
+    page: String(page),
+  });
+  const invoices: InvoiceListItem[] = arr(data.invoices).map((inv) => ({
+    invoiceId: str(inv.invoice_id),
+    billNumber: str(inv.invoice_number),
+    billDate: str(inv.date),
+    status: str(inv.status).toLowerCase(),
+    raw: {
+      invoice_id: inv.invoice_id,
+      invoice_number: inv.invoice_number,
+      date: inv.date,
+      customer_name: inv.customer_name,
+      salesperson_name: inv.salesperson_name,
+    },
+  }));
+  return { invoices, hasMore: Boolean(obj(data.page_context).has_more_page) };
 }
 
 /** Full bill for an invoice from listInvoices (categoryCache saves repeat item lookups). */

@@ -6,8 +6,8 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { ensureCustomerAccount } from "@/lib/customer-auth";
 import { addMonths, todayISO } from "@/lib/helpers";
-import { buildWarrantyRows } from "@/lib/warranty-rules";
-import { fetchBillFromList, listInvoices, ZohoError } from "@/lib/zoho";
+import { buildWarrantyRows, loadActiveCategories } from "@/lib/warranty-rules";
+import { fetchBillFromList, listInvoicesForItem, listItems, ZohoError, type InvoiceListItem } from "@/lib/zoho";
 
 const KEY = "zoho_import";
 const BATCH = 6; // bills per call (each bill = 1–3 Zoho requests)
@@ -16,8 +16,13 @@ export const NOT_RECORDED = "Not recorded";
 export type ImportState = {
   from: string;
   to: string;
-  page: number;
-  index: number; // next invoice on this page
+  /** items → find warranty items; bills → find their bills; process → add warranties */
+  phase: "items" | "bills" | "process";
+  page: number; // Zoho page within the current step
+  itemIds: string[]; // items in active warranty categories
+  itemCursor: number;
+  queue: Pick<InvoiceListItem, "invoiceId" | "billNumber" | "billDate" | "status" | "raw">[];
+  index: number; // next bill in the queue
   done: boolean;
   startedAt: string;
   updatedAt: string;
@@ -34,7 +39,7 @@ export type ImportState = {
 export async function loadImportState(): Promise<ImportState | null> {
   const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", KEY).maybeSingle();
   const v = data?.value as ImportState | undefined;
-  return v && v.from ? v : null;
+  return v && v.from && v.phase ? v : null; // older format → start again
 }
 
 async function saveState(state: ImportState) {
@@ -50,7 +55,11 @@ export async function startImport(from: string, to: string, staffName: string) {
   const state: ImportState = {
     from,
     to,
+    phase: "items",
     page: 1,
+    itemIds: [],
+    itemCursor: 0,
+    queue: [],
     index: 0,
     done: false,
     startedAt: now,
@@ -77,24 +86,80 @@ function warrantyNumber(taken: Set<string>) {
   return n;
 }
 
-/** Process the next few bills. Returns the updated progress. */
+/** Do the next piece of work (a few Zoho requests). Returns the updated progress. */
 export async function runImportBatch(staffId: string): Promise<{ state: ImportState; pause?: string }> {
   const state = await loadImportState();
   if (!state) throw new Error("No import has been started.");
   if (state.done) return { state };
+  if (!state.phase) throw new Error("This import was started by an older version. Click Start again.");
 
-  const { invoices, hasMore } = await listInvoices(state.from, state.to, state.page);
-  const slice = invoices.slice(state.index, state.index + BATCH);
+  let pause: string | undefined;
+  try {
+    if (state.phase === "items") await findItems(state);
+    else if (state.phase === "bills") await findBills(state);
+    else pause = await processBills(state, staffId);
+  } catch (error) {
+    if (!(error instanceof ZohoError)) throw error;
+    pause = error.message; // usually Zoho's "too many requests" limit — retried after a pause
+  }
+
+  await saveState(state);
+  return { state, pause };
+}
+
+async function findItems(state: ImportState) {
+  const categories = await loadActiveCategories();
+  for (let i = 0; i < 5; i++) {
+    const { items, hasMore } = await listItems(state.page);
+    for (const it of items) {
+      if (it.itemId && categories.has(it.category.trim().toLowerCase()) && !state.itemIds.includes(it.itemId)) {
+        state.itemIds.push(it.itemId);
+      }
+    }
+    if (!hasMore) {
+      state.phase = "bills";
+      state.page = 1;
+      return;
+    }
+    state.page++;
+  }
+}
+
+async function findBills(state: ImportState) {
+  const seen = new Set(state.queue.map((q) => q.invoiceId));
+  for (let calls = 0; calls < 12; calls++) {
+    if (state.itemCursor >= state.itemIds.length) {
+      state.queue.sort((a, b) => a.billDate.localeCompare(b.billDate));
+      state.phase = "process";
+      state.index = 0;
+      if (state.queue.length === 0) state.done = true;
+      return;
+    }
+    const { invoices, hasMore } = await listInvoicesForItem(state.itemIds[state.itemCursor], state.from, state.to, state.page);
+    for (const inv of invoices) {
+      if (seen.has(inv.invoiceId)) continue;
+      seen.add(inv.invoiceId);
+      state.queue.push(inv);
+    }
+    if (hasMore) state.page++;
+    else {
+      state.itemCursor++;
+      state.page = 1;
+    }
+  }
+}
+
+async function processBills(state: ImportState, staffId: string): Promise<string | undefined> {
+  const slice = state.queue.slice(state.index, state.index + BATCH);
   const categoryCache = new Map<string, string>();
   const usedNumbers = new Set<string>();
-  let pause: string | undefined;
 
   for (const inv of slice) {
     try {
       if (["void", "draft"].includes(inv.status)) {
         state.skippedStatus++;
       } else {
-        const bill = await fetchBillFromList(inv, categoryCache);
+        const bill = await fetchBillFromList(inv as InvoiceListItem, categoryCache);
         const { rows } = await buildWarrantyRows(bill);
         const fresh = rows.filter((r) => !r.existing);
         state.alreadyThere += rows.length - fresh.length;
@@ -148,26 +213,13 @@ export async function runImportBatch(staffId: string): Promise<{ state: ImportSt
       state.bills++;
       state.index++;
     } catch (error) {
-      if (error instanceof ZohoError) {
-        // Most often Zoho's "too many requests" limit — stop here and retry this bill after a pause.
-        pause = error.message;
-        break;
-      }
+      if (error instanceof ZohoError) return error.message; // retry this bill after a pause
       state.failed = [...state.failed, { bill: inv.billNumber, reason: error instanceof Error ? error.message : "Error" }].slice(-50);
       state.bills++;
       state.index++;
     }
   }
 
-  if (!pause && state.index >= invoices.length) {
-    if (hasMore) {
-      state.page++;
-      state.index = 0;
-    } else {
-      state.done = true;
-    }
-  }
-
-  await saveState(state);
-  return { state, pause };
+  if (state.index >= state.queue.length) state.done = true;
+  return undefined;
 }

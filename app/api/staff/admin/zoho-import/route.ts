@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { isISODate } from "@/lib/helpers";
-import { probeItemFilter, zohoConfigured } from "@/lib/zoho";
+import { zohoConfigured } from "@/lib/zoho";
 import { loadImportState, runImportBatch, startImport } from "@/lib/zoho-import";
 
 // Super Admin: bulk-import warranties from Zoho POS bills.
@@ -31,9 +31,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Zoho POS is not connected yet." }, { status: 400 });
       }
       return NextResponse.json({ state: await startImport(from, to, auth.staff.fullName) });
-    }
-    if (body.action === "probe") {
-      return NextResponse.json(await probeItemFilter(String(body.itemId), String(body.from), String(body.to)));
     }
     if (body.action === "next") {
       return NextResponse.json(await runImportBatch(auth.staff.id));
