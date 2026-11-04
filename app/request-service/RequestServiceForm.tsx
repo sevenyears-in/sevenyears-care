@@ -41,7 +41,7 @@ export default function RequestServiceForm({
   const [altName, setAltName] = useState("");
   const [altMobile, setAltMobile] = useState("");
   const [warrantyNumber, setWarrantyNumber] = useState(initialWarrantyNumber);
-  // Find the product by bill or warranty number (no registered mobile needed — it may be a gift).
+  // Find the product by mobile, bill or warranty number (it may be a gift, so any of these works).
   const [reference, setReference] = useState(initialWarrantyNumber);
   const [items, setItems] = useState<LookupItem[] | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -95,7 +95,7 @@ export default function RequestServiceForm({
     setItems(null);
     setWarrantyNumber("");
     if (reference.trim().length < 4) {
-      setLookupError("Enter the bill number or warranty number.");
+      setLookupError("Enter the mobile number, bill number or warranty number.");
       return;
     }
     setLookupBusy(true);
@@ -114,6 +114,11 @@ export default function RequestServiceForm({
     setItems(list);
     const usable = list.filter((i) => i.active);
     if (usable.length === 1) setWarrantyNumber(usable[0].warrantyNumber);
+    // Found by their own mobile number → use it as the contact number too.
+    const typed = reference.replace(/\D/g, "").slice(-10);
+    if (/^[6-9]\d{9}$/.test(typed) && reference.replace(/[\s+\-]/g, "").replace(/^(91|0)/, "").length === 10) {
+      setMobileNumber((m) => m || typed);
+    }
   };
 
   // Opened with ?warranty=…: look it up straight away.
@@ -320,7 +325,7 @@ export default function RequestServiceForm({
           ) : (
             <div className="mt-4 space-y-3">
               <label htmlFor="reference" className={labelClass}>
-                Bill number or Warranty number *
+                Mobile number, Bill number or Warranty number *
               </label>
               <div className="flex gap-2">
                 <input
@@ -339,7 +344,7 @@ export default function RequestServiceForm({
                     }
                   }}
                   className={inputClass}
-                  placeholder="e.g. VDK26-SI1-8504 or SY-WAR-2026-123456"
+                  placeholder="e.g. 9876543210, VDK26-SI1-8504 or SY-WAR-2026-123456"
                 />
                 <button
                   type="button"
@@ -351,8 +356,8 @@ export default function RequestServiceForm({
                 </button>
               </div>
               <p className="text-xs text-black/50">
-                Printed on the bill or the warranty certificate. The product may have been bought by someone else (a gift) —
-                that&apos;s fine.
+                Use the buyer&apos;s mobile, the gift receiver&apos;s mobile (if given at the store), or the number printed on
+                the bill or warranty certificate. The product may have been bought by someone else (a gift) — that&apos;s fine.
               </p>
               <ErrorBox message={lookupError} />
               {items && (

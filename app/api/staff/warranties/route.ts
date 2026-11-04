@@ -16,6 +16,8 @@ type IncomingItem = {
   customerName?: unknown;
   customerMobile?: unknown;
   customerAddress?: unknown;
+  alternateName?: unknown;
+  alternateMobile?: unknown;
   extended?: unknown;
 };
 
@@ -72,6 +74,8 @@ export async function POST(request: Request) {
       const customerMobile = cleanMobile(item.customerMobile);
       const customerAddress = String(item.customerAddress ?? "").trim();
       const extended = item.extended === true;
+      const alternateName = String(item.alternateName ?? "").trim();
+      const alternateMobile = cleanMobile(item.alternateMobile);
 
       if (!row) errors.push(`${label}: this item is not warranty-eligible on this bill.`);
       else if (row.existing)
@@ -84,6 +88,9 @@ export async function POST(request: Request) {
       if (!customerName) errors.push(`${label}: customer name is required.`);
       if (!isValidMobile(customerMobile)) errors.push(`${label}: enter a valid 10-digit mobile number.`);
       if (customerAddress.length < 5) errors.push(`${label}: customer address is required.`);
+      if (alternateMobile && !isValidMobile(alternateMobile)) errors.push(`${label}: the alternate mobile number is not valid.`);
+      if (alternateMobile && alternateMobile === customerMobile) errors.push(`${label}: the alternate mobile is the same as the customer's.`);
+      if (alternateMobile && !alternateName) errors.push(`${label}: enter the alternate contact's name.`);
       if ([modelNumber, serialNumber, customerName, customerAddress].some((v) => NON_ENGLISH.test(v)))
         errors.push(`${label}: please type details in English letters (needed for the PDF certificate).`);
       if (extended && row && !row.extendedAllowed)
@@ -94,7 +101,7 @@ export async function POST(request: Request) {
         errors.push(`${label}: serial number ${serialNumber} is entered twice.`);
       seenSerials.add(serialKey);
 
-      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended };
+      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, alternateName: alternateMobile ? alternateName : "", alternateMobile };
     });
 
     // Serial numbers already used on another warranty
@@ -162,6 +169,7 @@ export async function POST(request: Request) {
         customer_name: item.customerName,
         customer_mobile: item.customerMobile,
         customer_address: item.customerAddress,
+        ...(item.alternateMobile ? { alternate_name: item.alternateName, alternate_mobile: item.alternateMobile } : {}),
         warranty_start_date: startDate,
         standard_warranty_expiry_date: standardExpiry,
         extended_warranty_purchased: item.extended,
@@ -194,16 +202,23 @@ export async function POST(request: Request) {
     // Customer login: User ID = mobile, first password = last 4 digits of the bill number.
     const accounts: { mobile: string; name: string; created: boolean; password: string | null }[] = [];
     const seen = new Set<string>();
-    for (const r of records) {
-      const mobile = String(r.customer_mobile);
+    // The gift user (alternate contact) gets a login too, so they can see the warranty in My Account.
+    const people = records.flatMap((r) => [
+      { mobile: String(r.customer_mobile), name: String(r.customer_name) },
+      ...("alternate_mobile" in r && r.alternate_mobile
+        ? [{ mobile: String(r.alternate_mobile), name: String(r.alternate_name ?? "") }]
+        : []),
+    ]);
+    for (const p of people) {
+      const mobile = p.mobile;
       if (seen.has(mobile)) continue;
       seen.add(mobile);
-      const result = await ensureCustomerAccount(mobile, String(r.customer_name), bill.billNumber).catch(() => ({
+      const result = await ensureCustomerAccount(mobile, p.name, bill.billNumber).catch(() => ({
         created: false,
       }));
       accounts.push({
         mobile,
-        name: String(r.customer_name),
+        name: p.name,
         created: result.created,
         password: result.created ? billPassword(bill.billNumber) : null,
       });
@@ -266,7 +281,7 @@ export async function GET(request: Request) {
       `serial_number.ilike.%${safe}%`,
       `customer_name.ilike.%${safe}%`,
     ];
-    if (mobile.length >= 4) filters.push(`customer_mobile.like.%${mobile}%`);
+    if (mobile.length >= 4) filters.push(`customer_mobile.like.%${mobile}%`, `alternate_mobile.like.%${mobile}%`);
     query = query.or(filters.join(","));
   }
 

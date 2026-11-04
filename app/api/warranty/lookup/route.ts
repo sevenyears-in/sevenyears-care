@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       .select(
         "warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, warranty_start_date, warranty_expiry_date, extended_warranty_purchased, status"
       )
-      .eq("customer_mobile", mobile)
+      .or(`customer_mobile.eq.${mobile},alternate_mobile.eq.${mobile}`)
       .order("bill_date", { ascending: false });
 
     if (error) throw error;

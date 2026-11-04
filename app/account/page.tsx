@@ -22,7 +22,7 @@ export default async function AccountPage() {
       .select(
         "id, warranty_number, verification_token, product_name, model_number, serial_number, bill_number, bill_date, store_name, warranty_expiry_date, extended_warranty_purchased, status"
       )
-      .eq("customer_mobile", customer.mobile)
+      .or(`customer_mobile.eq.${customer.mobile},alternate_mobile.eq.${customer.mobile}`)
       .order("bill_date", { ascending: false }),
     // Requests they raised or are the alternate contact for.
     supabaseAdmin

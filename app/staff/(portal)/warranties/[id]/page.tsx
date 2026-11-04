@@ -21,6 +21,8 @@ type Row = {
   category_name: string | null;
   model_number: string;
   serial_number: string;
+  alternate_name: string | null;
+  alternate_mobile: string | null;
   customer_name: string;
   customer_mobile: string;
   customer_address: string;
@@ -46,7 +48,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   const { data, error } = await supabaseAdmin
     .from("warranties")
     .select(
-      "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)"
+      "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -65,6 +67,10 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
         { label: "Name", value: w.customer_name },
         { label: "Mobile", value: w.customer_mobile ? `+91 ${w.customer_mobile}` : null },
         { label: "Address", value: w.customer_address },
+        {
+          label: "User / alternate",
+          value: w.alternate_mobile ? `${w.alternate_name ?? ""} · +91 ${w.alternate_mobile}` : null,
+        },
       ],
     },
     {

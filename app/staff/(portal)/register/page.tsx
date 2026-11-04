@@ -53,6 +53,8 @@ type Entry = {
   customerName: string;
   customerMobile: string;
   customerAddress: string;
+  alternateName: string;
+  alternateMobile: string;
   extended: boolean;
 };
 
@@ -129,6 +131,8 @@ export default function RegisterWarrantyStaffPage() {
           customerName: result.bill.customer.name,
           customerMobile: result.bill.customer.mobile,
           customerAddress: result.bill.customer.address,
+          alternateName: "",
+          alternateMobile: "",
           extended: false,
         };
       }
@@ -156,6 +160,8 @@ export default function RegisterWarrantyStaffPage() {
           customerName: source.customerName,
           customerMobile: source.customerMobile,
           customerAddress: source.customerAddress,
+          alternateName: source.alternateName,
+          alternateMobile: source.alternateMobile,
         };
       }
       return next;
@@ -178,7 +184,12 @@ export default function RegisterWarrantyStaffPage() {
       if (!/^[6-9]\d{9}$/.test(e.customerMobile.replace(/\D/g, "")))
         problems.push(`${label}: enter a valid 10-digit mobile number.`);
       if (e.customerAddress.trim().length < 5) problems.push(`${label}: enter the customer address.`);
-      if ([e.modelNumber, e.serialNumber, e.customerName, e.customerAddress].some((v) => /[^\x20-\x7E\xA0-\xFF\r\n\t]/.test(v)))
+      const altMobile = e.alternateMobile.replace(/\D/g, "");
+      if (altMobile && !/^[6-9]\d{9}$/.test(altMobile)) problems.push(`${label}: the alternate mobile number is not valid.`);
+      if (altMobile && altMobile === e.customerMobile.replace(/\D/g, ""))
+        problems.push(`${label}: the alternate mobile is the same as the customer's.`);
+      if (altMobile && !e.alternateName.trim()) problems.push(`${label}: enter the alternate contact's name.`);
+      if ([e.modelNumber, e.serialNumber, e.customerName, e.customerAddress, e.alternateName].some((v) => /[^\x20-\x7E\xA0-\xFF\r\n\t]/.test(v)))
         problems.push(`${label}: type all details in English letters (needed for the PDF certificate).`);
     });
 
@@ -516,6 +527,33 @@ export default function RegisterWarrantyStaffPage() {
                             className={smallInput}
                           />
                         </Field>
+                      </div>
+                      <div className="rounded-2xl bg-[#f7f9fb] p-3 sm:col-span-2 lg:col-span-4">
+                        <p className="text-xs font-bold text-black/60">
+                          🎁 Gift? Who will use this product? <span className="font-normal text-black/45">(optional — they can also request service with their own number)</span>
+                        </p>
+                        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                          <Field label="User / alternate contact name">
+                            <input
+                              value={e.alternateName}
+                              onChange={(ev) => setField(row.key, "alternateName", ev.target.value)}
+                              className={smallInput}
+                            />
+                          </Field>
+                          <Field label="Their mobile number">
+                            <div className="flex">
+                              <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-white px-3 text-xs font-semibold">+91</span>
+                              <input
+                                type="tel"
+                                inputMode="numeric"
+                                maxLength={10}
+                                value={e.alternateMobile}
+                                onChange={(ev) => setField(row.key, "alternateMobile", ev.target.value.replace(/\D/g, ""))}
+                                className={smallPhone}
+                              />
+                            </div>
+                          </Field>
+                        </div>
                       </div>
                     </div>
 

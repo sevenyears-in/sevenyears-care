@@ -11,7 +11,7 @@ export async function GET() {
   const { data } = await supabaseAdmin
     .from("warranties")
     .select("warranty_number, bill_number, bill_date, product_name, model_number, serial_number, store_name, warranty_expiry_date, status, customer_name, customer_address")
-    .eq("customer_mobile", customer.mobile)
+    .or(`customer_mobile.eq.${customer.mobile},alternate_mobile.eq.${customer.mobile}`)
     .order("bill_date", { ascending: false });
 
   const today = todayISO();
