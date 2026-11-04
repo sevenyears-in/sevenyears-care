@@ -153,7 +153,15 @@ export function LiveAlerts() {
           </span>
           <Link
             href={alertHref(a)}
-            onClick={() => setToasts((t) => t.filter((x) => x.id !== a.id))}
+            onClick={() => {
+              setToasts((t) => t.filter((x) => x.id !== a.id));
+              fetch("/api/staff/alerts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: a.id }),
+                keepalive: true,
+              }).catch(() => null);
+            }}
             className="min-w-0 flex-1"
           >
             <p className="text-sm font-bold">{a.title}</p>

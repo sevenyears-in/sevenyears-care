@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/helpers";
 import { MarkAlertsRead } from "@/components/MarkAlertsRead";
+import { AlertItem } from "@/components/AlertItem";
 
 export default async function AlertsPage() {
   const staff = await getCurrentStaff();
@@ -13,11 +13,12 @@ export default async function AlertsPage() {
     .from("staff_notifications")
     .select("id, ticket_type, ticket_id, title, body, read_at, created_at")
     .eq("staff_id", staff.id)
+    .is("read_at", null) // read alerts disappear
     .order("created_at", { ascending: false })
     .limit(100);
 
   const alerts = data ?? [];
-  const unread = alerts.filter((a) => !a.read_at).length;
+  const unread = alerts.length;
 
   return (
     <div className="space-y-6">
@@ -25,7 +26,8 @@ export default async function AlertsPage() {
         <div>
           <h1 className="text-3xl font-bold">Alerts</h1>
           <p className="mt-2 text-sm text-black/60">
-            New requests, assignments, approvals and escalations for you. The same alerts go to your e-mail and WhatsApp.
+            New requests, assignments, approvals and escalations for you. Open an alert (or tap ✓) and it disappears. The
+            same alerts go to your e-mail and WhatsApp.
           </p>
         </div>
         {unread > 0 && <MarkAlertsRead />}
@@ -33,7 +35,7 @@ export default async function AlertsPage() {
 
       {alerts.length === 0 ? (
         <div className="rounded-3xl bg-white p-8 text-center text-sm text-black/55 soft-card ring-1 ring-black/5">
-          No alerts yet.
+          You&apos;re all caught up — no new alerts. 🎉
         </div>
       ) : (
         <ul className="divide-y divide-black/5 overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
@@ -46,16 +48,14 @@ export default async function AlertsPage() {
                 ? "/staff/feedback"
                 : "/staff";
             return (
-              <li key={a.id}>
-                <Link href={href} className={`block px-5 py-4 transition hover:bg-[#f7f9fb] ${a.read_at ? "opacity-60" : ""}`}>
-                  <div className="flex items-center gap-2">
-                    {!a.read_at && <span className="h-2 w-2 rounded-full bg-[#ff5e79]" aria-label="Unread" />}
-                    <p className="font-bold">{a.title}</p>
-                  </div>
-                  {a.body && <p className="mt-1 whitespace-pre-line text-sm text-black/60">{a.body}</p>}
-                  <p className="mt-1 text-xs text-black/40">{formatDateTime(a.created_at)}</p>
-                </Link>
-              </li>
+              <AlertItem
+                key={a.id}
+                id={String(a.id)}
+                href={href}
+                title={a.title}
+                body={a.body}
+                when={formatDateTime(a.created_at)}
+              />
             );
           })}
         </ul>

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { after } from "next/server";
+import { markAlertsRead } from "@/lib/alerts";
 import { getCurrentStaff } from "@/lib/auth";
 import { asRole, canSeeComplaints, canSeeService, ROLE_LABELS, sameStore } from "@/lib/roles";
 import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
@@ -101,6 +103,8 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   const askedToExplain =
     explanations.some((e) => e.staffId === staff.id) && !(type === "complaint" && complaintKind(ticket.title) === "staff");
   if (!canViewTicket(staff, type, ticket) && !askedToExplain) notFound();
+  // Opening the request clears its alerts for this person (after the page is sent).
+  after(() => markAlertsRead(staff.id, { ticketId: ticket.id }));
 
   const canAsk = canRequestExplanation(staff.role);
   const [history, people, everyone] = await Promise.all([

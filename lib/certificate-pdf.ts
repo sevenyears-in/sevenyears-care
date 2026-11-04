@@ -4,6 +4,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
+import { embedPoppins } from "@/lib/pdf-fonts";
 import { formatDate } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
 import { qrMatrix } from "@/lib/qr";
@@ -84,8 +85,10 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
 
   const page = pdf.addPage([595.28, 841.89]); // A4
   const { width, height } = page.getSize();
-  const regular = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  // Poppins (as on sevenyears.in); Helvetica only if the font can't be loaded.
+  const poppins = await embedPoppins(pdf);
+  const regular = poppins?.regular ?? (await pdf.embedFont(StandardFonts.Helvetica));
+  const bold = poppins?.bold ?? (await pdf.embedFont(StandardFonts.HelveticaBold));
 
   const M = 40; // page margin
   const contentWidth = width - M * 2;

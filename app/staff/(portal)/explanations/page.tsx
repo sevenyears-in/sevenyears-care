@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
+import { markAlertsRead } from "@/lib/alerts";
 import { getCurrentStaff } from "@/lib/auth";
 import {
   canRequestExplanation,
@@ -19,6 +21,8 @@ import { complaintKind } from "@/lib/sla";
 export default async function MyExplanationsPage() {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
+
+  after(() => markAlertsRead(staff.id, { titleLike: "%explanation%" }));
 
   const canAsk = canRequestExplanation(staff.role);
   const overview = isCorporateStaff(staff) || staff.role === "hr_head" || staff.role === "hr_executive";

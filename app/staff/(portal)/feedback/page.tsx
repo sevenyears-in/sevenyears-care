@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
+import { markAlertsRead } from "@/lib/alerts";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/helpers";
@@ -47,6 +49,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
   if (!staff) redirect("/staff/login");
   if (!canSeeFeedback(staff.role)) redirect("/staff");
 
+  after(() => markAlertsRead(staff.id, { titleLike: "%feedback%" }));
   const { tab: tabParam, days: daysParam } = await searchParams;
   const tab = TABS.some((t) => t.value === tabParam) ? (tabParam as (typeof TABS)[number]["value"]) : "followup";
   const days = [7, 30, 90, 365].includes(Number(daysParam)) ? Number(daysParam) : 30;
