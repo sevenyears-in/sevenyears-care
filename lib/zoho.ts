@@ -316,6 +316,21 @@ export async function listInvoices(from: string, to: string, page: number) {
   return { invoices, hasMore: Boolean(obj(data.page_context).has_more_page) };
 }
 
+/** Diagnostic: does Zoho filter invoices by item, and do items carry a category? */
+export async function probeItemFilter(itemId: string, from: string, to: string) {
+  const all = await zohoGet("invoices", { date_start: from, date_end: to, per_page: "200" });
+  const byItem = await zohoGet("invoices", { date_start: from, date_end: to, per_page: "200", item_id: itemId });
+  const items = await zohoGet("items", { per_page: "5" });
+  const first = arr(items.items)[0] ?? {};
+  return {
+    allCount: arr(all.invoices).length,
+    byItemCount: arr(byItem.invoices).length,
+    byItemBills: arr(byItem.invoices).map((i) => str(i.invoice_number)).slice(0, 10),
+    itemKeys: Object.keys(first),
+    itemCategory: str(first.category_name),
+  };
+}
+
 /** Full bill for an invoice from listInvoices (categoryCache saves repeat item lookups). */
 export async function fetchBillFromList(inv: InvoiceListItem, categoryCache: Map<string, string>) {
   return billFromInvoice(inv.raw, categoryCache);
