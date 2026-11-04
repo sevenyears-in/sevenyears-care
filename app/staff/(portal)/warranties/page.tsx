@@ -11,70 +11,169 @@ type Warranty = {
   verification_token: string;
   bill_number: string;
   bill_date: string;
+  store_name: string | null;
   product_name: string;
   model_number: string;
   serial_number: string;
   customer_name: string;
   customer_mobile: string;
+  alternate_name: string | null;
+  alternate_mobile: string | null;
   warranty_expiry_date: string;
   extended_warranty_purchased: boolean;
   status: string;
 };
 
+type Filters = { q: string; store: string; from: string; to: string; status: string };
+const EMPTY: Filters = { q: "", store: "", from: "", to: "", status: "" };
+
+const STATUS_OPTIONS = [
+  { value: "", label: "All warranties" },
+  { value: "active", label: "Active" },
+  { value: "expired", label: "Expired" },
+  { value: "gift", label: "Gifts" },
+  { value: "incomplete", label: "Details to complete" },
+  { value: "void", label: "Void" },
+];
+
+const small = inputClass.replace("px-4 py-3", "px-3 py-2.5 text-sm");
+
+function queryString(f: Filters, page?: number) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(f)) if (v) p.set(k, v);
+  if (page && page > 1) p.set("page", String(page));
+  return p.toString();
+}
+
 export default function StaffWarrantiesPage() {
-  const [q, setQ] = useState("");
+  const [draft, setDraft] = useState<Filters>(EMPTY);
+  const [filters, setFilters] = useState<Filters>(EMPTY);
+  const [page, setPage] = useState(1);
   const [warranties, setWarranties] = useState<Warranty[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [stores, setStores] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const search = useCallback(async (term: string) => {
+  useEffect(() => {
+    fetch("/api/staff/warranties/stores")
+      .then((r) => r.json())
+      .then((d) => setStores(d.stores ?? []))
+      .catch(() => null);
+  }, []);
+
+  const load = useCallback(async (f: Filters, p: number) => {
     setLoading(true);
     setErrorMessage("");
-    const response = await fetch(`/api/staff/warranties?q=${encodeURIComponent(term)}`);
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401) {
+    const response = await fetch(`/api/staff/warranties?${queryString(f, p)}`, { cache: "no-store" }).catch(() => null);
+    const data = response ? await response.json().catch(() => ({})) : {};
+    if (response?.status === 401) {
       window.location.href = "/staff/login";
       return;
     }
-    if (!response.ok) setErrorMessage(data.error || "Unable to load warranties.");
-    else setWarranties(data.warranties ?? []);
+    if (!response?.ok) setErrorMessage(data.error || "Unable to load warranties.");
+    else {
+      setWarranties(data.warranties ?? []);
+      setTotal(data.total ?? 0);
+      setPageSize(data.pageSize ?? 50);
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    const run = async () => {
-      await search("");
-    };
-    run();
-  }, [search]);
+    void load(filters, page);
+  }, [filters, page, load]);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    search(q);
+  const apply = (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    setPage(1);
+    setFilters({ ...draft });
   };
+  const clear = () => {
+    setDraft(EMPTY);
+    setPage(1);
+    setFilters(EMPTY);
+  };
+  const set = (k: keyof Filters, v: string) => setDraft((d) => ({ ...d, [k]: v }));
+
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = Math.min(total, page * pageSize);
+  const filtered = Object.values(filters).some(Boolean);
 
   const today = todayISO();
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Warranties</h1>
-        <p className="mt-2 text-sm text-black/60">
-          Latest 50 registrations. Search by bill number, warranty number, customer, mobile or serial number.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Warranties</h1>
+          <p className="mt-2 text-sm text-black/60">Search, filter by store and bill date, or download the full details.</p>
+        </div>
+        <div className="rounded-3xl bg-white px-5 py-3 text-right soft-card ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wider text-black/45">{filtered ? "Matching" : "Total"} warranties</p>
+          <p className="text-3xl font-bold">{loading && total === 0 ? "…" : total.toLocaleString("en-IN")}</p>
+        </div>
       </div>
 
-      <form onSubmit={submit} className="flex gap-3">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className={inputClass}
-          placeholder="Search..."
-          aria-label="Search warranties"
-        />
-        <button type="submit" className="rounded-2xl bg-[#161616] px-6 font-bold text-white">
-          Search
-        </button>
+      <form onSubmit={apply} className="rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1.3fr_1fr_1fr_1.2fr]">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-black/55">Search</span>
+            <input
+              value={draft.q}
+              onChange={(e) => set("q", e.target.value)}
+              className={small}
+              placeholder="Bill, warranty no., name, mobile, serial…"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-black/55">Store</span>
+            <select value={draft.store} onChange={(e) => set("store", e.target.value)} className={small}>
+              <option value="">All stores</option>
+              {stores.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-black/55">Bill date from</span>
+            <input type="date" value={draft.from} max={draft.to || today} onChange={(e) => set("from", e.target.value)} className={small} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-black/55">Bill date to</span>
+            <input type="date" value={draft.to} min={draft.from} max={today} onChange={(e) => set("to", e.target.value)} className={small} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-black/55">Show</span>
+            <select value={draft.status} onChange={(e) => set("status", e.target.value)} className={small}>
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="submit" className="rounded-2xl bg-[#161616] px-5 py-2.5 text-sm font-bold text-white">
+            Apply
+          </button>
+          {filtered && (
+            <button type="button" onClick={clear} className="rounded-2xl px-4 py-2.5 text-sm font-bold ring-1 ring-black/10">
+              Clear
+            </button>
+          )}
+          <a
+            href={`/api/staff/warranties/export?${queryString(filters)}`}
+            className="ml-auto rounded-2xl bg-[#11b8d0] px-4 py-2.5 text-sm font-bold text-white"
+          >
+            ⬇ Download full details (Excel)
+          </a>
+        </div>
       </form>
 
       <ErrorBox message={errorMessage} />
@@ -111,17 +210,30 @@ export default function StaffWarrantiesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold">{w.bill_number}</p>
-                        <p className="text-xs text-black/50">{formatDate(w.bill_date)}</p>
+                        <p className="text-xs text-black/50">
+                          {formatDate(w.bill_date)}
+                          {w.store_name ? ` · ${w.store_name}` : ""}
+                        </p>
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold">{w.product_name}</p>
                         <p className="text-xs text-black/50">
-                          Model {w.model_number} • S/N {w.serial_number}
+                          Model {w.model_number} •{" "}
+                          {w.serial_number === "Not recorded" ? (
+                            <span className="font-semibold text-amber-700">S/N to be added</span>
+                          ) : (
+                            <>S/N {w.serial_number}</>
+                          )}
                         </p>
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold">{w.customer_name}</p>
                         <p className="text-xs text-black/50">+91 {w.customer_mobile}</p>
+                        {w.alternate_mobile && (
+                          <p className="text-xs text-[#ff5e79]">
+                            🎁 {w.alternate_name} · +91 {w.alternate_mobile}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {formatDate(w.warranty_expiry_date)}
@@ -153,6 +265,35 @@ export default function StaffWarrantiesPage() {
           </div>
         )}
       </div>
+
+      {total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <p className="text-black/55">
+            Showing {firstRow.toLocaleString("en-IN")}–{lastRow.toLocaleString("en-IN")} of {total.toLocaleString("en-IN")}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => p - 1)}
+              className="rounded-xl px-3 py-2 font-bold ring-1 ring-black/10 disabled:opacity-30"
+            >
+              ← Previous
+            </button>
+            <span className="text-black/55">
+              Page {page} of {pages}
+            </span>
+            <button
+              type="button"
+              disabled={page >= pages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded-xl px-3 py-2 font-bold ring-1 ring-black/10 disabled:opacity-30"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
 import { addMonths, cleanMobile, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
 import { extendedSettings } from "@/lib/extended-warranty";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
+import { PAGE_SIZE, readFilters, searchWarranties } from "@/lib/warranty-search";
 import { fetchBill, ZohoError } from "@/lib/zoho";
 
 type IncomingItem = {
@@ -283,43 +284,21 @@ export async function POST(request: Request) {
 }
 
 // ------------------------------------------------------------------
-// GET /api/staff/warranties?q=… — search (bill no., warranty no., mobile, serial)
+// GET /api/staff/warranties?q=&store=&from=&to=&status=&page= — list with total
 // ------------------------------------------------------------------
 
 export async function GET(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
 
-  const q = (new URL(request.url).searchParams.get("q") ?? "").trim();
-
-  let query = supabaseAdmin
-    .from("warranties")
-    .select(
-      "id, warranty_number, verification_token, bill_number, bill_date, product_name, model_number, serial_number, customer_name, customer_mobile, warranty_expiry_date, extended_warranty_purchased, status, created_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  if (q) {
-    // strip characters that have meaning in PostgREST filter syntax
-    const safe = q.replace(/[,()*%]/g, " ").trim();
-    const mobile = q.replace(/\D/g, "");
-    const filters = [
-      `warranty_number.ilike.%${safe}%`,
-      `bill_number.ilike.%${safe}%`,
-      `serial_number.ilike.%${safe}%`,
-      `customer_name.ilike.%${safe}%`,
-    ];
-    if (mobile.length >= 4) filters.push(`customer_mobile.like.%${mobile}%`, `alternate_mobile.like.%${mobile}%`);
-    query = query.or(filters.join(","));
-  }
-
-  const { data, error } = await query;
+  const filters = readFilters(request.url);
+  const page = Math.max(1, Math.min(10000, Number(new URL(request.url).searchParams.get("page")) || 1));
+  const { data, error, count } = await searchWarranties(filters, page);
 
   if (error) {
     console.error("Search warranties error:", error);
     return NextResponse.json({ error: "Unable to load warranties." }, { status: 500 });
   }
 
-  return NextResponse.json({ warranties: data ?? [] });
+  return NextResponse.json({ warranties: data ?? [], total: count ?? 0, page, pageSize: PAGE_SIZE });
 }
