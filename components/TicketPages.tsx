@@ -120,6 +120,21 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   const details: { label: string; value: string | null }[] = [
     { label: "Customer", value: ticket.contactName },
     { label: "Mobile", value: ticket.contactMobile },
+    ...(type === "service"
+      ? [
+          {
+            label: "Alternate contact",
+            value: ticket.alternateMobile ? `${ticket.alternateName ?? ""} ${ticket.alternateMobile}`.trim() : null,
+          },
+          {
+            label: "Bought by",
+            value:
+              ticket.buyerMobile && ticket.buyerMobile !== ticket.contactMobile
+                ? `${ticket.buyerName ?? ""} (${ticket.buyerMobile})`
+                : null,
+          },
+        ]
+      : []),
     { label: "E-mail", value: ticket.contactEmail },
     { label: "Store", value: ticket.storeName },
     { label: "Product", value: ticket.productName },
@@ -216,6 +231,11 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
               >
                 WhatsApp customer
               </a>
+              {ticket.alternateMobile && (
+                <a href={`tel:+91${ticket.alternateMobile}`} className="rounded-xl border border-black/10 bg-white px-4 py-2 font-bold">
+                  📞 Alternate{ticket.alternateName ? ` (${ticket.alternateName.split(" ")[0]})` : ""}
+                </a>
+              )}
             </>
           )}
           {mapLink && (

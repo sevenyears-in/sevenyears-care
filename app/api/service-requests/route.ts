@@ -6,6 +6,7 @@ import { cleanMobile, generateTicketNumber, isISODate, isValidMobile, todayISO }
 import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 import { SAFETY_ISSUE_TYPES } from "@/lib/sla";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
+import { notifyCustomer } from "@/lib/notify";
 
 // POST /api/service-requests
 // Creates a service request against a registered warranty.
@@ -16,8 +17,12 @@ export async function POST(request: Request) {
     const body = await request.json();
     const customer = await getCurrentCustomer();
 
-    // Logged in to My Account: the mobile number comes from their account.
-    const mobile = customer ? customer.mobile : cleanMobile(body.mobileNumber);
+    // The person to contact (often not the buyer — baby products are gifts):
+    // their name and mobile; the buyer is told separately.
+    const mobile = cleanMobile(body.contactMobile ?? body.mobileNumber ?? customer?.mobile);
+    const contactName = String(body.contactName ?? customer?.name ?? "").trim().slice(0, 120);
+    const altName = String(body.altName ?? "").trim().slice(0, 120);
+    const altMobile = cleanMobile(body.altMobile);
     const warrantyNumber = String(body.warrantyNumber ?? "").trim().toUpperCase();
     const issueType = String(body.issueType ?? "").trim();
     const description = String(body.description ?? "").trim();
@@ -30,6 +35,12 @@ export async function POST(request: Request) {
       typeof body.locationAccuracy === "number" ? body.locationAccuracy : null;
 
     // ---------------- Validation ----------------
+    if (!contactName) {
+      return NextResponse.json({ error: "Enter the name of the person we should contact." }, { status: 400 });
+    }
+    if (altMobile && !isValidMobile(altMobile)) {
+      return NextResponse.json({ error: "The alternate mobile number is not valid." }, { status: 400 });
+    }
     if (!isValidMobile(mobile)) {
       return NextResponse.json(
         { error: "Enter a valid 10-digit Indian mobile number." },
@@ -37,7 +48,7 @@ export async function POST(request: Request) {
       );
     }
     if (!warrantyNumber) {
-      return NextResponse.json({ error: "Enter your warranty number." }, { status: 400 });
+      return NextResponse.json({ error: "Enter the bill number or warranty number and choose the product." }, { status: 400 });
     }
     if (!SERVICE_ISSUE_TYPES.includes(issueType)) {
       return NextResponse.json({ error: "Please choose the type of problem." }, { status: 400 });
@@ -69,11 +80,11 @@ export async function POST(request: Request) {
 
     if (warrantyError) throw warrantyError;
 
-    if (!warranty || warranty.customer_mobile !== mobile) {
+    // The bill / warranty number is the proof of purchase — the requester's mobile can be anyone's.
+    if (!warranty) {
       return NextResponse.json(
         {
-          error:
-            "This warranty number doesn't match the mobile number. Please check both and try again.",
+          error: "We couldn't find this warranty. Please check the bill / warranty number and try again.",
         },
         { status: 404 }
       );
@@ -128,8 +139,10 @@ export async function POST(request: Request) {
       .insert({
         request_number: requestNumber,
         warranty_id: warranty.id,
-        contact_name: warranty.customer_name,
+        contact_name: contactName,
         contact_mobile: mobile,
+        alternate_name: altName || null,
+        alternate_mobile: altMobile || null,
         product_name: warranty.product_name,
         store_name: warranty.store_name,
         issue_type: issueType,
@@ -178,7 +191,9 @@ export async function POST(request: Request) {
         number: created.request_number,
         storeName: warranty.store_name ?? null,
         title: issueType,
-        summary: `${warranty.product_name} — ${issueType} · Customer: ${warranty.customer_name} (${mobile})`,
+        summary: `${warranty.product_name} — ${issueType} · Contact: ${contactName} (${mobile})${
+          warranty.customer_mobile !== mobile ? ` · Bought by ${warranty.customer_name} (${warranty.customer_mobile})` : ""
+        }`,
         details: [
           `Problem: ${description}`,
           serviceMode === "home_visit" ? "Customer asked for a home visit / pickup." : "Customer will bring it to the store.",
@@ -186,14 +201,26 @@ export async function POST(request: Request) {
           ...(priority === "safety" ? ["SAFETY: ask the customer to stop using the product until it is checked."] : []),
         ],
         priority,
-        customer: { name: warranty.customer_name, mobile },
+        customer: { name: contactName, mobile },
       }).catch((error) => console.error("New service request alerts failed:", error))
     );
 
+    // The buyer gets a copy when someone else raised it (e.g. a gift).
+    if (warranty.customer_mobile && warranty.customer_mobile !== mobile) {
+      after(() =>
+        notifyCustomer({
+          name: warranty.customer_name,
+          mobile: warranty.customer_mobile,
+          ticketNumber: created.request_number,
+          message: `A service request was raised for the ${warranty.product_name} you bought, by ${contactName}. Our team will contact them directly.`,
+        }).catch((error) => console.error("Buyer copy failed:", error))
+      );
+    }
+
     // First request from this mobile: give them a My Account login.
-    const account = customer
+    const account = customer && customer.mobile === mobile
       ? { created: false }
-      : await ensureCustomerAccountFromRequest(mobile, String(warranty.customer_name ?? ""));
+      : await ensureCustomerAccountFromRequest(mobile, contactName);
 
     return NextResponse.json(
       {

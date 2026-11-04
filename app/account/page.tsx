@@ -24,10 +24,11 @@ export default async function AccountPage() {
       )
       .eq("customer_mobile", customer.mobile)
       .order("bill_date", { ascending: false }),
+    // Requests they raised or are the alternate contact for.
     supabaseAdmin
       .from("service_requests")
       .select("id, request_number, product_name, issue_type, status, resolution_notes, created_at, updated_at")
-      .eq("contact_mobile", customer.mobile)
+      .or(`contact_mobile.eq.${customer.mobile},alternate_mobile.eq.${customer.mobile}`)
       .order("created_at", { ascending: false }),
     supabaseAdmin
       .from("complaints")
@@ -36,6 +37,18 @@ export default async function AccountPage() {
       .order("created_at", { ascending: false }),
     supabaseAdmin.from("customer_feedback").select("kind, ref_id, ref_number, resolved, answers").eq("mobile", customer.mobile),
   ]);
+
+  // Plus requests on products they bought (e.g. raised by the person they gifted it to).
+  const myWarrantyIds = (warranties.data ?? []).map((w) => w.id);
+  const { data: onMyProducts } = myWarrantyIds.length
+    ? await supabaseAdmin
+        .from("service_requests")
+        .select("id, request_number, product_name, issue_type, status, resolution_notes, created_at, updated_at")
+        .in("warranty_id", myWarrantyIds)
+    : { data: [] };
+  const serviceList = [...(services.data ?? []), ...(onMyProducts ?? [])]
+    .filter((r, i, all) => all.findIndex((x) => x.id === r.id) === i)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 
   // Feedback already given (the table may not exist yet — then everything is "not rated").
   const given = feedback.data ?? [];
@@ -158,10 +171,10 @@ export default async function AccountPage() {
 
       <section className="mt-8 space-y-3">
         <h2 className="text-xl font-bold">My Service Requests</h2>
-        {(services.data ?? []).length === 0 ? (
+        {serviceList.length === 0 ? (
           <p className={`${card} text-sm text-black/55`}>No service requests yet.</p>
         ) : (
-          (services.data ?? []).map((r) => (
+          serviceList.map((r) => (
             <div key={r.id} className={card}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>

@@ -13,6 +13,16 @@ import {
 import { formatDateTime, todayISO } from "@/lib/helpers";
 import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 
+type LookupItem = {
+  warrantyNumber: string;
+  productName: string;
+  model: string;
+  serialEnd: string;
+  store: string | null;
+  active: boolean;
+  underWarranty: boolean;
+};
+
 type Created = {
   request_number: string;
   status: string;
@@ -27,7 +37,16 @@ export default function RequestServiceForm({
   initialWarrantyNumber: string;
 }) {
   const [mobileNumber, setMobileNumber] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [altName, setAltName] = useState("");
+  const [altMobile, setAltMobile] = useState("");
   const [warrantyNumber, setWarrantyNumber] = useState(initialWarrantyNumber);
+  // Find the product by bill or warranty number (no registered mobile needed — it may be a gift).
+  const [reference, setReference] = useState(initialWarrantyNumber);
+  const [items, setItems] = useState<LookupItem[] | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupError, setLookupError] = useState("");
+  const [useOther, setUseOther] = useState(false);
   const [issueType, setIssueType] = useState("");
   const [description, setDescription] = useState("");
   const [serviceMode, setServiceMode] = useState("store_visit");
@@ -58,6 +77,7 @@ export default function RequestServiceForm({
       setMe(data);
       if (data.loggedIn) {
         setMobileNumber(data.mobile ?? "");
+        setContactName(data.name ?? "");
         const list = (data.warranties ?? []) as { warrantyNumber: string; active: boolean }[];
         const chosen = list.find((w) => w.warrantyNumber === initialWarrantyNumber) ?? list.find((w) => w.active) ?? list[0];
         if (chosen) setWarrantyNumber(chosen.warrantyNumber);
@@ -68,6 +88,39 @@ export default function RequestServiceForm({
 
   const loggedIn = Boolean(me?.loggedIn);
   const myWarranties = me?.warranties ?? [];
+  const pickFromAccount = loggedIn && myWarranties.length > 0 && !useOther;
+
+  const lookup = async () => {
+    setLookupError("");
+    setItems(null);
+    setWarrantyNumber("");
+    if (reference.trim().length < 4) {
+      setLookupError("Enter the bill number or warranty number.");
+      return;
+    }
+    setLookupBusy(true);
+    const r = await fetch("/api/service-requests/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference }),
+    }).catch(() => null);
+    const d = r ? await r.json().catch(() => ({})) : {};
+    setLookupBusy(false);
+    if (!r?.ok) {
+      setLookupError(d.error || "Unable to find this bill.");
+      return;
+    }
+    const list = (d.items ?? []) as LookupItem[];
+    setItems(list);
+    const usable = list.filter((i) => i.active);
+    if (usable.length === 1) setWarrantyNumber(usable[0].warrantyNumber);
+  };
+
+  // Opened with ?warranty=…: look it up straight away.
+  useEffect(() => {
+    if (initialWarrantyNumber) void lookup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const captureLocation = () => {
     if (!navigator.geolocation) {
@@ -97,12 +150,21 @@ export default function RequestServiceForm({
 
     const mobile = mobileNumber.replace(/\D/g, "");
 
-    if (!loggedIn && !/^[6-9]\d{9}$/.test(mobile)) {
-      setErrorMessage("Please enter a valid 10-digit mobile number.");
+    if (!warrantyNumber.trim()) {
+      setErrorMessage("Enter the bill or warranty number, tap Find and choose the product.");
       return;
     }
-    if (!warrantyNumber.trim()) {
-      setErrorMessage("Please enter your warranty number.");
+    if (!contactName.trim()) {
+      setErrorMessage("Please enter the name of the person we should contact.");
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      setErrorMessage("Please enter a valid 10-digit mobile number to contact.");
+      return;
+    }
+    const alt = altMobile.replace(/\D/g, "");
+    if (alt && !/^[6-9]\d{9}$/.test(alt)) {
+      setErrorMessage("The alternate mobile number is not valid.");
       return;
     }
     if (!issueType) {
@@ -121,7 +183,10 @@ export default function RequestServiceForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mobileNumber: mobile,
+          contactMobile: mobile,
+          contactName,
+          altName,
+          altMobile: altMobile.replace(/\D/g, ""),
           warrantyNumber,
           issueType,
           description,
@@ -197,7 +262,7 @@ export default function RequestServiceForm({
 
         <p className="mt-5 text-sm text-black/60">
           Save your request number. You&apos;ll need it with your mobile number to
-          track progress.
+          track progress. If someone else bought this product, they also get a copy of this request.
         </p>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -222,8 +287,8 @@ export default function RequestServiceForm({
     <div className={cardClass}>
       <form onSubmit={handleSubmit} className="space-y-8" noValidate>
         <section>
-          <h2 className="text-lg font-bold">1. Your Warranty</h2>
-          {loggedIn && myWarranties.length > 0 ? (
+          <h2 className="text-lg font-bold">1. The Product</h2>
+          {pickFromAccount ? (
             <div className="mt-4">
               <label htmlFor="warranty-select" className={labelClass}>
                 Product *
@@ -241,16 +306,118 @@ export default function RequestServiceForm({
                   </option>
                 ))}
               </select>
-              <p className="mt-2 text-xs text-black/45">
-                Logged in as {me?.name || "you"} (+91 {mobileNumber}). Your details are taken from your warranty.
-              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseOther(true);
+                  setWarrantyNumber("");
+                }}
+                className="mt-2 text-xs font-bold text-[#0fa8bf]"
+              >
+                Product not in this list (e.g. a gift)? Use a bill or warranty number →
+              </button>
             </div>
           ) : (
-            <>
+            <div className="mt-4 space-y-3">
+              <label htmlFor="reference" className={labelClass}>
+                Bill number or Warranty number *
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="reference"
+                  type="text"
+                  value={reference}
+                  onChange={(e) => {
+                    setReference(e.target.value);
+                    setItems(null);
+                    setWarrantyNumber("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void lookup();
+                    }
+                  }}
+                  className={inputClass}
+                  placeholder="e.g. VDK26-SI1-8504 or SY-WAR-2026-123456"
+                />
+                <button
+                  type="button"
+                  onClick={lookup}
+                  disabled={lookupBusy}
+                  className="shrink-0 rounded-2xl bg-[#161616] px-5 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {lookupBusy ? "…" : "Find"}
+                </button>
+              </div>
+              <p className="text-xs text-black/50">
+                Printed on the bill or the warranty certificate. The product may have been bought by someone else (a gift) —
+                that&apos;s fine.
+              </p>
+              <ErrorBox message={lookupError} />
+              {items && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">{items.length > 1 ? "Which product needs service?" : "Product"}</p>
+                  {items.map((i) => (
+                    <label
+                      key={i.warrantyNumber}
+                      className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 text-sm transition ${
+                        !i.active
+                          ? "cursor-not-allowed border-black/5 opacity-50"
+                          : warrantyNumber === i.warrantyNumber
+                            ? "border-[#ff5e79] bg-[#ff5e79]/5"
+                            : "border-black/10 hover:border-black/25"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="product"
+                        disabled={!i.active}
+                        checked={warrantyNumber === i.warrantyNumber}
+                        onChange={() => setWarrantyNumber(i.warrantyNumber)}
+                        className="mt-1 accent-[#ff5e79]"
+                      />
+                      <span>
+                        <span className="font-bold">{i.productName}</span>
+                        <span className="block text-xs text-black/55">
+                          Model {i.model} · Serial …{i.serialEnd}
+                          {i.store ? ` · ${i.store}` : ""} ·{" "}
+                          {i.active ? (i.underWarranty ? "Under warranty" : "Warranty ended (chargeable)") : "Not active"}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {loggedIn && myWarranties.length > 0 && (
+                <button type="button" onClick={() => setUseOther(false)} className="text-xs font-bold text-[#0fa8bf]">
+                  ← Choose from my products
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="text-lg font-bold">2. Who should we contact?</h2>
+          <p className="mt-1 text-sm text-black/55">The person using the product — we&apos;ll call and send updates to this number.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
+              <label htmlFor="contact-name" className={labelClass}>
+                Name *
+              </label>
+              <input
+                id="contact-name"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                className={inputClass}
+                autoComplete="name"
+                placeholder="Full name"
+              />
+            </div>
+            <div>
               <label htmlFor="mobile" className={labelClass}>
-                Registered Mobile Number *
+                Mobile Number *
               </label>
               <div className="flex">
                 <div className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-4 text-sm font-semibold">
@@ -269,32 +436,42 @@ export default function RequestServiceForm({
                 />
               </div>
             </div>
-
             <div>
-              <label htmlFor="warranty" className={labelClass}>
-                Warranty Number *
+              <label htmlFor="alt-name" className={labelClass}>
+                Alternate contact name <span className="font-normal text-black/40">(optional)</span>
               </label>
               <input
-                id="warranty"
-                type="text"
-                value={warrantyNumber}
-                onChange={(e) => setWarrantyNumber(e.target.value)}
+                id="alt-name"
+                value={altName}
+                onChange={(e) => setAltName(e.target.value)}
                 className={inputClass}
-                placeholder="SY-WAR-2026-123456"
+                placeholder="e.g. spouse / family member"
               />
             </div>
+            <div>
+              <label htmlFor="alt-mobile" className={labelClass}>
+                Alternate mobile <span className="font-normal text-black/40">(optional)</span>
+              </label>
+              <div className="flex">
+                <div className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-4 text-sm font-semibold">
+                  +91
+                </div>
+                <input
+                  id="alt-mobile"
+                  type="tel"
+                  inputMode="numeric"
+                  value={altMobile}
+                  onChange={(e) => setAltMobile(e.target.value)}
+                  maxLength={10}
+                  className={phoneInputClass}
+                  placeholder="Another number to reach you"
+                />
+              </div>
+            </div>
           </div>
-          <p className="mt-3 text-sm text-black/50">
-            Don&apos;t know your warranty number?{" "}
-            <Link href="/my-warranties" className="font-bold text-[#ff5e79]">
-              Find it in My Warranties
-            </Link>
-          </p>
-            </>
-          )}
         </section>
         <section>
-          <h2 className="text-lg font-bold">2. The Problem</h2>
+          <h2 className="text-lg font-bold">3. The Problem</h2>
           <div className="mt-4 space-y-4">
             <div>
               <label htmlFor="issue" className={labelClass}>
@@ -333,7 +510,7 @@ export default function RequestServiceForm({
         </section>
 
         <section>
-          <h2 className="text-lg font-bold">3. How Should We Help?</h2>
+          <h2 className="text-lg font-bold">4. How Should We Help?</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {SERVICE_MODES.map((mode) => (
               <label
@@ -397,7 +574,7 @@ export default function RequestServiceForm({
         </section>
 
         <section>
-          <h2 className="text-lg font-bold">4. Your Location (optional)</h2>
+          <h2 className="text-lg font-bold">5. Your Location (optional)</h2>
           <div className="mt-4 rounded-2xl border border-dashed border-black/15 bg-[#fafafa] p-4">
             <p className="text-sm text-black/60">
               Sharing your current location helps us send the request to the nearest

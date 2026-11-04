@@ -67,6 +67,11 @@ export type Ticket = {
   address?: string | null;
   underWarranty?: boolean | null;
   warrantyNumber?: string | null;
+  alternateName?: string | null;
+  alternateMobile?: string | null;
+  /** Who bought it (may differ from the contact when it was a gift). */
+  buyerName?: string | null;
+  buyerMobile?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   // complaint only
@@ -84,7 +89,7 @@ const COMMON_COLS =
   "id, status, priority, severity, store_name, contact_name, contact_mobile, description, created_at, updated_at, acknowledged_at, ack_due_at, resolution_due_at, resolved_at, closed_at, resolution_type, resolution_notes, escalation_level";
 
 const SELECT: Record<TicketType, string> = {
-  service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, warranties ( warranty_number )`,
+  service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, alternate_name, alternate_mobile, warranties ( warranty_number, customer_name, customer_mobile )`,
   complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id, source, involved_staff_name, involved_staff_id`,
 };
 
@@ -96,8 +101,10 @@ function str(v: unknown) {
 
 function toTicket(type: TicketType, row: Row, names: Map<string, string>): Ticket {
   const assigneeId = str(row[ASSIGNEE_COL[type]]);
-  const warranty = row.warranties as { warranty_number?: string } | { warranty_number?: string }[] | null;
-  const warrantyNumber = Array.isArray(warranty) ? warranty[0]?.warranty_number : warranty?.warranty_number;
+  type W = { warranty_number?: string; customer_name?: string; customer_mobile?: string };
+  const wRaw = row.warranties as W | W[] | null;
+  const w = Array.isArray(wRaw) ? wRaw[0] : wRaw;
+  const warrantyNumber = w?.warranty_number;
 
   return {
     type,
@@ -130,6 +137,10 @@ function toTicket(type: TicketType, row: Row, names: Map<string, string>): Ticke
     address: str(row.address),
     underWarranty: typeof row.under_warranty === "boolean" ? row.under_warranty : null,
     warrantyNumber: warrantyNumber ?? null,
+    alternateName: str(row.alternate_name),
+    alternateMobile: str(row.alternate_mobile),
+    buyerName: w?.customer_name ?? null,
+    buyerMobile: w?.customer_mobile ?? null,
     latitude: typeof row.latitude === "number" ? row.latitude : null,
     longitude: typeof row.longitude === "number" ? row.longitude : null,
     referenceNumber: str(row.reference_number),

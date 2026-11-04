@@ -33,15 +33,16 @@ export async function POST(request: Request) {
       const { data: row, error } = await supabaseAdmin
         .from("service_requests")
         .select(
-          "id, request_number, contact_mobile, product_name, store_name, issue_type, description, service_mode, preferred_date, under_warranty, status, resolution_notes, created_at, updated_at, warranties ( warranty_number )"
+          "id, request_number, contact_mobile, alternate_mobile, product_name, store_name, issue_type, description, service_mode, preferred_date, under_warranty, status, resolution_notes, created_at, updated_at, warranties ( warranty_number, customer_mobile )"
         )
         .eq("request_number", ticketNumber)
         .maybeSingle();
 
       if (error) throw error;
-      if (!row || row.contact_mobile !== mobile) return notFound;
-
-      const warranty = one(row.warranties as unknown as { warranty_number: string } | { warranty_number: string }[] | null);
+      type WarrantyRef = { warranty_number: string; customer_mobile: string };
+      const warranty = row ? one(row.warranties as unknown as WarrantyRef | WarrantyRef[] | null) : null;
+      // The contact person, the alternate contact or the buyer can track it.
+      if (!row || ![row.contact_mobile, row.alternate_mobile, warranty?.customer_mobile].includes(mobile)) return notFound;
 
       return NextResponse.json({
         type: "service",
