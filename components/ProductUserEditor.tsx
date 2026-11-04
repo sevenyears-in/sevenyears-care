@@ -36,42 +36,42 @@ export function ProductUserEditor({
     setOpen(false);
     setDone(
       clear
-        ? "Saved — the buyer is the product user."
+        ? "Saved — marked as not a gift."
         : data.login?.created
-          ? `Saved. Login created — User ID ${userMobile}, password ${data.login.password}. The user has been sent their certificate link.`
-          : "Saved. The user has been sent their certificate link."
+          ? `Saved. Login created — User ID ${userMobile}, password ${data.login.password}. The recipient has been sent their certificate link.`
+          : "Saved. The recipient has been sent their certificate link."
     );
     router.refresh();
   };
 
   return (
     <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
-      <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Product user (gift)</p>
+      <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Gift Recipient</p>
       {!open ? (
         <>
           <p className="mt-3 text-sm">
             {mobile ? (
               <>
                 <b>{name}</b> · +91 {mobile}
-                <span className="block text-xs text-black/50">Messages, service updates and login go to this number.</span>
+                <span className="block text-xs text-black/50">Warranty and service updates are sent to the recipient.</span>
               </>
             ) : (
-              <span className="text-black/55">Same as the buyer.</span>
+              <span className="text-black/55">Not a gift — the customer uses this product.</span>
             )}
           </p>
           {done && <p className="mt-2 text-xs text-green-700">{done}</p>}
           <button type="button" onClick={() => setOpen(true)} className="mt-3 text-sm font-bold text-[#0b7f90] hover:underline">
-            {mobile ? "Change product user" : "Add product user"}
+            {mobile ? "Change recipient" : "Add gift recipient"}
           </button>
         </>
       ) : (
         <div className="mt-3 space-y-3">
           <label className="block">
-            <span className={labelClass}>User&apos;s name</span>
+            <span className={labelClass}>Recipient Name</span>
             <input value={userName} onChange={(e) => setUserName(e.target.value)} className={inputClass} />
           </label>
           <label className="block">
-            <span className={labelClass}>User&apos;s mobile</span>
+            <span className={labelClass}>Recipient Mobile Number</span>
             <input
               type="tel"
               inputMode="numeric"
@@ -93,7 +93,7 @@ export function ProductUserEditor({
             </button>
             {mobile && (
               <button type="button" onClick={() => save(true)} disabled={busy} className="rounded-2xl px-4 py-2.5 text-sm font-bold ring-1 ring-black/10">
-                User is the buyer
+                Not a gift
               </button>
             )}
             <button type="button" onClick={() => setOpen(false)} className="px-3 py-2.5 text-sm text-black/50">

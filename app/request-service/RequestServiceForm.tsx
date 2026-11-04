@@ -97,7 +97,7 @@ export default function RequestServiceForm({
     setWarrantyNumber("");
     const ownerMobile = lookupMobile.replace(/\D/g, "");
     if (!/^[6-9]\d{9}$/.test(ownerMobile)) {
-      setLookupError("Enter the 10-digit mobile number given at the store.");
+      setLookupError("Enter your registered 10-digit mobile number.");
       return;
     }
     if (reference.trim().length < 4) {
@@ -323,7 +323,7 @@ export default function RequestServiceForm({
           ) : (
             <div className="mt-4 space-y-3">
               <label htmlFor="owner-mobile" className={labelClass}>
-                Mobile number given at the store *
+                Registered Mobile Number *
               </label>
               <div className="flex">
                 <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-4 text-sm font-semibold">
@@ -341,11 +341,11 @@ export default function RequestServiceForm({
                     setWarrantyNumber("");
                   }}
                   className={phoneInputClass}
-                  placeholder="Buyer's or product user's mobile"
+                  placeholder="10-digit mobile number"
                 />
               </div>
               <label htmlFor="reference" className={labelClass}>
-                Bill number or Warranty number *
+                Bill / Warranty Number *
               </label>
               <div className="flex gap-2">
                 <input
@@ -364,7 +364,7 @@ export default function RequestServiceForm({
                     }
                   }}
                   className={inputClass}
-                  placeholder="e.g. VDK26-SI1-8504 or SY-WAR-2026-123456"
+                  placeholder="e.g. VDK26-SI1-8504"
                 />
                 <button
                   type="button"
@@ -376,9 +376,7 @@ export default function RequestServiceForm({
                 </button>
               </div>
               <p className="text-xs text-black/50">
-                Use the mobile number of the buyer or of the product user (given at the store when the warranty was
-                registered), and the number printed on the bill or warranty certificate. Number not matching? Call the store
-                or raise a complaint and our team will update it.
+                Enter the mobile number registered with your warranty.
               </p>
               <ErrorBox message={lookupError} />
               {items && (

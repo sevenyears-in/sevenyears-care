@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const ref = String(body.reference ?? "").toUpperCase().replace(/[^A-Z0-9\-/]/g, "").slice(0, 60);
   const mobile = cleanMobile(body.mobile);
   if (!isValidMobile(mobile)) {
-    return NextResponse.json({ error: "Enter the 10-digit mobile number given at the store." }, { status: 400 });
+    return NextResponse.json({ error: "Enter your registered 10-digit mobile number." }, { status: 400 });
   }
   if (ref.length < 4) {
     return NextResponse.json({ error: "Enter the bill number or warranty number." }, { status: 400 });
@@ -32,8 +32,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: data?.length
-          ? "This mobile number doesn't match the one given at the store for this bill. Use the buyer's or the product user's number — or call the store / raise a complaint and our team will update it."
-          : "We couldn't find a registered warranty for this number. Check the bill / warranty number (e.g. VDK26-SI1-8504 or SY-WAR-2026-123456), or raise a complaint and our team will help.",
+          ? "These details don't match our records. Please check and try again, or contact your nearest Seven Years store."
+          : "These details don't match our records. Please check and try again, or contact your nearest Seven Years store.",
       },
       { status: 404 }
     );

@@ -78,9 +78,9 @@ async function setProductUser(id: string, body: Record<string, unknown>, staffNa
 
   if (mobile) {
     if (!isValidMobile(mobile)) return NextResponse.json({ error: "Enter a valid 10-digit mobile number." }, { status: 400 });
-    if (!name) return NextResponse.json({ error: "Enter the product user's name." }, { status: 400 });
+    if (!name) return NextResponse.json({ error: "Enter the recipient's name." }, { status: 400 });
     if (mobile === w.customer_mobile) {
-      return NextResponse.json({ error: "This is the buyer's own number — leave it empty if the buyer uses the product." }, { status: 400 });
+      return NextResponse.json({ error: "This is the customer's own number. Choose \"Not a gift\" instead." }, { status: 400 });
     }
     if (/[^\x20-\x7E\xA0-\xFF]/.test(name)) {
       return NextResponse.json({ error: "Please type the name in English letters." }, { status: 400 });

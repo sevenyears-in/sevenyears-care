@@ -97,7 +97,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "This mobile number doesn't match the one given at the store for this product. Use the buyer's or the product user's number.",
+            "These details don't match our records. Please check and try again, or contact your nearest Seven Years store.",
         },
         { status: 403 }
       );

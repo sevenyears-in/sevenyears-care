@@ -189,10 +189,10 @@ export default function RegisterWarrantyStaffPage() {
       if (e.customerAddress.trim().length < 5) problems.push(`${label}: enter the customer address.`);
       if (!e.userSame) {
         const altMobile = e.alternateMobile.replace(/\D/g, "");
-        if (!e.alternateName.trim()) problems.push(`${label}: enter the product user's name.`);
-        if (!/^[6-9]\d{9}$/.test(altMobile)) problems.push(`${label}: enter the product user's 10-digit mobile number.`);
+        if (!e.alternateName.trim()) problems.push(`${label}: enter the recipient's name.`);
+        if (!/^[6-9]\d{9}$/.test(altMobile)) problems.push(`${label}: enter the recipient's 10-digit mobile number.`);
         else if (altMobile === e.customerMobile.replace(/\D/g, ""))
-          problems.push(`${label}: the user's mobile is the same as the buyer's — tick "User is same as buyer".`);
+          problems.push(`${label}: the recipient's mobile is the same as the customer's — untick "Purchased as a gift".`);
       }
       if ([e.modelNumber, e.serialNumber, e.customerName, e.customerAddress, e.alternateName].some((v) => /[^\x20-\x7E\xA0-\xFF\r\n\t]/.test(v)))
         problems.push(`${label}: type all details in English letters (needed for the PDF certificate).`);
@@ -510,10 +510,10 @@ export default function RegisterWarrantyStaffPage() {
                       <Field label="Serial Number *">
                         <input value={e.serialNumber} onChange={(ev) => setField(row.key, "serialNumber", ev.target.value)} className={smallInput} />
                       </Field>
-                      <Field label="Buyer Name *">
+                      <Field label="Customer Name *">
                         <input value={e.customerName} onChange={(ev) => setField(row.key, "customerName", ev.target.value)} className={smallInput} />
                       </Field>
-                      <Field label="Buyer Mobile *">
+                      <Field label="Customer Mobile *">
                         <div className="flex">
                           <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-[#f7f9fb] px-3 text-xs font-semibold">+91</span>
                           <input
@@ -540,28 +540,23 @@ export default function RegisterWarrantyStaffPage() {
                         <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
                           <input
                             type="checkbox"
-                            checked={e.userSame}
-                            onChange={(ev) => setField(row.key, "userSame", ev.target.checked)}
+                            checked={!e.userSame}
+                            onChange={(ev) => setField(row.key, "userSame", !ev.target.checked)}
                             className="h-4 w-4 accent-[#11b8d0]"
                           />
-                          User is same as buyer
-                          <span className="text-xs font-normal text-black/45">— untick if it is a gift</span>
+                          Purchased as a gift
                         </label>
                         {!e.userSame && (
                           <>
-                            <p className="mt-2 text-xs text-black/55">
-                              🎁 The user&apos;s number becomes the contact number for this product: their login (User ID = their
-                              mobile, password = last 4 digits of the bill), service updates and warranty messages go to them.
-                            </p>
                             <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                              <Field label="Product user's name *">
+                              <Field label="Recipient Name *">
                                 <input
                                   value={e.alternateName}
                                   onChange={(ev) => setField(row.key, "alternateName", ev.target.value)}
                                   className={smallInput}
                                 />
                               </Field>
-                              <Field label="Product user's mobile *">
+                              <Field label="Recipient Mobile Number *">
                                 <div className="flex">
                                   <span className="flex items-center rounded-l-2xl border border-r-0 border-black/10 bg-white px-3 text-xs font-semibold">+91</span>
                                   <input
@@ -575,6 +570,7 @@ export default function RegisterWarrantyStaffPage() {
                                 </div>
                               </Field>
                             </div>
+                            <p className="mt-2 text-xs text-black/50">Warranty and service updates will be sent to the recipient.</p>
                           </>
                         )}
                       </div>
@@ -610,7 +606,7 @@ export default function RegisterWarrantyStaffPage() {
                           onClick={() => copyCustomerToAll(row.key)}
                           className="text-xs font-bold text-[#11b8d0] hover:underline"
                         >
-                          Use these buyer / user details for all items
+                          Use these customer details for all items
                         </button>
                       )}
                     </div>

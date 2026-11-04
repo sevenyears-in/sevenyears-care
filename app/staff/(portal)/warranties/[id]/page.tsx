@@ -63,7 +63,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
 
   const sections: { title: string; rows: { label: string; value: string | null }[] }[] = [
     {
-      title: "Buyer",
+      title: "Customer",
       rows: [
         { label: "Name", value: w.customer_name },
         { label: "Mobile", value: w.customer_mobile ? `+91 ${w.customer_mobile}` : null },

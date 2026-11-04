@@ -88,9 +88,9 @@ export async function POST(request: Request) {
       if (!customerName) errors.push(`${label}: customer name is required.`);
       if (!isValidMobile(customerMobile)) errors.push(`${label}: enter a valid 10-digit mobile number.`);
       if (customerAddress.length < 5) errors.push(`${label}: customer address is required.`);
-      if (alternateMobile && !isValidMobile(alternateMobile)) errors.push(`${label}: the alternate mobile number is not valid.`);
-      if (alternateMobile && alternateMobile === customerMobile) errors.push(`${label}: the alternate mobile is the same as the customer's.`);
-      if (alternateMobile && !alternateName) errors.push(`${label}: enter the product user's name.`);
+      if (alternateMobile && !isValidMobile(alternateMobile)) errors.push(`${label}: the recipient's mobile number is not valid.`);
+      if (alternateMobile && alternateMobile === customerMobile) errors.push(`${label}: the recipient's mobile is the same as the customer's.`);
+      if (alternateMobile && !alternateName) errors.push(`${label}: enter the recipient's name.`);
       if ([modelNumber, serialNumber, customerName, customerAddress].some((v) => NON_ENGLISH.test(v)))
         errors.push(`${label}: please type details in English letters (needed for the PDF certificate).`);
       if (extended && row && !row.extendedAllowed)
