@@ -20,7 +20,7 @@ export default async function StaffDashboard() {
   const showService = canSeeService(staff.role);
   const showComplaints = canSeeComplaints(staff.role);
 
-  const [todayCount, totalCount, categoryCount, serviceTickets, complaintTickets, demo] = await Promise.all([
+  const [todayCount, totalCount, categoryCount, serviceTickets, complaintTickets, demo, serviceClosed, complaintClosed] = await Promise.all([
     supabaseAdmin
       .from("warranties")
       .select("id", { count: "exact", head: true })
@@ -34,6 +34,8 @@ export default async function StaffDashboard() {
     showService ? listTickets(staff, "service", "active") : Promise.resolve([] as Ticket[]),
     showComplaints ? listTickets(staff, "complaint", "active") : Promise.resolve([] as Ticket[]),
     zohoConfigured().then((ok) => !ok),
+    showService ? listTickets(staff, "service", "closed") : Promise.resolve([] as Ticket[]),
+    showComplaints ? listTickets(staff, "complaint", "closed") : Promise.resolve([] as Ticket[]),
   ]);
 
   const noCategories = (categoryCount.count ?? 0) === 0;
@@ -95,6 +97,7 @@ export default async function StaffDashboard() {
           base="/staff/service"
           staff={staff}
           tickets={serviceTickets}
+          closedCount={serviceClosed.length}
           extra={
             staff.role === "service_head" || staff.role === "super_admin"
               ? { label: "Awaiting your approval", value: serviceTickets.filter((t) => t.status === "awaiting_approval").length }
@@ -111,6 +114,7 @@ export default async function StaffDashboard() {
           base="/staff/complaints"
           staff={staff}
           tickets={complaintTickets}
+          closedCount={complaintClosed.length}
           extra={{ label: "Not assigned", value: complaintTickets.filter((t) => !t.assigneeId).length }}
         />
       )}
@@ -120,8 +124,8 @@ export default async function StaffDashboard() {
       <section className="space-y-4">
         <h2 className="text-xl font-bold">Warranties</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Stat label="Registered today" value={todayCount.count ?? 0} />
-          <Stat label="Total warranties" value={totalCount.count ?? 0} />
+          <Stat label="Registered today" value={todayCount.count ?? 0} accent="#0fa8bf" />
+          <Stat label="Total warranties" value={totalCount.count ?? 0} accent="#8883d7" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Link href="/staff/register" className="rounded-3xl bg-[#161616] p-6 text-white transition hover:opacity-95">
@@ -279,12 +283,14 @@ function QueueSection({
   base,
   staff,
   tickets,
+  closedCount,
   extra,
 }: {
   title: string;
   base: string;
   staff: StaffUser;
   tickets: Ticket[];
+  closedCount: number;
   extra: { label: string; value: number };
 }) {
   const mine = tickets.filter((t) => needsActionFrom(staff, t));
@@ -299,11 +305,19 @@ function QueueSection({
           Open queue →
         </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Stat label="Needs my action" value={mine.length} href={`${base}?filter=action`} highlight={mine.length > 0} />
-        <Stat label="New (not acknowledged)" value={fresh} href={`${base}?filter=new`} />
-        <Stat label="Overdue" value={overdue} href={`${base}?filter=overdue`} danger={overdue > 0} />
-        <Stat label={extra.label} value={extra.value} href={`${base}?filter=active`} />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Needs my action" value={mine.length} href={`${base}?filter=action`} highlight={mine.length > 0} accent="#ff5e79" />
+        <Stat label="New (not acknowledged)" value={fresh} href={`${base}?filter=new`} accent="#f39237" />
+        <Stat label="Overdue" value={overdue} href={`${base}?filter=overdue`} danger={overdue > 0} accent="#d43852" />
+        <Stat label={extra.label} value={extra.value} href={`${base}?filter=${extra.label === "Assigned to me" ? "mine" : "active"}`} accent="#8883d7" />
+        <Stat label="All open" value={tickets.length} href={`${base}?filter=active`} accent="#0fa8bf" />
+        <Stat
+          label="Resolved / closed"
+          value={closedCount}
+          display={closedCount >= 300 ? "300+" : undefined}
+          href={`${base}?filter=closed`}
+          accent="#16a34a"
+        />
       </div>
       {mine.length > 0 && <TicketTable tickets={mine.slice(0, 5)} base={base} emptyText="" />}
     </section>
@@ -316,12 +330,16 @@ function Stat({
   href,
   highlight,
   danger,
+  accent,
+  display,
 }: {
   label: string;
   value: number;
   href?: string;
   highlight?: boolean;
   danger?: boolean;
+  accent?: string;
+  display?: string;
 }) {
   const body = (
     <div
@@ -331,11 +349,12 @@ function Stat({
     >
       <span
         className={`absolute inset-x-0 top-0 h-1 ${danger ? "bg-red-500" : highlight ? "bg-[#ff5e79]" : "bg-transparent"}`}
+        style={!danger && !highlight && accent ? { backgroundColor: accent } : undefined}
         aria-hidden
       />
       <p className="text-xs font-semibold uppercase tracking-wider text-black/45">{label}</p>
       <p className={`mt-2 text-3xl font-bold tracking-tight ${danger ? "text-red-700" : highlight ? "text-[#ff5e79]" : ""}`}>
-        {value}
+        {display ?? value}
       </p>
     </div>
   );

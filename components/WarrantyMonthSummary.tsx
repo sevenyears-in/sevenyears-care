@@ -55,46 +55,74 @@ export function WarrantyMonthSummary({ query }: { query: string }) {
   const storeTotal = (s: string) => rows.filter((r) => r.store_name === s).reduce((a, r) => a + r.total, 0);
   const monthTotal = (m: string) => rows.filter((r) => r.month === m).reduce((a, r) => a + r.total, 0);
   const grand = rows.reduce((a, r) => a + r.total, 0);
-  const n = (v: number) => (v ? v.toLocaleString("en-IN") : <span className="text-black/25">0</span>);
+  const n = (v: number) => (v ? v.toLocaleString("en-IN") : <span className="text-black/20">–</span>);
+
+  // Logo colours, one per store; cells shaded by how many warranties (heat map).
+  const COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf", "#16a34a", "#d946ef"];
+  const colour = (i: number) => COLOURS[i % COLOURS.length];
+  const max = Math.max(1, ...rows.map((r) => r.total));
+  const cellStyle = (v: number, c: string) =>
+    v ? { backgroundColor: `${c}${Math.round(18 + (v / max) * 70).toString(16).padStart(2, "0")}` } : undefined;
+  const monthMax = Math.max(1, ...months.map(monthTotal));
 
   return (
     <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
-      <p className="px-5 pt-4 text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Warranties by store and bill month</p>
-      <div className="overflow-x-auto p-2">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead className="text-xs uppercase tracking-wider text-black/45">
-            <tr>
-              <th className="sticky left-0 bg-white px-3 py-2 text-left">Store Name</th>
-              {months.map((m) => (
-                <th key={m} className="px-3 py-2 text-right">
+      <div className="h-1.5 w-full bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
+      <div className="flex flex-wrap items-end justify-between gap-2 px-5 pt-4">
+        <p className="text-sm font-bold">
+          <span className="bg-[linear-gradient(90deg,#ff5e79,#8883d7)] bg-clip-text text-transparent">Warranties by store and bill month</span>
+        </p>
+        <p className="text-xs text-black/45">Darker = more warranties</p>
+      </div>
+      <div className="overflow-x-auto p-3">
+        <table className="w-full min-w-[560px] border-separate border-spacing-1 text-sm">
+          <thead>
+            <tr className="text-xs font-bold uppercase tracking-wider text-white">
+              <th className="sticky left-0 rounded-xl bg-[#161616] px-3 py-2 text-left">Store Name</th>
+              {months.map((m, i) => (
+                <th key={m} className="rounded-xl px-3 py-2 text-right" style={{ backgroundColor: colour(i + 1) }}>
                   {label(m)}
                 </th>
               ))}
-              <th className="px-3 py-2 text-right">Total</th>
+              <th className="rounded-xl bg-[#161616] px-3 py-2 text-right">Total</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-black/5">
-            {stores.map((s) => (
+          <tbody>
+            {stores.map((s, i) => (
               <tr key={s}>
-                <td className="sticky left-0 bg-white px-3 py-2 font-semibold">{s}</td>
-                {months.map((m) => (
-                  <td key={m} className="px-3 py-2 text-right tabular-nums">
-                    {n(get(s, m))}
-                  </td>
-                ))}
-                <td className="px-3 py-2 text-right font-bold tabular-nums">{n(storeTotal(s))}</td>
+                <td className="sticky left-0 rounded-xl bg-white px-3 py-2 font-semibold">
+                  <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ backgroundColor: colour(i) }} />
+                  {s}
+                </td>
+                {months.map((m) => {
+                  const v = get(s, m);
+                  return (
+                    <td key={m} className="rounded-xl px-3 py-2 text-right font-semibold tabular-nums" style={cellStyle(v, colour(i))}>
+                      {n(v)}
+                    </td>
+                  );
+                })}
+                <td className="rounded-xl px-3 py-2 text-right font-bold tabular-nums text-white" style={{ backgroundColor: colour(i) }}>
+                  {n(storeTotal(s))}
+                </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
-            <tr className="border-t-2 border-black/10 bg-[#f7f9fb] font-bold">
-              <td className="sticky left-0 bg-[#f7f9fb] px-3 py-2">Total warranties</td>
+            <tr className="font-bold">
+              <td className="sticky left-0 rounded-xl bg-[#f7f9fb] px-3 py-2">Total warranties</td>
               {months.map((m) => (
-                <td key={m} className="px-3 py-2 text-right tabular-nums">
+                <td key={m} className="rounded-xl bg-[#f7f9fb] px-3 pb-1 pt-2 text-right tabular-nums">
                   {n(monthTotal(m))}
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/5">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,#8883d7,#0fa8bf)]"
+                      style={{ width: `${(monthTotal(m) / monthMax) * 100}%` }}
+                    />
+                  </div>
                 </td>
               ))}
-              <td className="px-3 py-2 text-right tabular-nums">{n(grand)}</td>
+              <td className="rounded-xl bg-[#161616] px-3 py-2 text-right tabular-nums text-white">{n(grand)}</td>
             </tr>
           </tfoot>
         </table>

@@ -39,10 +39,26 @@ const TABS: { value: "all" | FeedbackFormKind | "followup"; label: string }[] = 
   { value: "complaint", label: "Complaint handling" },
 ];
 
-function avg(list: (number | null)[]) {
+function avgNum(list: (number | null)[]) {
   const n = list.filter((v): v is number => typeof v === "number");
-  return n.length ? (n.reduce((a, b) => a + b, 0) / n.length).toFixed(1) : "—";
+  return n.length ? n.reduce((a, b) => a + b, 0) / n.length : null;
 }
+
+/** Colour for a 1–5 rating: green good, amber fair, red poor. */
+function ratingStyle(v: number | null) {
+  if (v === null) return "bg-black/5 text-black/35";
+  if (v >= 4) return "bg-green-100 text-green-800";
+  if (v >= 3) return "bg-amber-100 text-amber-800";
+  return "bg-red-100 text-red-700";
+}
+
+const KIND_COLOUR: Record<string, string> = {
+  sales: "#0fa8bf",
+  service: "#8883d7",
+  complaint: "#f39237",
+  followup: "#ff5e79",
+  all: "#161616",
+};
 
 export default async function FeedbackReportPage({ searchParams }: { searchParams: Promise<{ tab?: string; days?: string }> }) {
   const staff = await getCurrentStaff();
@@ -96,7 +112,8 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="relative overflow-hidden rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5">
+        <div className="absolute inset-x-0 top-0 h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
         <h1 className="text-3xl font-bold">Customer Feedback</h1>
         <p className="mt-2 text-sm text-black/60">
           Ratings from the sales, service and complaint-handling forms
@@ -125,13 +142,13 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
 
       <div className={`${card} overflow-x-auto`}>
         <table className="w-full min-w-[640px] text-sm">
-          <thead className="bg-[#f7f9fb] text-xs uppercase tracking-wider text-black/45">
+          <thead className="text-xs uppercase tracking-wider text-white">
             <tr>
-              <th className="px-4 py-3 text-left">Store</th>
-              <th className="px-4 py-3 text-right">Sales ★</th>
-              <th className="px-4 py-3 text-right">Service ★</th>
-              <th className="px-4 py-3 text-right">Complaint handling ★</th>
-              <th className="px-4 py-3 text-right">Open follow-ups</th>
+              <th className="bg-[#161616] px-4 py-3 text-left">Store</th>
+              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.sales }}>Sales ★</th>
+              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.service }}>Service ★</th>
+              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.complaint }}>Complaint handling ★</th>
+              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.followup }}>Open follow-ups</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-black/5">
@@ -145,12 +162,17 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
               summary.map((s) => (
                 <tr key={s.store}>
                   <td className="px-4 py-3 font-semibold">{s.store}</td>
-                  {[s.sales, s.service, s.complaint].map((l, i) => (
-                    <td key={i} className="px-4 py-3 text-right">
-                      <span className="font-bold">{avg(l.map((r) => r.overall))}</span>
-                      <span className="text-xs text-black/40"> ({l.length})</span>
-                    </td>
-                  ))}
+                  {[s.sales, s.service, s.complaint].map((l, i) => {
+                    const a = avgNum(l.map((r) => r.overall));
+                    return (
+                      <td key={i} className="px-4 py-3 text-right">
+                        <span className={`inline-block rounded-full px-2.5 py-0.5 font-bold ${ratingStyle(a)}`}>
+                          {a === null ? "—" : `★ ${a.toFixed(1)}`}
+                        </span>
+                        <span className="text-xs text-black/40"> ({l.length})</span>
+                      </td>
+                    );
+                  })}
                   <td className={`px-4 py-3 text-right font-bold ${s.followups ? "text-[#d43852]" : "text-black/40"}`}>
                     {s.followups}
                   </td>
@@ -166,9 +188,8 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
           <Link
             key={t.value}
             href={`/staff/feedback?tab=${t.value}&days=${days}`}
-            className={`rounded-xl px-3 py-2 text-sm font-semibold ${
-              t.value === tab ? "bg-[#ff5e79]/10 text-[#ff5e79]" : "bg-white text-black/60 ring-1 ring-black/5"
-            }`}
+            className={`rounded-xl px-3 py-2 text-sm font-semibold ${t.value === tab ? "text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/5"}`}
+            style={t.value === tab ? { backgroundColor: KIND_COLOUR[t.value] } : { borderLeft: `4px solid ${KIND_COLOUR[t.value]}` }}
           >
             {t.label}
             {t.value === "followup" && openFollowups > 0 ? ` (${openFollowups})` : ""}
@@ -189,10 +210,10 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                 ? `/staff/service/${r.ref_id}`
                 : `/staff/complaints/${r.ref_id}`;
             return (
-              <li key={r.id} className={`${card} p-5`}>
+              <li key={r.id} className={`${card} overflow-hidden p-5`} style={{ borderLeft: `6px solid ${KIND_COLOUR[r.kind]}` }}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">
+                    <p className="text-xs font-bold uppercase tracking-wider" style={{ color: KIND_COLOUR[r.kind] }}>
                       {FORM_TITLES[r.kind]}
                       {r.confidential ? " · Confidential (HR)" : ""}
                     </p>
@@ -210,7 +231,9 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold">{r.overall ?? "—"}</p>
+                    <p className={`inline-block rounded-2xl px-3 py-1 text-2xl font-bold ${ratingStyle(r.overall)}`}>
+                      {r.overall === null ? "—" : `★ ${r.overall}`}
+                    </p>
                     <p className="text-xs text-black/40">{formatDateTime(r.created_at)}</p>
                   </div>
                 </div>
