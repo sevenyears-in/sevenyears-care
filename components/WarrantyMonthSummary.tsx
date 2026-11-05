@@ -64,7 +64,7 @@ export function WarrantyMonthSummary({ query }: { query: string }) {
   const tint = (v: number, c: string) =>
     v ? { backgroundColor: `${c}${Math.round(14 + (v / max) * 46).toString(16).padStart(2, "0")}` } : undefined;
 
-  const cell = "w-[84px] min-w-[72px] px-2 py-2.5 text-center tabular-nums";
+  const cell = "min-w-[64px] px-2 py-2.5 text-center tabular-nums";
 
   return (
     <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
@@ -81,7 +81,7 @@ export function WarrantyMonthSummary({ query }: { query: string }) {
         <table className="w-full min-w-[600px] border-separate border-spacing-x-1 border-spacing-y-1 text-sm">
           <thead>
             <tr className="text-[11px] font-bold uppercase tracking-wider text-black/45">
-              <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left">Store</th>
+              <th className="sticky left-0 z-10 w-40 bg-white px-3 py-2 text-left">Store</th>
               {months.map((m) => (
                 <th key={m} className={`${cell} py-2`}>
                   {label(m)}
