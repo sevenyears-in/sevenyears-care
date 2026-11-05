@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -124,8 +125,8 @@ export default async function StaffDashboard() {
       <section className="space-y-4">
         <h2 className="text-xl font-bold">Warranties</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Stat label="Registered today" value={todayCount.count ?? 0} accent="#0fa8bf" />
-          <Stat label="Total warranties" value={totalCount.count ?? 0} accent="#8883d7" />
+          <Stat label="Registered today" value={todayCount.count ?? 0} accent="#0fa8bf" icon="today" />
+          <Stat label="Total warranties" value={totalCount.count ?? 0} accent="#8883d7" icon="shield" href="/staff/warranties" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Link href="/staff/register" className="rounded-3xl bg-[#161616] p-6 text-white transition hover:opacity-95">
@@ -306,12 +307,19 @@ function QueueSection({
         </Link>
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Needs my action" value={mine.length} href={`${base}?filter=action`} highlight={mine.length > 0} accent="#ff5e79" />
-        <Stat label="New (not acknowledged)" value={fresh} href={`${base}?filter=new`} accent="#f39237" />
-        <Stat label="Overdue" value={overdue} href={`${base}?filter=overdue`} danger={overdue > 0} accent="#d43852" />
-        <Stat label={extra.label} value={extra.value} href={`${base}?filter=${extra.label === "Assigned to me" ? "mine" : "active"}`} accent="#8883d7" />
-        <Stat label="All open" value={tickets.length} href={`${base}?filter=active`} accent="#0fa8bf" />
+        <Stat label="Needs my action" value={mine.length} href={`${base}?filter=action`} highlight={mine.length > 0} accent="#ff5e79" icon="action" />
+        <Stat label="New" value={fresh} href={`${base}?filter=new`} accent="#f39237" icon="new" />
+        <Stat label="Overdue" value={overdue} href={`${base}?filter=overdue`} danger={overdue > 0} accent="#d43852" icon="overdue" />
         <Stat
+          label={extra.label}
+          value={extra.value}
+          href={`${base}?filter=${extra.label === "Assigned to me" ? "mine" : "active"}`}
+          accent="#8883d7"
+          icon={extra.label === "Awaiting your approval" ? "approve" : "people"}
+        />
+        <Stat label="All open" value={tickets.length} href={`${base}?filter=active`} accent="#0fa8bf" icon="open" />
+        <Stat
+          icon="done"
           label="Resolved / closed"
           value={closedCount}
           display={closedCount >= 300 ? "300+" : undefined}
@@ -324,14 +332,27 @@ function QueueSection({
   );
 }
 
+const ICONS: Record<string, ReactNode> = {
+  action: <path d="M12 8v4l2.5 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+  new: <path d="M12 5v14M5 12h14" />,
+  overdue: <path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />,
+  people: <path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm13 9v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8" />,
+  approve: <path d="M9 12l2 2 4-4M7.8 4.4a3 3 0 0 0 1.7-.7 3 3 0 0 1 5 0 3 3 0 0 0 1.7.7 3 3 0 0 1 2.7 2.7 3 3 0 0 0 .7 1.7 3 3 0 0 1 0 5 3 3 0 0 0-.7 1.7 3 3 0 0 1-2.7 2.7 3 3 0 0 0-1.7.7 3 3 0 0 1-5 0 3 3 0 0 0-1.7-.7 3 3 0 0 1-2.7-2.7 3 3 0 0 0-.7-1.7 3 3 0 0 1 0-5 3 3 0 0 0 .7-1.7 3 3 0 0 1 2.7-2.7Z" />,
+  open: <path d="M4 6h16M4 12h16M4 18h10" />,
+  done: <path d="M20 6 9 17l-5-5" />,
+  shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />,
+  today: <path d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />,
+};
+
 function Stat({
   label,
   value,
   href,
   highlight,
   danger,
-  accent,
+  accent = "#8883d7",
   display,
+  icon = "open",
 }: {
   label: string;
   value: number;
@@ -340,23 +361,54 @@ function Stat({
   danger?: boolean;
   accent?: string;
   display?: string;
+  icon?: keyof typeof ICONS;
 }) {
+  const colour = danger ? "#d43852" : accent;
+  const lit = value > 0 && (highlight || danger);
   const body = (
     <div
-      className={`soft-card relative h-full overflow-hidden rounded-3xl p-5 ring-1 transition ${
-        danger ? "bg-red-50 ring-red-200" : highlight ? "bg-[#ff5e79]/5 ring-[#ff5e79]/30" : "bg-white ring-black/5"
-      } ${href ? "hover:-translate-y-0.5 hover:shadow-md" : ""}`}
+      className={`group relative flex h-full flex-col justify-between overflow-hidden rounded-3xl p-5 ring-1 transition duration-200 ${
+        href ? "hover:-translate-y-0.5 hover:shadow-lg" : ""
+      } ${lit ? "shadow-md" : "soft-card"}`}
+      style={{
+        background: lit ? `linear-gradient(135deg, ${colour}, ${colour}cc)` : `linear-gradient(135deg, #ffffff 55%, ${colour}12)`,
+        // ring colour
+        ["--tw-ring-color" as string]: lit ? "transparent" : `${colour}26`,
+      }}
     >
       <span
-        className={`absolute inset-x-0 top-0 h-1 ${danger ? "bg-red-500" : highlight ? "bg-[#ff5e79]" : "bg-transparent"}`}
-        style={!danger && !highlight && accent ? { backgroundColor: accent } : undefined}
+        className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-60 blur-2xl"
+        style={{ backgroundColor: lit ? "#ffffff40" : `${colour}22` }}
         aria-hidden
       />
-      <p className="text-xs font-semibold uppercase tracking-wider text-black/45">{label}</p>
-      <p className={`mt-2 text-3xl font-bold tracking-tight ${danger ? "text-red-700" : highlight ? "text-[#ff5e79]" : ""}`}>
-        {display ?? value}
-      </p>
+      <div className="flex items-start justify-between">
+        <span
+          className="flex h-10 w-10 items-center justify-center rounded-2xl"
+          style={{ backgroundColor: lit ? "#ffffff33" : `${colour}1f`, color: lit ? "#fff" : colour }}
+        >
+          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            {ICONS[icon]}
+          </svg>
+        </span>
+        {href && (
+          <span className={`text-lg transition group-hover:translate-x-0.5 ${lit ? "text-white/70" : "text-black/20 group-hover:text-black/50"}`} aria-hidden>
+            →
+          </span>
+        )}
+      </div>
+      <div className="mt-4">
+        <p className={`text-3xl font-bold leading-none tracking-tight tabular-nums ${lit ? "text-white" : value ? "text-[#161616]" : "text-black/30"}`}>
+          {display ?? value}
+        </p>
+        <p className={`mt-2 text-[13px] font-semibold leading-tight ${lit ? "text-white/90" : "text-black/55"}`}>{label}</p>
+      </div>
     </div>
   );
-  return href ? <Link href={href}>{body}</Link> : body;
+  return href ? (
+    <Link href={href} className="block h-full">
+      {body}
+    </Link>
+  ) : (
+    body
+  );
 }

@@ -142,13 +142,24 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
 
       <div className={`${card} overflow-x-auto`}>
         <table className="w-full min-w-[640px] text-sm">
-          <thead className="text-xs uppercase tracking-wider text-white">
+          <thead className="border-b border-black/5 text-[11px] uppercase tracking-wider text-black/45">
             <tr>
-              <th className="bg-[#161616] px-4 py-3 text-left">Store</th>
-              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.sales }}>Sales ★</th>
-              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.service }}>Service ★</th>
-              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.complaint }}>Complaint handling ★</th>
-              <th className="px-4 py-3 text-right" style={{ backgroundColor: KIND_COLOUR.followup }}>Open follow-ups</th>
+              <th className="px-5 py-3.5 text-left">Store</th>
+              {(
+                [
+                  ["sales", "Sales"],
+                  ["service", "Service"],
+                  ["complaint", "Complaint handling"],
+                  ["followup", "Open follow-ups"],
+                ] as const
+              ).map(([k, l]) => (
+                <th key={k} className="px-5 py-3.5 text-center">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: KIND_COLOUR[k] }} />
+                    {l}
+                  </span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-black/5">
@@ -161,11 +172,11 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
             ) : (
               summary.map((s) => (
                 <tr key={s.store}>
-                  <td className="px-4 py-3 font-semibold">{s.store}</td>
+                  <td className="px-5 py-3 font-semibold">{s.store}</td>
                   {[s.sales, s.service, s.complaint].map((l, i) => {
                     const a = avgNum(l.map((r) => r.overall));
                     return (
-                      <td key={i} className="px-4 py-3 text-right">
+                      <td key={i} className="px-5 py-3 text-center">
                         <span className={`inline-block rounded-full px-2.5 py-0.5 font-bold ${ratingStyle(a)}`}>
                           {a === null ? "—" : `★ ${a.toFixed(1)}`}
                         </span>
@@ -173,7 +184,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                       </td>
                     );
                   })}
-                  <td className={`px-4 py-3 text-right font-bold ${s.followups ? "text-[#d43852]" : "text-black/40"}`}>
+                  <td className={`px-5 py-3 text-center font-bold ${s.followups ? "text-[#d43852]" : "text-black/40"}`}>
                     {s.followups}
                   </td>
                 </tr>
@@ -188,9 +199,11 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
           <Link
             key={t.value}
             href={`/staff/feedback?tab=${t.value}&days=${days}`}
-            className={`rounded-xl px-3 py-2 text-sm font-semibold ${t.value === tab ? "text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/5"}`}
-            style={t.value === tab ? { backgroundColor: KIND_COLOUR[t.value] } : { borderLeft: `4px solid ${KIND_COLOUR[t.value]}` }}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+              t.value === tab ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/10 hover:text-black"
+            }`}
           >
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: KIND_COLOUR[t.value] === "#161616" && t.value === tab ? "#fff" : KIND_COLOUR[t.value] }} />
             {t.label}
             {t.value === "followup" && openFollowups > 0 ? ` (${openFollowups})` : ""}
           </Link>
@@ -210,7 +223,8 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                 ? `/staff/service/${r.ref_id}`
                 : `/staff/complaints/${r.ref_id}`;
             return (
-              <li key={r.id} className={`${card} overflow-hidden p-5`} style={{ borderLeft: `6px solid ${KIND_COLOUR[r.kind]}` }}>
+              <li key={r.id} className={`${card} relative overflow-hidden p-5 pl-6`}>
+                <span className="absolute inset-y-4 left-0 w-1 rounded-r-full" style={{ backgroundColor: KIND_COLOUR[r.kind] }} aria-hidden />
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wider" style={{ color: KIND_COLOUR[r.kind] }}>

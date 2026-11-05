@@ -57,52 +57,55 @@ export function WarrantyMonthSummary({ query }: { query: string }) {
   const grand = rows.reduce((a, r) => a + r.total, 0);
   const n = (v: number) => (v ? v.toLocaleString("en-IN") : <span className="text-black/20">–</span>);
 
-  // Logo colours, one per store; cells shaded by how many warranties (heat map).
-  const COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf", "#16a34a", "#d946ef"];
+  // One soft colour per store; cells get a little stronger as the count goes up.
+  const COLOURS = ["#ff5e79", "#8883d7", "#0fa8bf", "#f39237", "#16a34a", "#d946ef"];
   const colour = (i: number) => COLOURS[i % COLOURS.length];
   const max = Math.max(1, ...rows.map((r) => r.total));
-  const cellStyle = (v: number, c: string) =>
-    v ? { backgroundColor: `${c}${Math.round(18 + (v / max) * 70).toString(16).padStart(2, "0")}` } : undefined;
-  const monthMax = Math.max(1, ...months.map(monthTotal));
+  const tint = (v: number, c: string) =>
+    v ? { backgroundColor: `${c}${Math.round(14 + (v / max) * 46).toString(16).padStart(2, "0")}` } : undefined;
+
+  const cell = "w-[84px] min-w-[72px] px-2 py-2.5 text-center tabular-nums";
 
   return (
     <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
-      <div className="h-1.5 w-full bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
-      <div className="flex flex-wrap items-end justify-between gap-2 px-5 pt-4">
-        <p className="text-sm font-bold">
-          <span className="bg-[linear-gradient(90deg,#ff5e79,#8883d7)] bg-clip-text text-transparent">Warranties by store and bill month</span>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-black/5 px-6 py-4">
+        <div>
+          <p className="text-base font-bold">Warranties by store and bill month</p>
+          <p className="text-xs text-black/45">Based on the bill date · follows the store and date filters</p>
+        </div>
+        <p className="text-2xl font-bold tabular-nums">
+          {grand.toLocaleString("en-IN")} <span className="text-xs font-semibold text-black/45">total</span>
         </p>
-        <p className="text-xs text-black/45">Darker = more warranties</p>
       </div>
-      <div className="overflow-x-auto p-3">
-        <table className="w-full min-w-[560px] border-separate border-spacing-1 text-sm">
+      <div className="overflow-x-auto px-3 py-3">
+        <table className="w-full min-w-[600px] border-separate border-spacing-x-1 border-spacing-y-1 text-sm">
           <thead>
-            <tr className="text-xs font-bold uppercase tracking-wider text-white">
-              <th className="sticky left-0 rounded-xl bg-[#161616] px-3 py-2 text-left">Store Name</th>
-              {months.map((m, i) => (
-                <th key={m} className="rounded-xl px-3 py-2 text-right" style={{ backgroundColor: colour(i + 1) }}>
+            <tr className="text-[11px] font-bold uppercase tracking-wider text-black/45">
+              <th className="sticky left-0 z-10 bg-white px-3 py-2 text-left">Store</th>
+              {months.map((m) => (
+                <th key={m} className={`${cell} py-2`}>
                   {label(m)}
                 </th>
               ))}
-              <th className="rounded-xl bg-[#161616] px-3 py-2 text-right">Total</th>
+              <th className={`${cell} py-2 text-black/70`}>Total</th>
             </tr>
           </thead>
           <tbody>
             {stores.map((s, i) => (
               <tr key={s}>
-                <td className="sticky left-0 rounded-xl bg-white px-3 py-2 font-semibold">
-                  <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ backgroundColor: colour(i) }} />
+                <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-2.5 font-semibold">
+                  <span className="mr-2.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ backgroundColor: colour(i) }} />
                   {s}
                 </td>
                 {months.map((m) => {
                   const v = get(s, m);
                   return (
-                    <td key={m} className="rounded-xl px-3 py-2 text-right font-semibold tabular-nums" style={cellStyle(v, colour(i))}>
+                    <td key={m} className={`${cell} rounded-xl font-medium`} style={tint(v, colour(i))}>
                       {n(v)}
                     </td>
                   );
                 })}
-                <td className="rounded-xl px-3 py-2 text-right font-bold tabular-nums text-white" style={{ backgroundColor: colour(i) }}>
+                <td className={`${cell} rounded-xl font-bold`} style={{ color: colour(i), backgroundColor: `${colour(i)}14` }}>
                   {n(storeTotal(s))}
                 </td>
               </tr>
@@ -110,19 +113,13 @@ export function WarrantyMonthSummary({ query }: { query: string }) {
           </tbody>
           <tfoot>
             <tr className="font-bold">
-              <td className="sticky left-0 rounded-xl bg-[#f7f9fb] px-3 py-2">Total warranties</td>
+              <td className="sticky left-0 z-10 whitespace-nowrap border-t border-black/10 bg-white px-3 py-3">Total</td>
               {months.map((m) => (
-                <td key={m} className="rounded-xl bg-[#f7f9fb] px-3 pb-1 pt-2 text-right tabular-nums">
+                <td key={m} className={`${cell} border-t border-black/10 py-3`}>
                   {n(monthTotal(m))}
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/5">
-                    <div
-                      className="h-full rounded-full bg-[linear-gradient(90deg,#8883d7,#0fa8bf)]"
-                      style={{ width: `${(monthTotal(m) / monthMax) * 100}%` }}
-                    />
-                  </div>
                 </td>
               ))}
-              <td className="rounded-xl bg-[#161616] px-3 py-2 text-right tabular-nums text-white">{n(grand)}</td>
+              <td className={`${cell} rounded-xl bg-[#161616] py-3 text-white`}>{n(grand)}</td>
             </tr>
           </tfoot>
         </table>
