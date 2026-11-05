@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, StatusBadge } from "@/components/SiteChrome";
 import { formatDate, statusLabel, todayISO } from "@/lib/helpers";
+import { WarrantyMonthSummary } from "@/components/WarrantyMonthSummary";
 
 type Warranty = {
   id: string;
@@ -175,6 +176,8 @@ export default function StaffWarrantiesPage() {
           </a>
         </div>
       </form>
+
+      <WarrantyMonthSummary query={queryString({ ...EMPTY, store: filters.store, from: filters.from, to: filters.to })} />
 
       <ErrorBox message={errorMessage} />
 

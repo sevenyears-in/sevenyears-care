@@ -3,7 +3,7 @@ import { requireStaff } from "@/lib/auth";
 import { answerExplanation, canRequestExplanation, manageExplanation, requestExplanation } from "@/lib/explanations";
 import { canViewTicket, getTicket } from "@/lib/tickets";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { CORPORATE_OFFICE_NAME, sameStore } from "@/lib/roles";
+import { CORPORATE_OFFICE_NAME, isCorporateStaff, sameStore } from "@/lib/roles";
 
 // POST  { type, ticketId, staffId, reason } → ask a staff member to explain
 // PATCH { id, explanation }                 → the staff member replies
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
   const staffId = String(body.staffId ?? "");
   const { data: person } = await supabaseAdmin.from("staff_users").select("store_name").eq("id", staffId).maybeSingle();
   if (
+    !isCorporateStaff(auth.staff) &&
     person &&
     person.store_name &&
     !sameStore(person.store_name, CORPORATE_OFFICE_NAME) &&

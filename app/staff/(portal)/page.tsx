@@ -24,7 +24,8 @@ export default async function StaffDashboard() {
     supabaseAdmin
       .from("warranties")
       .select("id", { count: "exact", head: true })
-      .gte("created_at", `${today}T00:00:00+05:30`),
+      .gte("created_at", `${today}T00:00:00+05:30`)
+      .neq("source", "zoho_import"), // only warranties registered at the store counter
     supabaseAdmin.from("warranties").select("id", { count: "exact", head: true }),
     supabaseAdmin
       .from("warranty_categories")

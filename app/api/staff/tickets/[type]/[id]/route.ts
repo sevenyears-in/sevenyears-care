@@ -1,4 +1,5 @@
 import { after, NextResponse } from "next/server";
+import { purgeServicePhotos } from "@/lib/service-photos";
 import { requireStaff } from "@/lib/auth";
 import { runAction, type ActionInput, type ActionName } from "@/lib/tickets";
 
@@ -59,6 +60,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ typ
     const result = await runAction(auth.staff, type, id, input);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
+    }
+
+    // Closed / cancelled service request: delete its photos for good.
+    if (type === "service" && (action === "close" || action === "cancel")) {
+      after(() => purgeServicePhotos(id).then(() => undefined).catch((error) => console.error("Photo delete failed:", error)));
     }
 
     if (result.followUp) {

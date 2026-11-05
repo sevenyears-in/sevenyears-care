@@ -7,6 +7,7 @@ import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 import { SAFETY_ISSUE_TYPES } from "@/lib/sla";
 import { announceNewTicket, initialDeadlines } from "@/lib/tickets";
 import { notifyCustomer } from "@/lib/notify";
+import { attachPhotos, PHOTO_REQUIRED_ISSUES, MAX_PHOTOS } from "@/lib/service-photos";
 
 // POST /api/service-requests
 // Creates a service request against a registered warranty.
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
     const altMobile = cleanMobile(body.altMobile);
     const warrantyNumber = String(body.warrantyNumber ?? "").trim().toUpperCase();
     const ownerMobile = cleanMobile(body.ownerMobile);
+    const photoPaths: string[] = Array.isArray(body.photos) ? body.photos.map(String).slice(0, MAX_PHOTOS) : [];
     const issueType = String(body.issueType ?? "").trim();
     const description = String(body.description ?? "").trim();
     const serviceMode = String(body.serviceMode ?? "store_visit");
@@ -53,6 +55,9 @@ export async function POST(request: Request) {
     }
     if (!SERVICE_ISSUE_TYPES.includes(issueType)) {
       return NextResponse.json({ error: "Please choose the type of problem." }, { status: 400 });
+    }
+    if (PHOTO_REQUIRED_ISSUES.includes(issueType) && photoPaths.length < MAX_PHOTOS) {
+      return NextResponse.json({ error: `Please add ${MAX_PHOTOS} photos of the product from different angles.` }, { status: 400 });
     }
     if (description.length < 10) {
       return NextResponse.json(
@@ -176,6 +181,9 @@ export async function POST(request: Request) {
 
     if (insertError) throw insertError;
 
+    // Photos: move from the temporary folder to this request.
+    const photos = photoPaths.length ? await attachPhotos(created.id, photoPaths).catch(() => [] as string[]) : [];
+
     // Stores without a separate technician (e.g. the Service Head does it): give the job straight to them.
     const defaultTech = await defaultTechnicianFor(warranty.store_name ?? null).catch(() => null);
     if (defaultTech) {
@@ -214,6 +222,7 @@ export async function POST(request: Request) {
         details: [
           `Problem: ${description}`,
           serviceMode === "home_visit" ? "Customer asked for a home visit / pickup." : "Customer will bring it to the store.",
+          ...(photos.length ? [`${photos.length} photo${photos.length > 1 ? "s" : ""} attached.`] : []),
           underWarranty ? "Under warranty." : "Out of warranty (chargeable).",
           ...(priority === "safety" ? ["SAFETY: ask the customer to stop using the product until it is checked."] : []),
         ],

@@ -1,3 +1,4 @@
+import { purgeServicePhotos } from "@/lib/service-photos";
 // Automatic escalation (SOP escalation matrix), run by /api/cron/sla.
 //
 // Level 1 — not acknowledged in time, or resolution time missed:
@@ -135,5 +136,11 @@ export async function runEscalations() {
     summary.autoClosed++;
   }
 
-  return summary;
+  // Photos of closed service requests, and uploads never sent, are deleted for good.
+  const photosDeleted = await purgeServicePhotos().catch((error) => {
+    console.error("Photo clean-up failed:", error);
+    return 0;
+  });
+
+  return { ...summary, photosDeleted };
 }

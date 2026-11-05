@@ -194,6 +194,7 @@ async function processBills(state: ImportState, staffId: string): Promise<string
               warranty_expiry_date: expiry,
               status: "active",
               registered_by: staffId,
+              source: "zoho_import",
             };
           });
 

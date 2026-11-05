@@ -347,9 +347,19 @@ export async function getHistory(type: TicketType, id: string): Promise<HistoryE
   }));
 }
 
-/** People who can be given the job: technicians (service) or complaint owners (by complaint type). */
-export async function assignableStaff(type: TicketType, storeName: string | null, title?: string | null) {
+/**
+ * People who can be given the job: technicians (service) or complaint owners (by complaint type).
+ * Corporate Office staff and the Super Admin (everyone = true) can choose any active staff member —
+ * except for confidential staff-behaviour complaints, which stay with HR.
+ */
+export async function assignableStaff(
+  type: TicketType,
+  storeName: string | null,
+  title?: string | null,
+  everyone = false
+) {
   const kind = type === "complaint" ? complaintKind(title) : null;
+  const all = everyone && kind !== "staff";
   const roles: Role[] =
     type === "service"
       ? ["technician", "service_head"]
@@ -359,12 +369,12 @@ export async function assignableStaff(type: TicketType, storeName: string | null
           ? ["store_manager", "cre", "service_head", "technician", "operations_manager"]
           : ["cre", "store_manager", "operations_manager"];
 
-  const { data } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("staff_users")
     .select("id, full_name, role, store_name")
-    .eq("is_active", true)
-    .in("role", roles)
-    .order("full_name");
+    .eq("is_active", true);
+  if (!all) query = query.in("role", roles);
+  const { data } = await query.order("full_name");
 
   const people = (data ?? []).map((s) => ({
     id: String(s.id),
@@ -376,9 +386,16 @@ export async function assignableStaff(type: TicketType, storeName: string | null
   }));
 
   return people
-    // Only the staff of this store and Corporate Office staff can be chosen.
-    .filter((p) => p.sameStore || p.corporate)
-    .sort((a, b) => Number(b.sameStore) - Number(a.sameStore));
+    // Store staff choose from this store and the Corporate Office; corporate staff from everyone.
+    .filter((p) => all || p.sameStore || p.corporate)
+    // This store first, then Corporate Office, then the other stores.
+    .sort(
+      (a, b) =>
+        Number(b.sameStore) - Number(a.sameStore) ||
+        Number(b.corporate) - Number(a.corporate) ||
+        (a.storeName ?? "").localeCompare(b.storeName ?? "") ||
+        a.fullName.localeCompare(b.fullName)
+    );
 }
 
 /** Default owner for a new complaint (automatic routing). */
@@ -913,7 +930,7 @@ export async function runAction(
   let assigneeName: string | null = null;
   let assigneeRole: Role | null = null;
   if (input.action === "take_ownership" && input.assigneeId && input.assigneeId !== staff.id) {
-    const options = await assignableStaff(type, ticket.storeName, ticket.title);
+    const options = await assignableStaff(type, ticket.storeName, ticket.title, isCorporateStaff(staff));
     const chosen = options.find((o) => o.id === input.assigneeId);
     if (!chosen && input.assigneeId !== ticket.assigneeId) return fail("Choose a valid owner.");
     assigneeName = chosen?.fullName ?? ticket.assigneeName;
@@ -922,7 +939,7 @@ export async function runAction(
   if (input.action === "classify_assign" && input.assigneeId === ticket.assigneeId) {
     assigneeName = ticket.assigneeName; // keeping the same technician
   } else if (input.action === "assign" || input.action === "classify_assign") {
-    const options = await assignableStaff(type, ticket.storeName, ticket.title);
+    const options = await assignableStaff(type, ticket.storeName, ticket.title, isCorporateStaff(staff));
     const chosen = options.find((o) => o.id === input.assigneeId);
     if (!chosen) return fail("Choose a valid person to assign.");
     if (staff.role === "store_manager" && type === "service" && chosen.role === "technician" && !chosen.sameStore) {

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { markAlertsRead } from "@/lib/alerts";
+import { photoLinks } from "@/lib/service-photos";
 import { getCurrentStaff } from "@/lib/auth";
-import { asRole, canSeeComplaints, canSeeService, ROLE_LABELS, sameStore } from "@/lib/roles";
+import { asRole, canSeeComplaints, canSeeService, isCorporateStaff, ROLE_LABELS, sameStore } from "@/lib/roles";
 import { formatDate, formatDateTime, statusLabel } from "@/lib/helpers";
 import {
   COMPLAINT_RESOLUTIONS,
@@ -98,7 +99,10 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   const { id } = await params;
   const ticket = await getTicket(type, id);
   if (!ticket) notFound();
-  const explanations = await explanationsForTicket(type, id);
+  const [explanations, photos] = await Promise.all([
+    explanationsForTicket(type, id),
+    type === "service" ? photoLinks(id).catch(() => [] as string[]) : Promise.resolve([] as string[]),
+  ]);
   // Staff asked to explain can open the request even if it isn't theirs to handle.
   // (Not for staff behaviour complaints — those stay confidential; they reply from My Explanations.)
   const askedToExplain =
@@ -110,7 +114,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   const canAsk = canRequestExplanation(staff.role);
   const [history, people, everyone] = await Promise.all([
     getHistory(type, id),
-    assignableStaff(type, ticket.storeName, ticket.title),
+    assignableStaff(type, ticket.storeName, ticket.title, isCorporateStaff(staff)),
     canAsk
       ? supabaseAdmin.from("staff_users").select("id, full_name, role, store_name").eq("is_active", true).order("full_name")
       : Promise.resolve({ data: [] as { id: string; full_name: string; role: string; store_name: string | null }[] }),
@@ -203,6 +207,18 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
         </div>
         <h1 className="mt-3 text-2xl font-bold">{ticket.title}</h1>
         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-black/70">{ticket.description}</p>
+
+        {photos.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-3">
+            {photos.map((url, i) => (
+              <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block h-28 w-28 overflow-hidden rounded-2xl ring-1 ring-black/10">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`Customer photo ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
+              </a>
+            ))}
+            <p className="w-full text-xs text-black/45">Customer photos · tap to enlarge · deleted automatically when the request is closed.</p>
+          </div>
+        )}
 
         {type === "service" && ticket.priority === "safety" && (
           <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">
@@ -301,10 +317,11 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
             explanations={explanations}
             suggestedStaffId={ticket.involvedStaffId ?? ticket.assigneeId ?? null}
             people={(everyone.data ?? [])
-              // Only the staff of this store and Corporate Office staff.
+              // Store staff: this store and Corporate Office. Corporate staff / Super Admin: everyone.
               .filter((p) => String(p.id) !== staff.id)
               .filter(
                 (p) =>
+                  isCorporateStaff(staff) ||
                   !p.store_name ||
                   sameStore(p.store_name, "CORPORATE OFFICE") ||
                   sameStore(p.store_name, ticket.storeName) ||
@@ -312,7 +329,10 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
               )
               .sort(
                 (a, b) =>
-                  Number(sameStore(b.store_name, ticket.storeName)) - Number(sameStore(a.store_name, ticket.storeName))
+                  Number(sameStore(b.store_name, ticket.storeName)) - Number(sameStore(a.store_name, ticket.storeName)) ||
+                  Number(sameStore(b.store_name, "CORPORATE OFFICE")) - Number(sameStore(a.store_name, "CORPORATE OFFICE")) ||
+                  String(a.store_name ?? "").localeCompare(String(b.store_name ?? "")) ||
+                  String(a.full_name).localeCompare(String(b.full_name))
               )
               .map((p) => ({
                 id: String(p.id),

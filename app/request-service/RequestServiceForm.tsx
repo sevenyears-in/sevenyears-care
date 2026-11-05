@@ -11,7 +11,8 @@ import {
   primaryButtonClass,
 } from "@/components/SiteChrome";
 import { formatDateTime, todayISO } from "@/lib/helpers";
-import { SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
+import { PHOTO_OPTIONAL_ISSUES, PHOTO_REQUIRED_ISSUES, SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
+import { PhotoPicker, uploadPhotos, type PickedPhoto } from "@/components/PhotoPicker";
 
 type LookupItem = {
   warrantyNumber: string;
@@ -49,6 +50,9 @@ export default function RequestServiceForm({
   const [lookupError, setLookupError] = useState("");
   const [useOther, setUseOther] = useState(false);
   const [issueType, setIssueType] = useState("");
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
+  const photosRequired = PHOTO_REQUIRED_ISSUES.includes(issueType);
+  const photosAllowed = photosRequired || PHOTO_OPTIONAL_ISSUES.includes(issueType);
   const [description, setDescription] = useState("");
   const [serviceMode, setServiceMode] = useState("store_visit");
   const [preferredDate, setPreferredDate] = useState("");
@@ -177,10 +181,23 @@ export default function RequestServiceForm({
       setErrorMessage("Please describe the problem in a little more detail.");
       return;
     }
+    if (photosRequired && photos.length < 3) {
+      setErrorMessage("Please add 3 photos of the product from different angles.");
+      return;
+    }
 
     setSubmitting(true);
 
     try {
+      let photoPaths: string[] = [];
+      if (photosAllowed && photos.length) {
+        try {
+          photoPaths = await uploadPhotos(photos);
+        } catch (e) {
+          setErrorMessage(e instanceof Error ? e.message : "A photo could not be uploaded. Please try again.");
+          return;
+        }
+      }
       const response = await fetch("/api/service-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,6 +209,7 @@ export default function RequestServiceForm({
           warrantyNumber,
           ownerMobile: lookupMobile.replace(/\D/g, ""),
           issueType,
+          photos: photoPaths,
           description,
           serviceMode,
           preferredDate: preferredDate || null,
@@ -530,6 +548,8 @@ export default function RequestServiceForm({
                 placeholder="What happened, when did it start, and anything you've already tried."
               />
             </div>
+
+            {photosAllowed && <PhotoPicker photos={photos} onChange={setPhotos} required={photosRequired} />}
           </div>
         </section>
 
