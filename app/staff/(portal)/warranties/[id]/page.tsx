@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/SiteChrome";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { CompleteWarrantyDetails } from "@/components/CompleteWarrantyDetails";
 import { ProductUserEditor } from "@/components/ProductUserEditor";
+import { AdminDangerZone } from "@/components/AdminDangerZone";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
 
 // Staff: full details of one warranty (opened from Warranties → View).
@@ -24,6 +25,8 @@ type Row = {
   serial_number: string;
   alternate_name: string | null;
   alternate_mobile: string | null;
+  void_reason: string | null;
+  voided_by: string | null;
   customer_name: string;
   customer_mobile: string;
   customer_address: string;
@@ -49,7 +52,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   const { data, error } = await supabaseAdmin
     .from("warranties")
     .select(
-      "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)"
+      "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -167,6 +170,9 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
         ))}
         <ProductUserEditor id={w.id} name={w.alternate_name} mobile={w.alternate_mobile} />
         <ResetCustomerLogin warrantyId={w.id} />
+        {staff.role === "super_admin" && (
+          <AdminDangerZone kind="warranty" id={w.id} number={w.warranty_number} voided={w.status === "void"} voidReason={w.void_reason} />
+        )}
       </div>
     </div>
   );

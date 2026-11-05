@@ -40,6 +40,10 @@ export const PAID_PRODUCT_TYPES = [
 export const PAID_SERVICE_NOTE =
   "Inspection charges apply. The repair cost will be shared with you after inspection, for your approval before any work begins.";
 export const PAID_HOME_VISIT_NOTE = "Home visit / pickup charges apply.";
+/** What the customer agrees to (tick box on the Paid Service form). */
+export const PAID_AGREEMENT =
+  "I agree to pay the inspection charge. I'll receive a repair quote after inspection, and repair work will start only after I approve it.";
+export const PAID_HOME_AGREEMENT = "I also agree to pay the home visit / pickup charge.";
 
 export const SERVICE_MODES = [
   { value: "store_visit", label: "I will bring it to the store" },

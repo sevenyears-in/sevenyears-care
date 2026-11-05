@@ -182,7 +182,6 @@ export default function RegisterWarrantyStaffPage() {
       const e = entries[row.key];
       const label = `Item ${index + 1} (${row.productName})`;
       if (!e.modelNumber.trim()) problems.push(`${label}: enter the model number.`);
-      if (!e.serialNumber.trim()) problems.push(`${label}: enter the serial number.`);
       if (!e.customerName.trim()) problems.push(`${label}: enter the customer name.`);
       if (!/^[6-9]\d{9}$/.test(e.customerMobile.replace(/\D/g, "")))
         problems.push(`${label}: enter a valid 10-digit mobile number.`);
@@ -507,8 +506,8 @@ export default function RegisterWarrantyStaffPage() {
                       <Field label="Model Number *">
                         <input value={e.modelNumber} onChange={(ev) => setField(row.key, "modelNumber", ev.target.value)} className={smallInput} />
                       </Field>
-                      <Field label="Serial Number *">
-                        <input value={e.serialNumber} onChange={(ev) => setField(row.key, "serialNumber", ev.target.value)} className={smallInput} />
+                      <Field label="Serial Number">
+                        <p className="rounded-2xl bg-[#f7f9fb] px-3 py-2.5 text-sm text-black/50">Created automatically</p>
                       </Field>
                       <Field label="Customer Name *">
                         <input value={e.customerName} onChange={(ev) => setField(row.key, "customerName", ev.target.value)} className={smallInput} />

@@ -1,3 +1,4 @@
+import { deleteTicket } from "@/lib/admin-delete";
 import { after, NextResponse } from "next/server";
 import { purgeServicePhotos } from "@/lib/service-photos";
 import { requireStaff } from "@/lib/auth";
@@ -76,5 +77,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ typ
   } catch (error) {
     console.error("Ticket action error:", error);
     return NextResponse.json({ error: "Unable to save. Please try again." }, { status: 500 });
+  }
+}
+
+// DELETE /api/staff/tickets/<type>/<id> — Super Admin only: remove the request for good.
+export async function DELETE(_request: Request, { params }: { params: Promise<{ type: string; id: string }> }) {
+  const auth = await requireStaff("super_admin");
+  if (auth.response) return auth.response;
+  const { type, id } = await params;
+  if ((type !== "service" && type !== "complaint") || !/^[0-9a-f-]{36}$/i.test(id)) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+  try {
+    await deleteTicket(type, id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Delete ticket error:", error);
+    return NextResponse.json({ error: "Unable to delete. Please try again." }, { status: 500 });
   }
 }

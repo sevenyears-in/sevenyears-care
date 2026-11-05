@@ -39,6 +39,7 @@ import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, Tick
 import { TicketActions } from "@/components/TicketActions";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { ExplanationsPanel } from "@/components/ExplanationsPanel";
+import { AdminDangerZone } from "@/components/AdminDangerZone";
 import { canRequestExplanation, explanationsForTicket } from "@/lib/explanations";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
@@ -407,6 +408,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
                 : COMPLAINT_RESOLUTIONS
           }
         />
+        {staff.role === "super_admin" && <AdminDangerZone kind={type} id={ticket.id} number={ticket.number} />}
       </div>
     </div>
   );

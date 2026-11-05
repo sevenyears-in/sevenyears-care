@@ -1,7 +1,8 @@
+import { deleteWarranty } from "@/lib/admin-delete";
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { NOT_RECORDED } from "@/lib/zoho-import";
+const NOT_RECORDED = "Not recorded";
 import { after } from "next/server";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
@@ -21,6 +22,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const body = await request.json().catch(() => ({}));
   if (body.action === "user") return setProductUser(id, body, auth.staff.fullName);
+  if (body.action === "void" || body.action === "unvoid") {
+    if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can do this." }, { status: 403 });
+    const reason = String(body.reason ?? "").trim().slice(0, 300);
+    if (body.action === "void" && reason.length < 5) return NextResponse.json({ error: "Write the reason for voiding." }, { status: 400 });
+    const { error } = await supabaseAdmin
+      .from("warranties")
+      .update(
+        body.action === "void"
+          ? { status: "void", void_reason: reason, voided_at: new Date().toISOString(), voided_by: auth.staff.fullName }
+          : { status: "active", void_reason: null, voided_at: null, voided_by: null }
+      )
+      .eq("id", id);
+    if (error) {
+      console.error("Void warranty error:", error);
+      return NextResponse.json({ error: "Unable to save." }, { status: 500 });
+    }
+    return NextResponse.json({ success: true });
+  }
   const modelNumber = String(body.modelNumber ?? "").trim();
   const serialNumber = String(body.serialNumber ?? "").trim();
   const address = String(body.customerAddress ?? "").trim();
@@ -114,4 +133,20 @@ async function setProductUser(id: string, body: Record<string, unknown>, staffNa
   }
   console.info(`Product user on ${w.warranty_number} set by ${staffName}`);
   return NextResponse.json({ success: true, login });
+}
+
+// DELETE /api/staff/warranties/:id — Super Admin only.
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireStaff("super_admin");
+  if (auth.response) return auth.response;
+  const { id } = await params;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  try {
+    const blocked = await deleteWarranty(id);
+    if (blocked) return NextResponse.json({ error: blocked }, { status: 409 });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Delete warranty error:", error);
+    return NextResponse.json({ error: "Unable to delete. Please try again." }, { status: 500 });
+  }
 }

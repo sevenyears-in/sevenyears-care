@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     if (!SERVICE_MODES.some((m) => m.value === serviceMode)) return bad("Choose how you would like the service.");
     if (serviceMode === "home_visit" && address.length < 10) return bad("Enter the address for the home visit / pickup.");
     if (preferredDate && !isISODate(preferredDate)) return bad("Preferred date is not valid.");
-    if (body.agreed !== true) return bad("Please confirm that you understand the service is chargeable.");
+    if (body.agreed !== true) return bad("Please tick the box to agree to the charges.");
 
     const { stores } = await getStores();
     const store = stores.find((s) => s.name.toLowerCase() === storeName.toLowerCase());

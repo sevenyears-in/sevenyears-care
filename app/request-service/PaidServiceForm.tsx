@@ -5,6 +5,8 @@ import { FormEvent, useState } from "react";
 import { cardClass, ErrorBox, inputClass, labelClass, phoneInputClass, primaryButtonClass } from "@/components/SiteChrome";
 import { todayISO } from "@/lib/helpers";
 import {
+  PAID_AGREEMENT,
+  PAID_HOME_AGREEMENT,
   PAID_HOME_VISIT_NOTE,
   PAID_PRODUCT_TYPES,
   PAID_SERVICE_NOTE,
@@ -54,7 +56,7 @@ export default function PaidServiceForm({ stores }: { stores: string[] }) {
     if (photosRequired && photos.length < 3) return setError("Please add 3 photos of the product from different angles.");
     if (!storeName) return setError("Choose the store.");
     if (serviceMode === "home_visit" && address.trim().length < 10) return setError("Enter the address for the home visit / pickup.");
-    if (!agreed) return setError("Please confirm that you understand the service is chargeable.");
+    if (!agreed) return setError("Please tick the box to agree to the charges.");
 
     setSubmitting(true);
     try {
@@ -247,8 +249,8 @@ export default function PaidServiceForm({ stores }: { stores: string[] }) {
       <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-[#f7f9fb] p-4 text-sm">
         <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#f39237]" />
         <span>
-          I understand this is a paid service. {PAID_SERVICE_NOTE}
-          {serviceMode === "home_visit" ? ` ${PAID_HOME_VISIT_NOTE}` : ""}
+          {PAID_AGREEMENT}
+          {serviceMode === "home_visit" ? ` ${PAID_HOME_AGREEMENT}` : ""}
         </span>
       </label>
 

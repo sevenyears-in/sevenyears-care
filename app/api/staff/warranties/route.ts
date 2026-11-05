@@ -62,7 +62,6 @@ export async function POST(request: Request) {
     // ---------------- Validate every item ----------------
     const errors: string[] = [];
     const seenKeys = new Set<string>();
-    const seenSerials = new Set<string>();
 
     const clean = items.map((item, index) => {
       const label = `Row ${index + 1}`;
@@ -85,7 +84,6 @@ export async function POST(request: Request) {
       seenKeys.add(key);
 
       if (!modelNumber) errors.push(`${label}: model number is required.`);
-      if (!serialNumber) errors.push(`${label}: serial number is required.`);
       if (!customerName) errors.push(`${label}: customer name is required.`);
       if (!isValidMobile(customerMobile)) errors.push(`${label}: enter a valid 10-digit mobile number.`);
       if (customerAddress.length < 5) errors.push(`${label}: customer address is required.`);
@@ -97,27 +95,9 @@ export async function POST(request: Request) {
       if (extended && row && !row.extendedAllowed)
         errors.push(`${label}: extended warranty is not available for ${row.categoryName}.`);
 
-      const serialKey = serialNumber.toLowerCase();
-      if (serialNumber && seenSerials.has(serialKey))
-        errors.push(`${label}: serial number ${serialNumber} is entered twice.`);
-      seenSerials.add(serialKey);
 
       return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, alternateName: alternateMobile ? alternateName : "", alternateMobile };
     });
-
-    // Serial numbers already used on another warranty
-    const serials = clean.map((c) => c.serialNumber).filter(Boolean);
-    if (serials.length > 0) {
-      const { data: used, error: usedError } = await supabaseAdmin
-        .from("warranties")
-        .select("serial_number, warranty_number")
-        .in("serial_number", serials);
-
-      if (usedError) throw usedError;
-      for (const u of used ?? []) {
-        errors.push(`Serial number ${u.serial_number} is already registered (${u.warranty_number}).`);
-      }
-    }
 
     if (errors.length > 0) {
       return NextResponse.json({ error: errors[0], errors }, { status: 400 });
@@ -166,7 +146,7 @@ export async function POST(request: Request) {
         sku: row.sku,
         category_name: row.categoryName,
         model_number: item.modelNumber,
-        serial_number: item.serialNumber,
+        // serial_number: created automatically by the database (SY-SN-<year>-<number>)
         customer_name: item.customerName,
         customer_mobile: item.customerMobile,
         customer_address: item.customerAddress,
