@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter your registered 10-digit mobile number." }, { status: 400 });
   }
   if (ref.length < 4) {
-    return NextResponse.json({ error: "Enter the bill number or warranty number." }, { status: 400 });
+    return NextResponse.json({ error: "Enter the invoice or warranty number." }, { status: 400 });
   }
   const { data, error } = await supabaseAdmin
     .from("warranties")

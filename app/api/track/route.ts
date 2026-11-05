@@ -103,7 +103,7 @@ export async function POST(request: Request) {
         details: [
           { label: "Category", value: row.category },
           { label: "Store", value: row.store_name ?? null },
-          { label: "Bill / Warranty No.", value: row.reference_number },
+          { label: "Invoice or Warranty No.", value: row.reference_number },
           { label: "Staff", value: complaintKind(row.category) === "staff" ? null : row.involved_staff_name ?? null },
           { label: "Looked into by", value: complaintKind(row.category) === "staff" ? "Our HR team" : owner },
         ],

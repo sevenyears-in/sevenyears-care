@@ -115,13 +115,13 @@ export default function TrackRequestPage() {
   return (
     <PageShell
       title="Track Request"
-      intro="Check the latest status of a service request (SY-SRV-…) or complaint (SY-CMP-…)."
+      intro="Check the latest status of a service request (e.g. SY-SRV-2026-950210) or complaint (e.g. SY-CMP-2026-736504)."
     >
       <div className={cardClass}>
         <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2" noValidate>
           <div>
             <label htmlFor="ticket" className={labelClass}>
-              Request / Complaint Number *
+              Request or Complaint Number *
             </label>
             <input
               id="ticket"
@@ -129,7 +129,7 @@ export default function TrackRequestPage() {
               value={ticketNumber}
               onChange={(e) => setTicketNumber(e.target.value)}
               className={inputClass}
-              placeholder="SY-SRV-2026-123456"
+              placeholder="e.g. SY-SRV-2026-950210 or SY-CMP-2026-736504"
             />
           </div>
 

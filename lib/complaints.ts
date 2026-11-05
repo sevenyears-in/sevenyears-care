@@ -145,7 +145,7 @@ export async function createComplaint(input: NewComplaint): Promise<CreateResult
       summary: `${category} · Customer: ${fullName} (${mobile}) · via ${SOURCE_LABELS[input.source]}`,
       details: [
         `Complaint: ${description}`,
-        `Bill / warranty: ${ref.reference}`,
+        `Invoice or warranty no.: ${ref.reference}`,
         ...(ref.staffName ? [`Staff on the bill: ${ref.staffName}`] : []),
       ],
       priority: "normal",

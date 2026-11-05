@@ -14,10 +14,15 @@ export default async function RequestServicePage({ searchParams }: Props) {
   const paid = params.type === "paid";
   const stores = paid ? ((await getStores().catch(() => ({ stores: [] }))).stores ?? []).map((s) => s.name) : [];
 
-  const tab = (active: boolean) =>
-    `flex-1 rounded-2xl px-4 py-3 text-center text-sm font-bold transition ${
-      active ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/10 hover:text-black"
-    }`;
+  // Logo colours: teal for warranty, orange for paid service.
+  const tab = (active: boolean, colour: string) => ({
+    className: `flex-1 rounded-2xl border-2 px-4 py-3 text-center text-sm font-bold transition ${
+      active ? "text-white shadow-md" : "bg-white hover:shadow-sm"
+    }`,
+    style: active
+      ? { background: `linear-gradient(135deg, ${colour}, ${colour}d9)`, borderColor: colour }
+      : { borderColor: `${colour}55`, color: colour },
+  });
 
   return (
     <PageShell
@@ -25,13 +30,13 @@ export default async function RequestServicePage({ searchParams }: Props) {
       intro="Something not working right? Tell us the problem and our service team will get in touch to arrange a repair."
     >
       <div className="mb-6 flex flex-col gap-3 sm:flex-row">
-        <Link href="/request-service" className={tab(!paid)}>
-          Under Seven Years Warranty
-          <span className={`block text-xs font-normal ${paid ? "text-black/45" : "text-white/70"}`}>Product bought from us with a registered warranty</span>
+        <Link href="/request-service" {...tab(!paid, "#0fa8bf")}>
+          🛡️ Under Seven Years Warranty
+          <span className={`block text-xs font-normal ${paid ? "text-black/50" : "text-white/85"}`}>Product bought from us with a registered warranty</span>
         </Link>
-        <Link href="/request-service?type=paid" className={tab(paid)}>
-          Paid Service
-          <span className={`block text-xs font-normal ${paid ? "text-white/70" : "text-black/45"}`}>Bought elsewhere, or warranty not applicable</span>
+        <Link href="/request-service?type=paid" {...tab(paid, "#f39237")}>
+          🔧 Paid Service
+          <span className={`block text-xs font-normal ${paid ? "text-white/85" : "text-black/50"}`}>Bought elsewhere, or warranty not applicable</span>
         </Link>
       </div>
       {paid ? <PaidServiceForm stores={stores} /> : <RequestServiceForm initialWarrantyNumber={warranty} />}

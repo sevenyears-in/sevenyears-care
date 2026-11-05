@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       );
     }
     if (!warrantyNumber) {
-      return NextResponse.json({ error: "Enter the bill number or warranty number and choose the product." }, { status: 400 });
+      return NextResponse.json({ error: "Enter the invoice or warranty number and choose the product." }, { status: 400 });
     }
     if (!SERVICE_ISSUE_TYPES.includes(issueType)) {
       return NextResponse.json({ error: "Please choose the type of problem." }, { status: 400 });
@@ -86,11 +86,11 @@ export async function POST(request: Request) {
 
     if (warrantyError) throw warrantyError;
 
-    // The bill / warranty number is the proof of purchase — the requester's mobile can be anyone's.
+    // The invoice or warranty number is the proof of purchase — the requester's mobile can be anyone's.
     if (!warranty) {
       return NextResponse.json(
         {
-          error: "We couldn't find this warranty. Please check the bill / warranty number and try again.",
+          error: "We couldn't find this warranty. Please check the invoice or warranty number and try again.",
         },
         { status: 404 }
       );

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
     if (!reference) {
       return NextResponse.json(
-        { error: "Enter your warranty number or bill number." },
+        { error: "Enter your invoice or warranty number." },
         { status: 400 }
       );
     }

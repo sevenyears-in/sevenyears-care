@@ -234,7 +234,7 @@ export default function RegisterComplaintPage() {
               <h2 className="text-lg font-bold">2. About the Complaint</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
-                  <label htmlFor="reference" className={labelClass}>Invoice (Bill) or Warranty Number *</label>
+                  <label htmlFor="reference" className={labelClass}>Invoice or Warranty Number *</label>
                   {loggedIn && bills.length > 0 && (
                     <select id="bill" value={billChoice} onChange={(e) => setBillChoice(e.target.value)} className={`${inputClass} mb-3`}>
                       {bills.map((w) => (

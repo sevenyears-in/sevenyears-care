@@ -16,6 +16,7 @@ import {
   PRIORITIES,
   SERVICE_RESOLUTIONS,
   SERVICE_SEVERITIES,
+  slaState,
   type TicketType,
 } from "@/lib/sla";
 import {
@@ -26,7 +27,11 @@ import {
   getTicket,
   isTicketManager,
   listTickets,
+  needsActionFrom,
+  rawSla,
   seesAllStores,
+  type ListFilter,
+  type Ticket,
 } from "@/lib/tickets";
 import { StatusBadge } from "@/components/SiteChrome";
 import { PaidServicePanel } from "@/components/PaidServicePanel";
@@ -48,15 +53,32 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
   if (type === "service" ? !canSeeService(staff.role) : !canSeeComplaints(staff.role)) redirect("/staff");
 
   const params = await searchParams;
-  const filter = parseFilter(params.filter);
+  // Opens on "All open" so nothing is hidden; every tab shows how many it holds.
+  const filter = parseFilter(params.filter, "active");
   const search = typeof params.q === "string" ? params.q.slice(0, 60) : "";
   const storeFilter = typeof params.store === "string" ? params.store.slice(0, 80) : "";
-  const all = await listTickets(staff, type, filter, search);
   const storeScoped = !seesAllStores(staff, type);
-  const tickets =
+  const [openRaw, closedRaw] = await Promise.all([
+    listTickets(staff, type, "active", search),
+    listTickets(staff, type, "closed", search),
+  ]);
+  const byStore = (list: Ticket[]) =>
     storeFilter && !storeScoped
-      ? all.filter((t) => (t.storeName ?? "").trim().toLowerCase() === storeFilter.trim().toLowerCase())
-      : all;
+      ? list.filter((t) => (t.storeName ?? "").trim().toLowerCase() === storeFilter.trim().toLowerCase())
+      : list;
+  const open = byStore(openRaw);
+  const closed = byStore(closedRaw);
+  const lists: Record<ListFilter, Ticket[]> = {
+    action: open.filter((t) => needsActionFrom(staff, t)),
+    new: open.filter((t) => t.status === "open"),
+    overdue: open.filter((t) => slaState(rawSla(t)).state === "overdue"),
+    mine: open.filter((t) => t.assigneeId === staff.id),
+    active: open,
+    closed,
+    all: [...open, ...closed],
+  };
+  const counts = Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.length])) as Record<ListFilter, number>;
+  const tickets = lists[filter];
   const scope = storeScoped
     ? `Showing ${staff.storeName ?? "your store"} and anything assigned to you.`
     : storeFilter
@@ -84,7 +106,7 @@ export async function TicketListPage({ type, searchParams }: { type: TicketType;
           Store: {storeFilter} <span aria-hidden>✕</span>
         </Link>
       )}
-      <FilterTabs base={BASE[type]} current={filter} search={search} store={storeScoped ? "" : storeFilter} />
+      <FilterTabs base={BASE[type]} current={filter} search={search} store={storeScoped ? "" : storeFilter} counts={counts} />
       <TicketTable
         tickets={tickets}
         base={BASE[type]}
@@ -145,7 +167,7 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
     { label: "Store", value: ticket.storeName },
     { label: "Product", value: ticket.productName },
     { label: "Warranty No.", value: ticket.warrantyNumber ?? null },
-    { label: "Bill / warranty no.", value: ticket.referenceNumber ?? null },
+    { label: "Invoice or warranty no.", value: ticket.referenceNumber ?? null },
     { label: "Staff on the bill", value: ticket.involvedStaffName ?? null },
     {
       label: "Received via",

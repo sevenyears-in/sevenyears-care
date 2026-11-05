@@ -79,11 +79,13 @@ export function FilterTabs({
   current,
   search,
   store = "",
+  counts,
 }: {
   base: string;
   current: ListFilter;
   search: string;
   store?: string;
+  counts?: Partial<Record<ListFilter, number>>;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -91,11 +93,26 @@ export function FilterTabs({
         <Link
           key={key}
           href={`${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}${store ? `&store=${encodeURIComponent(store)}` : ""}`}
-          className={`rounded-full px-3.5 py-2 text-sm font-semibold transition ${
+          className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition ${
             key === current ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/5 hover:text-black hover:ring-black/15"
           }`}
         >
           {FILTER_LABELS[key]}
+          {counts && counts[key] !== undefined && (
+            <span
+              className={`min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-xs font-bold ${
+                key === current
+                  ? "bg-white/20 text-white"
+                  : counts[key]! > 0 && (key === "action" || key === "overdue")
+                    ? "bg-[#ff5e79] text-white"
+                    : counts[key]! > 0
+                      ? "bg-[#8883d7]/15 text-[#5c57b0]"
+                      : "bg-black/5 text-black/35"
+              }`}
+            >
+              {counts[key]}
+            </span>
+          )}
         </Link>
       ))}
       <form action={base} className="flex w-full gap-2 sm:ml-auto sm:w-auto">

@@ -105,7 +105,7 @@ export default function RequestServiceForm({
       return;
     }
     if (reference.trim().length < 4) {
-      setLookupError("Enter the bill number or warranty number.");
+      setLookupError("Enter the invoice or warranty number.");
       return;
     }
     setLookupBusy(true);
@@ -157,7 +157,7 @@ export default function RequestServiceForm({
     const mobile = mobileNumber.replace(/\D/g, "");
 
     if (!warrantyNumber.trim()) {
-      setErrorMessage("Enter the bill or warranty number, tap Find and choose the product.");
+      setErrorMessage("Enter the invoice or warranty number, tap Find and choose the product.");
       return;
     }
     if (!contactName.trim()) {
@@ -335,7 +335,7 @@ export default function RequestServiceForm({
                 }}
                 className="mt-2 text-xs font-bold text-[#0fa8bf]"
               >
-                Product not in this list (e.g. a gift)? Use a bill or warranty number →
+                Product not in this list (e.g. a gift)? Use an invoice or warranty number →
               </button>
             </div>
           ) : (
@@ -363,7 +363,7 @@ export default function RequestServiceForm({
                 />
               </div>
               <label htmlFor="reference" className={labelClass}>
-                Bill / Warranty Number *
+                Invoice or Warranty Number *
               </label>
               <div className="flex gap-2">
                 <input

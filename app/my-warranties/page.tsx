@@ -52,7 +52,7 @@ export default function MyWarrantiesPage() {
     }
 
     if (!reference.trim()) {
-      setErrorMessage("Please enter a warranty number or bill number.");
+      setErrorMessage("Please enter an invoice or warranty number.");
       return;
     }
 
@@ -84,7 +84,7 @@ export default function MyWarrantiesPage() {
   return (
     <PageShell
       title="My Warranties"
-      intro="See all products registered with your mobile number. For your security, enter one warranty number or bill number from any of your purchases."
+      intro="See all products registered with your mobile number. For your security, enter one invoice or warranty number from any of your purchases."
     >
       {warranties === null ? (
         <div className={cardClass}>
@@ -113,7 +113,7 @@ export default function MyWarrantiesPage() {
 
             <div>
               <label htmlFor="reference" className={labelClass}>
-                Warranty Number or Bill Number *
+                Invoice or Warranty Number *
               </label>
               <input
                 id="reference"
