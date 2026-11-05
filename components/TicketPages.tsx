@@ -24,10 +24,12 @@ import {
   canViewTicket,
   getHistory,
   getTicket,
+  isTicketManager,
   listTickets,
   seesAllStores,
 } from "@/lib/tickets";
 import { StatusBadge } from "@/components/SiteChrome";
+import { PaidServicePanel } from "@/components/PaidServicePanel";
 import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, TicketTable } from "@/components/TicketUI";
 import { TicketActions } from "@/components/TicketActions";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
@@ -224,6 +226,23 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
           <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">
             Safety issue: call the customer now and ask them to stop using the product until it is checked.
           </p>
+        )}
+        {type === "service" && ticket.paid && (
+          <div className="mt-4">
+            <PaidServicePanel
+              id={ticket.id}
+              canQuote={staff.role !== "director" && (isTicketManager(staff, "service", ticket) || ticket.assigneeId === staff.id)}
+              brand={ticket.brand ?? null}
+              model={ticket.modelNumber ?? null}
+              purchasedFrom={ticket.purchasedFrom ?? null}
+              homeVisit={ticket.serviceMode === "home_visit"}
+              quoteAmount={ticket.quoteAmount ?? null}
+              quoteNote={ticket.quoteNote ?? null}
+              quoteStatus={ticket.quoteStatus ?? null}
+              quoteSentAt={ticket.quoteSentAt ?? null}
+              quoteDecidedAt={ticket.quoteDecidedAt ?? null}
+            />
+          </div>
         )}
         {type === "complaint" && ticket.severity === "critical" && (
           <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">

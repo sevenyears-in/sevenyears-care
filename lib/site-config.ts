@@ -26,6 +26,21 @@ export const PHOTO_REQUIRED_ISSUES = ["Damaged or broken part", "Wheel, brake or
 /** Problems where photos may help but are optional. */
 export const PHOTO_OPTIONAL_ISSUES = ["Battery or charging issue", "Remote / electronics issue", "Assembly or installation help", "Other"];
 
+/** Paid service (bought elsewhere / no Seven Years warranty). */
+export const PAID_PRODUCT_TYPES = [
+  "Ride-on car / jeep / bike",
+  "Bicycle / tricycle",
+  "Stroller / pram",
+  "Car seat",
+  "Cradle / cot / walker",
+  "Scooter",
+  "Electronic toy",
+  "Other",
+];
+export const PAID_SERVICE_NOTE =
+  "Inspection charges apply. The repair cost will be shared with you after inspection, for your approval before any work begins.";
+export const PAID_HOME_VISIT_NOTE = "Home visit / pickup charges apply.";
+
 export const SERVICE_MODES = [
   { value: "store_visit", label: "I will bring it to the store" },
   { value: "home_visit", label: "Request a home visit / pickup" },

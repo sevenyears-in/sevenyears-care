@@ -155,6 +155,11 @@ export function TicketTable({ tickets, base, emptyText }: { tickets: Ticket[]; b
                 <PriorityBadge priority={t.priority} type={t.type} severity={t.severity} />
                 <EscalationBadge level={t.escalationLevel} />
                 <SlaBadge ticket={t} />
+                {t.paid && (
+                  <span className="rounded-full bg-[#f39237] px-2.5 py-1 text-xs font-bold text-white">
+                    PAID{t.quoteStatus === "pending" ? " · quote sent" : t.quoteStatus === "approved" ? " · approved" : t.quoteStatus === "declined" ? " · declined" : ""}
+                  </span>
+                )}
               </div>
               <p className="mt-2 font-semibold group-hover:text-[#ff5e79]">
                 {t.title}

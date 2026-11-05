@@ -74,6 +74,16 @@ export type Ticket = {
   buyerMobile?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Paid service: product bought elsewhere / no Seven Years warranty. */
+  paid?: boolean;
+  brand?: string | null;
+  modelNumber?: string | null;
+  purchasedFrom?: string | null;
+  quoteAmount?: number | null;
+  quoteNote?: string | null;
+  quoteStatus?: "pending" | "approved" | "declined" | null;
+  quoteSentAt?: string | null;
+  quoteDecidedAt?: string | null;
   // complaint only
   referenceNumber?: string | null;
   source?: string | null;
@@ -89,7 +99,7 @@ const COMMON_COLS =
   "id, status, priority, severity, store_name, contact_name, contact_mobile, description, created_at, updated_at, acknowledged_at, ack_due_at, resolution_due_at, resolved_at, closed_at, resolution_type, resolution_notes, escalation_level";
 
 const SELECT: Record<TicketType, string> = {
-  service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, alternate_name, alternate_mobile, warranties ( warranty_number, customer_name, customer_mobile )`,
+  service: `${COMMON_COLS}, request_number, issue_type, product_name, assigned_technician_id, service_mode, preferred_date, address, under_warranty, latitude, longitude, alternate_name, alternate_mobile, paid, brand, model_number, purchased_from, quote_amount, quote_note, quote_status, quote_sent_at, quote_decided_at, warranties ( warranty_number, customer_name, customer_mobile )`,
   complaint: `${COMMON_COLS}, complaint_number, category, contact_email, reference_number, owner_id, source, involved_staff_name, involved_staff_id`,
 };
 
@@ -141,6 +151,15 @@ function toTicket(type: TicketType, row: Row, names: Map<string, string>): Ticke
     alternateMobile: str(row.alternate_mobile),
     buyerName: w?.customer_name ?? null,
     buyerMobile: w?.customer_mobile ?? null,
+    paid: row.paid === true,
+    brand: str(row.brand),
+    modelNumber: str(row.model_number),
+    purchasedFrom: str(row.purchased_from),
+    quoteAmount: row.quote_amount === null || row.quote_amount === undefined ? null : Number(row.quote_amount),
+    quoteNote: str(row.quote_note),
+    quoteStatus: (str(row.quote_status) as Ticket["quoteStatus"]) ?? null,
+    quoteSentAt: str(row.quote_sent_at),
+    quoteDecidedAt: str(row.quote_decided_at),
     latitude: typeof row.latitude === "number" ? row.latitude : null,
     longitude: typeof row.longitude === "number" ? row.longitude : null,
     referenceNumber: str(row.reference_number),
@@ -569,8 +588,10 @@ export function availableActions(staff: StaffUser, t: Ticket): ActionName[] {
   if (t.type === "service") {
     const active = activeStatuses("service").includes(s);
     if (active && manager) list.push("classify_assign"); // classification + priority + technician in one step
-    if (["acknowledged", "assigned", "awaiting_parts"].includes(s) && worker) list.push("start");
-    if (["assigned", "in_progress"].includes(s) && worker) list.push("awaiting_parts");
+    // Paid service: repair work starts only after the customer approves the quote.
+    const quoteOk = !t.paid || t.quoteStatus === "approved";
+    if (["acknowledged", "assigned", "awaiting_parts"].includes(s) && worker && quoteOk) list.push("start");
+    if (["assigned", "in_progress"].includes(s) && worker && quoteOk) list.push("awaiting_parts");
     if (["assigned", "in_progress", "awaiting_parts"].includes(s) && worker) list.push("request_approval");
     if (s === "awaiting_approval" && ["service_head", "super_admin", "admin"].includes(staff.role)) list.push("approve", "reject");
     if (["acknowledged", "assigned", "in_progress", "awaiting_parts"].includes(s) && worker) list.push("resolve");
