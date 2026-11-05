@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/SiteChrome";
 import { formatDateTime, statusLabel } from "@/lib/helpers";
 import { slaState } from "@/lib/sla";
 import type { ListFilter, Ticket } from "@/lib/tickets";
+import { ScrollActiveIntoView } from "@/components/ScrollActiveIntoView";
 
 export function SlaBadge({ ticket }: { ticket: Ticket }) {
   const sla = slaState({
@@ -93,7 +94,7 @@ export function FilterTabs({
   return (
     <div className="space-y-3">
       {/* One bar of tabs; on phones it scrolls sideways instead of wrapping. */}
-      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:px-0">
+      <ScrollActiveIntoView className="-mx-4 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:px-0">
         <nav className="inline-flex min-w-max gap-1 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-black/5" aria-label="Filter">
           {(Object.keys(FILTER_LABELS) as ListFilter[]).map((key) => {
             const active = key === current;
@@ -125,13 +126,13 @@ export function FilterTabs({
             );
           })}
         </nav>
-      </div>
+      </ScrollActiveIntoView>
       <form action={base} className="flex gap-2 sm:max-w-md">
         <input type="hidden" name="filter" value={current} />
         <input
           name="q"
           defaultValue={search}
-          placeholder="Search number, mobile or name"
+          placeholder="Number, mobile or name"
           className="w-full min-w-0 rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-[#ff5e79] focus:ring-4 focus:ring-[#ff5e79]/10"
         />
         <button className="shrink-0 rounded-xl bg-[#161616] px-4 py-2.5 text-sm font-bold text-white">Search</button>
