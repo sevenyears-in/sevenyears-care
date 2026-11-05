@@ -87,43 +87,54 @@ export function FilterTabs({
   store?: string;
   counts?: Partial<Record<ListFilter, number>>;
 }) {
+  const q = (key: ListFilter) =>
+    `${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}${store ? `&store=${encodeURIComponent(store)}` : ""}`;
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {(Object.keys(FILTER_LABELS) as ListFilter[]).map((key) => (
-        <Link
-          key={key}
-          href={`${base}?filter=${key}${search ? `&q=${encodeURIComponent(search)}` : ""}${store ? `&store=${encodeURIComponent(store)}` : ""}`}
-          className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition ${
-            key === current ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/5 hover:text-black hover:ring-black/15"
-          }`}
-        >
-          {FILTER_LABELS[key]}
-          {counts && counts[key] !== undefined && (
-            <span
-              className={`min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-xs font-bold ${
-                key === current
-                  ? "bg-white/20 text-white"
-                  : counts[key]! > 0 && (key === "action" || key === "overdue")
-                    ? "bg-[#ff5e79] text-white"
-                    : counts[key]! > 0
-                      ? "bg-[#8883d7]/15 text-[#5c57b0]"
-                      : "bg-black/5 text-black/35"
-              }`}
-            >
-              {counts[key]}
-            </span>
-          )}
-        </Link>
-      ))}
-      <form action={base} className="flex w-full gap-2 sm:ml-auto sm:w-auto">
+    <div className="space-y-3">
+      {/* One bar of tabs; on phones it scrolls sideways instead of wrapping. */}
+      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:px-0">
+        <nav className="inline-flex min-w-max gap-1 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-black/5" aria-label="Filter">
+          {(Object.keys(FILTER_LABELS) as ListFilter[]).map((key) => {
+            const active = key === current;
+            const n = counts?.[key];
+            const urgent = (key === "action" || key === "overdue") && (n ?? 0) > 0;
+            return (
+              <Link
+                key={key}
+                href={q(key)}
+                aria-current={active ? "page" : undefined}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-[13px] font-semibold transition ${
+                  active
+                    ? "bg-[linear-gradient(135deg,#ff5e79,#8883d7)] text-white shadow-sm"
+                    : "text-black/60 hover:bg-[#f7f9fb] hover:text-black"
+                }`}
+              >
+                {urgent && !active && <span className="h-1.5 w-1.5 rounded-full bg-[#ff5e79]" aria-hidden />}
+                {FILTER_LABELS[key]}
+                {n !== undefined && (
+                  <span
+                    className={`rounded-md px-1.5 text-[11px] font-bold leading-5 tabular-nums ${
+                      active ? "bg-white/25 text-white" : urgent ? "bg-[#ff5e79]/12 text-[#d43852]" : n > 0 ? "bg-black/[0.06] text-black/70" : "text-black/30"
+                    }`}
+                  >
+                    {n}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+      <form action={base} className="flex gap-2 sm:max-w-md">
         <input type="hidden" name="filter" value={current} />
         <input
           name="q"
           defaultValue={search}
-          placeholder="Number, mobile or name"
-          className="w-full min-w-0 rounded-full border border-black/10 bg-white px-4 py-2 text-sm outline-none transition focus:border-[#ff5e79] focus:ring-4 focus:ring-[#ff5e79]/10 sm:w-56"
+          placeholder="Search number, mobile or name"
+          className="w-full min-w-0 rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-[#ff5e79] focus:ring-4 focus:ring-[#ff5e79]/10"
         />
-        <button className="rounded-full bg-[#ff5e79] px-4 py-2 text-sm font-bold text-white shadow-sm shadow-[#ff5e79]/30">Search</button>
+        <button className="shrink-0 rounded-xl bg-[#161616] px-4 py-2.5 text-sm font-bold text-white">Search</button>
       </form>
     </div>
   );

@@ -168,12 +168,6 @@ export default function StaffWarrantiesPage() {
               Clear
             </button>
           )}
-          <a
-            href={`/api/staff/warranties/export?${queryString(filters)}`}
-            className="ml-auto rounded-2xl bg-[#11b8d0] px-4 py-2.5 text-sm font-bold text-white"
-          >
-            ⬇ Download full details (Excel)
-          </a>
         </div>
       </form>
 
