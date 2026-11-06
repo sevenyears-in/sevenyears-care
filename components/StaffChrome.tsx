@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AlertSoundSettings, LiveAlerts, useUnreadCount } from "@/components/LiveAlerts";
-import { canSeeComplaints, canSeeService, isAdmin, ROLE_LABELS, type Role } from "@/lib/roles";
+import { isAdmin, type Role } from "@/lib/roles";
+import type { Section } from "@/lib/access";
 
 /** Logo colours, used in turn for the menu items. */
 export const LOGO_COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"]; // orange & teal slightly deeper so white text stays readable
@@ -15,12 +16,15 @@ type Props = {
   fullName: string;
   userId: string;
   role: Role;
+  roleLabel: string;
+  sections: Section[];
   storeName: string | null;
   unreadAlerts: number;
   explanationsWaiting: number;
 };
 
-export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, explanationsWaiting }: Props) {
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting }: Props) {
+  const can = (s: Section) => sections.includes(s);
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -48,18 +52,17 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
 
-  const seesFeedback =
-    isAdmin(role) ||
-    ["director", "store_manager", "service_head", "hr_head", "hr_executive", "cre", "operations_manager"].includes(role);
-
+  // Roles & Access decides which sections each person sees.
   const links = [
     { href: "/staff", label: "Dashboard" },
-    ...(canSeeService(role) ? [{ href: "/staff/service", label: "Service Requests" }] : []),
-    ...(canSeeComplaints(role) ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
-    { href: "/staff/explanations", label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations" },
-    ...(seesFeedback ? [{ href: "/staff/feedback", label: "Feedback" }] : []),
-    { href: "/staff/register", label: "Register Warranty" },
-    { href: "/staff/warranties", label: "Warranties" },
+    ...(can("service") ? [{ href: "/staff/service", label: "Service Requests" }] : []),
+    ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
+    ...(can("explanations") || explanationsWaiting > 0
+      ? [{ href: "/staff/explanations", label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations" }]
+      : []),
+    ...(can("feedback") ? [{ href: "/staff/feedback", label: "Feedback" }] : []),
+    ...(can("register") ? [{ href: "/staff/register", label: "Register Warranty" }] : []),
+    ...(can("warranties") ? [{ href: "/staff/warranties", label: "Warranties" }] : []),
   ];
 
   // Admin pages live under one "Settings" menu so the top bar stays short.
@@ -73,6 +76,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
       : []),
     ...(role === "super_admin"
       ? [
+          { href: "/staff/admin/roles", label: "Roles & Access", icon: "🔐" },
           { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
           { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
           { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
@@ -140,7 +144,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
               </span>
               <span className="hidden text-left leading-tight sm:block">
                 <span className="block max-w-[160px] truncate text-sm font-bold">{fullName}</span>
-                <span className="block text-[11px] text-black/50">{ROLE_LABELS[role]}</span>
+                <span className="block text-[11px] text-black/50">{roleLabel}</span>
               </span>
             </button>
 
@@ -152,7 +156,7 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
                 <div className="border-b border-black/5 px-3 pb-3 pt-2">
                   <p className="font-bold">{fullName}</p>
                   <p className="text-xs text-black/50">
-                    {userId} · {ROLE_LABELS[role]}
+                    {userId} · {roleLabel}
                   </p>
                   {storeName && <p className="mt-0.5 text-xs text-black/50">{storeName}</p>}
                 </div>
@@ -267,14 +271,18 @@ export function StaffHeader({ fullName, userId, role, storeName, unreadAlerts, e
 }
 
 /** Phone-style menu at the bottom of the screen (phones only). */
-export function StaffBottomNav({ role, unreadAlerts }: { role: Role; unreadAlerts: number }) {
+export function StaffBottomNav({ sections, unreadAlerts }: { sections: Section[]; unreadAlerts: number }) {
   const pathname = usePathname();
   const unread = useUnreadCount(unreadAlerts);
   const items = [
     { href: "/staff", label: "Home", icon: "🏠" },
-    ...(canSeeService(role) ? [{ href: "/staff/service", label: "Service", icon: "🛠️" }] : []),
-    ...(canSeeComplaints(role) ? [{ href: "/staff/complaints", label: "Complaints", icon: "💬" }] : []),
-    { href: "/staff/register", label: "Warranty", icon: "🧾" },
+    ...(sections.includes("service") ? [{ href: "/staff/service", label: "Service", icon: "🛠️" }] : []),
+    ...(sections.includes("complaints") ? [{ href: "/staff/complaints", label: "Complaints", icon: "💬" }] : []),
+    ...(sections.includes("register")
+      ? [{ href: "/staff/register", label: "Warranty", icon: "🧾" }]
+      : sections.includes("warranties")
+        ? [{ href: "/staff/warranties", label: "Warranty", icon: "🧾" }]
+        : []),
     { href: "/staff/alerts", label: "Alerts", icon: "🔔", badge: unread },
   ];
 

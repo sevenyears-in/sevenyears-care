@@ -33,13 +33,15 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
         fullName={staff.fullName}
         userId={staff.userId}
         role={staff.role}
+        roleLabel={staff.access.roleLabel}
+        sections={staff.access.sections}
         storeName={staff.storeName}
         unreadAlerts={count ?? 0}
         explanationsWaiting={explanationsWaiting}
       />
       <AppSetup />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-6 sm:py-8">{children}</main>
-      <StaffBottomNav role={staff.role} unreadAlerts={count ?? 0} />
+      <StaffBottomNav sections={staff.access.sections} unreadAlerts={count ?? 0} />
     </div>
   );
 }

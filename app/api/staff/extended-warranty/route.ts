@@ -5,6 +5,7 @@ import { applyExtension, extendedSettings, warrantyById } from "@/lib/extended-w
 import { extendLink, tellCustomerActive } from "@/lib/extended-notify";
 import { notifyCustomer } from "@/lib/notify";
 import { canHandleExtensions, sameStoreOrCorporate } from "@/lib/extended-access";
+import { hasSection } from "@/lib/access";
 
 // PATCH { id, action: "approve" | "reject" | "paid_store", note? }
 
@@ -12,7 +13,7 @@ export async function PATCH(request: Request) {
   const auth = await requireStaff("staff");
   if (auth.response) return auth.response;
   const staff = auth.staff;
-  if (!canHandleExtensions(staff.role)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+  if (!hasSection(staff, "extended") || staff.role === "director") return NextResponse.json({ error: "Not allowed." }, { status: 403 });
 
   const body = (await request.json().catch(() => ({}))) as { id?: string; action?: string; note?: string };
   const note = String(body.note ?? "").trim().slice(0, 1000);

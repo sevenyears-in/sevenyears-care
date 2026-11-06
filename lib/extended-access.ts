@@ -13,6 +13,6 @@ export function canSeeExtensions(role: Role) {
 }
 
 /** Store teams handle their own store; Corporate Office and the Service Head handle all stores. */
-export function sameStoreOrCorporate(staff: { role: Role; storeName: string | null }, store: string | null) {
-  return isCorporateStaff(staff) || staff.role === "service_head" || sameStore(staff.storeName, store);
+export function sameStoreOrCorporate(staff: { role: Role; storeName: string | null; access?: { allStores: boolean } }, store: string | null) {
+  return isCorporateStaff(staff) || staff.role === "service_head" || Boolean(staff.access?.allStores) || sameStore(staff.storeName, store);
 }

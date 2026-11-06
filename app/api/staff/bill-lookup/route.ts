@@ -1,3 +1,4 @@
+import { hasSection } from "@/lib/access";
 import { NextResponse } from "next/server";
 import { extendedSettings } from "@/lib/extended-warranty";
 import { requireStaff } from "@/lib/auth";
@@ -11,6 +12,7 @@ import { fetchBill, ZohoError } from "@/lib/zoho";
 export async function POST(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
+  if (!hasSection(auth.staff, "register")) return NextResponse.json({ error: "You don't have access to this section." }, { status: 403 });
 
   try {
     const body = await request.json();

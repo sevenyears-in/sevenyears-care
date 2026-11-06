@@ -1,3 +1,4 @@
+import { hasSection } from "@/lib/access";
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -7,6 +8,7 @@ import { readFilters } from "@/lib/warranty-search";
 export async function GET(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
+  if (!hasSection(auth.staff, "warranties")) return NextResponse.json({ error: "You don't have access to this section." }, { status: 403 });
   const f = readFilters(request.url);
   const { data, error } = await supabaseAdmin.rpc("warranty_month_summary", {
     p_from: f.from || null,

@@ -12,14 +12,15 @@ import { TicketTable } from "@/components/TicketUI";
 import { InstallAppCard } from "@/components/InstallApp";
 import { ExtendedWarrantySection } from "@/components/ExtendedWarrantySection";
 import { canSeeExtensions } from "@/lib/extended-access";
+import { hasSection } from "@/lib/access";
 
 export default async function StaffDashboard() {
   const staff = await getCurrentStaff();
   if (!staff) return null;
   const today = todayISO();
 
-  const showService = canSeeService(staff.role);
-  const showComplaints = canSeeComplaints(staff.role);
+  const showService = hasSection(staff, "service");
+  const showComplaints = hasSection(staff, "complaints");
 
   const [todayCount, totalCount, categoryCount, serviceTickets, complaintTickets, demo, serviceClosed, complaintClosed] = await Promise.all([
     supabaseAdmin
@@ -120,7 +121,7 @@ export default async function StaffDashboard() {
         />
       )}
 
-      {canSeeExtensions(staff.role) && <ExtendedWarrantySection staff={staff} />}
+      {hasSection(staff, "extended") && <ExtendedWarrantySection staff={staff} />}
 
       <section className="space-y-4">
         <h2 className="text-xl font-bold">Warranties</h2>

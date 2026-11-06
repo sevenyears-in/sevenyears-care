@@ -38,6 +38,7 @@ import { PaidServicePanel } from "@/components/PaidServicePanel";
 import { EscalationBadge, FilterTabs, parseFilter, PriorityBadge, SlaBadge, TicketTable } from "@/components/TicketUI";
 import { TicketActions } from "@/components/TicketActions";
 import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
+import { hasSection } from "@/lib/access";
 import { ExplanationsPanel } from "@/components/ExplanationsPanel";
 import { AdminDangerZone } from "@/components/AdminDangerZone";
 import { canRequestExplanation, explanationsForTicket } from "@/lib/explanations";
@@ -51,7 +52,7 @@ type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 export async function TicketListPage({ type, searchParams }: { type: TicketType; searchParams: SearchParams }) {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
-  if (type === "service" ? !canSeeService(staff.role) : !canSeeComplaints(staff.role)) redirect("/staff");
+  if (!hasSection(staff, type === "service" ? "service" : "complaints")) redirect("/staff");
 
   const params = await searchParams;
   // Opens on "All open" so nothing is hidden; every tab shows how many it holds.

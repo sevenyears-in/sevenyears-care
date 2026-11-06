@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
 import { ASSIGNABLE_ROLES, ROLE_HELP, ROLE_LABELS, type Role } from "@/lib/roles";
+import { SECTIONS, type Section } from "@/lib/access";
 
 type StaffRow = {
   id: string;
@@ -18,7 +19,11 @@ type StaffRow = {
   notify_whatsapp: boolean;
   is_active: boolean;
   last_login_at: string | null;
+  custom_role_id?: string | null;
+  extra_sections?: Section[] | null;
 };
+
+type CustomRoleOption = { id: string; name: string; baseRole: Role };
 
 const STORE_ROLES: Role[] = ["store_manager", "technician", "csa", "floor_incharge"];
 
@@ -33,6 +38,8 @@ export default function StaffUsersPage() {
   const [storeError, setStoreError] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<Role>("admin");
+  const [customRoles, setCustomRoles] = useState<CustomRoleOption[]>([]);
+  const [accessFor, setAccessFor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
@@ -41,6 +48,7 @@ export default function StaffUsersPage() {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("csa");
+  const [newCustomRole, setNewCustomRole] = useState("");
   const [storeName, setStoreName] = useState("");
   const [directorStores, setDirectorStores] = useState<string[]>([]);
   const [email, setEmail] = useState("");
@@ -58,6 +66,7 @@ export default function StaffUsersPage() {
       setStoreError(data.storeError ?? "");
       setCurrentUserId(data.currentUserId ?? "");
       setCurrentRole(data.currentRole ?? "admin");
+      setCustomRoles(data.customRoles ?? []);
     }
     setLoading(false);
   }, []);
@@ -95,7 +104,7 @@ export default function StaffUsersPage() {
     const response = await fetch("/api/staff/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullName, userId, password, role, storeName, directorStores, email, whatsappNumber }),
+      body: JSON.stringify({ fullName, userId, password, role, customRoleId: newCustomRole, storeName, directorStores, email, whatsappNumber }),
     });
     const data = await response.json().catch(() => ({}));
     setSaving(false);
@@ -108,6 +117,7 @@ export default function StaffUsersPage() {
     setUserId("");
     setPassword("");
     setRole("csa");
+    setNewCustomRole("");
     setStoreName("");
     setDirectorStores([]);
     setEmail("");
@@ -165,12 +175,36 @@ export default function StaffUsersPage() {
         </div>
         <div>
           <label htmlFor="role" className={labelClass}>Role *</label>
-          <select id="role" value={role} onChange={(e) => setRole(e.target.value as Role)} className={inputClass}>
+          <select
+            id="role"
+            value={newCustomRole ? `custom:${newCustomRole}` : role}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.startsWith("custom:")) {
+                const c = customRoles.find((x) => x.id === v.slice(7));
+                setNewCustomRole(c?.id ?? "");
+                if (c) setRole(c.baseRole);
+              } else {
+                setNewCustomRole("");
+                setRole(v as Role);
+              }
+            }}
+            className={inputClass}
+          >
             {assignableRoles.map((r) => (
               <option key={r} value={r}>{ROLE_LABELS[r]}</option>
             ))}
+            {isSuper && customRoles.length > 0 && (
+              <optgroup label="Custom roles">
+                {customRoles.map((c) => (
+                  <option key={c.id} value={`custom:${c.id}`}>{c.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
-          <p className="mt-1 text-xs text-black/50">{ROLE_HELP[role]}</p>
+          <p className="mt-1 text-xs text-black/50">
+            {newCustomRole ? `Custom role — works like ${ROLE_LABELS[role]}. Access is set in Roles & Access.` : ROLE_HELP[role]}
+          </p>
         </div>
         <div>
           <label htmlFor="store" className={labelClass}>
@@ -254,9 +288,13 @@ export default function StaffUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <select
-                          value={u.role}
-                          disabled={self || locked}
-                          onChange={(e) => patch(u.id, { role: e.target.value }, "Role updated. It applies from their next login.")}
+                          value={u.custom_role_id ? `custom:${u.custom_role_id}` : u.role}
+                          disabled={self || locked || (!isSuper && Boolean(u.custom_role_id))}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v.startsWith("custom:")) patch(u.id, { customRoleId: v.slice(7) }, "Role updated.");
+                            else patch(u.id, { role: v, clearCustom: Boolean(u.custom_role_id) }, "Role updated. It applies from their next login.");
+                          }}
                           className="rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
                           aria-label={`Role for ${u.user_id}`}
                         >
@@ -266,7 +304,55 @@ export default function StaffUsersPage() {
                             .map((r) => (
                             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                           ))}
+                          {(isSuper || u.custom_role_id) && customRoles.length > 0 && (
+                            <optgroup label="Custom roles">
+                              {customRoles
+                                .filter((c) => isSuper || c.id === u.custom_role_id)
+                                .map((c) => (
+                                  <option key={c.id} value={`custom:${c.id}`}>{c.name}</option>
+                                ))}
+                            </optgroup>
+                          )}
                         </select>
+                        {isSuper && !self && u.role !== "super_admin" && (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setAccessFor(accessFor === u.id ? null : u.id)}
+                              className="text-xs font-semibold text-[#0b7f90] hover:underline"
+                            >
+                              {u.extra_sections?.length ? `Extra access (${u.extra_sections.length})` : "+ Extra access"}
+                            </button>
+                            {accessFor === u.id && (
+                              <div className="mt-2 w-52 space-y-1 rounded-xl bg-[#f7f9fb] p-2">
+                                {SECTIONS.map((sec) => {
+                                  const on = (u.extra_sections ?? []).includes(sec.key);
+                                  return (
+                                    <label key={sec.key} className="flex items-center gap-2 text-xs">
+                                      <input
+                                        type="checkbox"
+                                        checked={on}
+                                        onChange={() =>
+                                          patch(
+                                            u.id,
+                                            {
+                                              extraSections: on
+                                                ? (u.extra_sections ?? []).filter((k) => k !== sec.key)
+                                                : [...(u.extra_sections ?? []), sec.key],
+                                            },
+                                            "Extra access saved."
+                                          )
+                                        }
+                                      />
+                                      {sec.label}
+                                    </label>
+                                  );
+                                })}
+                                <p className="pt-1 text-[11px] text-black/45">On top of what their role allows.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {u.role === "director" ? (

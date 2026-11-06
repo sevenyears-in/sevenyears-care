@@ -9,6 +9,8 @@ import {
 } from "@/lib/auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
 import { isRole, type Role } from "@/lib/roles";
+import { SECTION_KEYS } from "@/lib/access";
+import { loadAccessConfig } from "@/lib/access-config";
 import { CORPORATE_OFFICE, getStores, matchStore } from "@/lib/stores";
 
 // Staff management (Super Admin and Admin).
@@ -67,15 +69,16 @@ export async function GET() {
   const auth = await requireStaff("admin");
   if (auth.response) return auth.response;
 
-  const [{ data, error }, storeList] = await Promise.all([
-    supabaseAdmin
-      .from("staff_users")
-      .select(
-        "id, user_id, full_name, role, store_name, director_stores, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at"
-      )
-      .order("created_at", { ascending: true }),
+  const COLS =
+    "id, user_id, full_name, role, store_name, director_stores, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at";
+  const [withAccess, storeList, access] = await Promise.all([
+    supabaseAdmin.from("staff_users").select(`${COLS}, custom_role_id, extra_sections`).order("created_at", { ascending: true }),
     getStores(),
+    loadAccessConfig(),
   ]);
+  const { data, error } = withAccess.error
+    ? await supabaseAdmin.from("staff_users").select(COLS).order("created_at", { ascending: true })
+    : withAccess;
 
   if (error) {
     console.error("List staff error:", error);
@@ -86,6 +89,7 @@ export async function GET() {
     users: data ?? [],
     currentUserId: auth.staff.id,
     currentRole: auth.staff.role,
+    customRoles: access.custom.map((c) => ({ id: c.id, name: c.name, baseRole: c.baseRole })),
     stores: [{ name: CORPORATE_OFFICE, code: null }, ...storeList.stores],
     storeSource: storeList.source,
     storeError: storeList.error,
@@ -101,7 +105,16 @@ export async function POST(request: Request) {
     const fullName = String(body.fullName ?? "").trim();
     const userId = normaliseUserId(body.userId);
     const password = String(body.password ?? "");
-    const role: Role = isRole(body.role) && body.role !== "staff" ? body.role : "csa";
+    let role: Role = isRole(body.role) && body.role !== "staff" ? body.role : "csa";
+    // Custom role (Roles & Access): works like its built-in role. Super Admin only.
+    let customRoleId: string | null = null;
+    if (typeof body.customRoleId === "string" && body.customRoleId) {
+      if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can give custom roles." }, { status: 403 });
+      const custom = (await loadAccessConfig()).custom.find((c) => c.id === body.customRoleId);
+      if (!custom) return NextResponse.json({ error: "That role no longer exists." }, { status: 400 });
+      role = custom.baseRole;
+      customRoleId = custom.id;
+    }
     const store = await storeValue(body.storeName);
     const storeName = store.value ?? "";
     const directorStores = await directorStoresValue(body.directorStores);
@@ -147,6 +160,7 @@ export async function POST(request: Request) {
       must_change_password: true,
       email: email || null,
       whatsapp_number: whatsapp.value,
+      ...(customRoleId ? { custom_role_id: customRoleId } : {}),
     });
 
     if (error) throw error;
@@ -220,7 +234,23 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "“Store Staff” is no longer used. Choose CSA or CRE." }, { status: 400 });
     }
 
-    if (isRole(body.role) && body.role !== target.role) {
+    // Roles & Access (Super Admin): custom role and extra sections for this person.
+    if (typeof body.customRoleId === "string" || Array.isArray(body.extraSections)) {
+      if (!actorIsSuper) return NextResponse.json({ error: "Only the Super Admin can change access." }, { status: 403 });
+      if (isSelf) return NextResponse.json({ error: "You can't change your own access." }, { status: 400 });
+    }
+    if (typeof body.customRoleId === "string" && body.customRoleId) {
+      const custom = (await loadAccessConfig()).custom.find((c) => c.id === body.customRoleId);
+      if (!custom) return NextResponse.json({ error: "That role no longer exists." }, { status: 400 });
+      update.custom_role_id = custom.id;
+      update.role = custom.baseRole;
+    }
+    if (Array.isArray(body.extraSections)) {
+      update.extra_sections = SECTION_KEYS.filter((k) => (body.extraSections as unknown[]).includes(k));
+    }
+
+    if (isRole(body.role) && (body.role !== target.role || body.clearCustom)) {
+      update.custom_role_id = null; // a built-in role replaces any custom role
       if (isSelf) {
         return NextResponse.json({ error: "You can't change your own role." }, { status: 400 });
       }

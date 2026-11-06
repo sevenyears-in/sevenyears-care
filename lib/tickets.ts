@@ -3,6 +3,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { StaffUser } from "@/lib/auth";
+import { hasSection } from "@/lib/access";
 import {
   asRole,
   canSeeComplaints,
@@ -201,14 +202,14 @@ export function canViewTicket(staff: StaffUser, type: TicketType, t: Viewable) {
     if (staff.role === "hr_executive") return false; // HR Executive: staff behaviour complaints only
     if (staff.role === "service_head") return kind === "service"; // delivery / warranty-service complaints
   }
-  if (type === "service" ? !canSeeService(staff.role) : !canSeeComplaints(staff.role)) return false;
+  if (!hasSection(staff, type === "service" ? "service" : "complaints")) return false; // Roles & Access
   if (seesAllStores(staff, type)) return true;
   return sameStore(staff.storeName, t.storeName);
 }
 
 /** Corporate staff see every store; so do the Service Head (service) and HR Head / Operations Manager (complaints). */
 export function seesAllStores(staff: StaffUser, type: TicketType) {
-  if (isCorporateStaff(staff)) return true;
+  if (isCorporateStaff(staff) || staff.access?.allStores) return true;
   if (staff.role === "service_head") return true;
   if (type === "complaint" && (staff.role === "hr_head" || staff.role === "operations_manager")) return true;
   return false;

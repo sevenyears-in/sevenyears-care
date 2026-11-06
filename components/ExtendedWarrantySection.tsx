@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from "@/lib/helpers";
 import { extendedSettings, rupees, type ExtensionRequest } from "@/lib/extended-warranty";
 import { canHandleExtensions, sameStoreOrCorporate } from "@/lib/extended-access";
 import { ExtensionActions } from "@/components/ExtensionActions";
+import { hasSection } from "@/lib/access";
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   pending_inspection: { label: "Inspection needed", cls: "bg-amber-50 text-amber-800 ring-amber-600/20" },
@@ -29,7 +30,7 @@ export async function ExtendedWarrantySection({ staff, full = false }: { staff: 
   );
   const open = all.filter((r) => r.status === "pending_inspection" || r.status === "awaiting_payment");
   const done = all.filter((r) => r.status === "paid" || r.status === "inspection_failed").slice(0, 50);
-  const canAct = canHandleExtensions(staff.role);
+  const canAct = hasSection(staff, "extended") && staff.role !== "director";
   const month = new Date().toISOString().slice(0, 7);
   const paidThisMonth = all.filter((r) => r.status === "paid" && r.paid_at && r.paid_at.slice(0, 7) === month);
 

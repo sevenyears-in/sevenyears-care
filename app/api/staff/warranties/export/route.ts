@@ -1,3 +1,5 @@
+import { hasSection } from "@/lib/access";
+import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
@@ -46,6 +48,7 @@ function cell(value: unknown) {
 export async function GET(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
+  if (!hasSection(auth.staff, "warranties")) return NextResponse.json({ error: "You don't have access to this section." }, { status: 403 });
 
   const filters = readFilters(request.url);
   const lines = ["﻿" + COLUMNS.map(([, label]) => label).join(",")];

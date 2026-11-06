@@ -1,3 +1,4 @@
+import { hasSection } from "@/lib/access";
 import { after, NextResponse } from "next/server";
 import { feedbackLink } from "@/lib/feedback-token";
 import { notifyCustomer, siteUrl } from "@/lib/notify";
@@ -40,6 +41,7 @@ function warrantyNumber() {
 export async function POST(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
+  if (!hasSection(auth.staff, "register")) return NextResponse.json({ error: "You don't have access to this section." }, { status: 403 });
 
   try {
     const body = await request.json();
@@ -270,6 +272,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
+  if (!hasSection(auth.staff, "warranties")) return NextResponse.json({ error: "You don't have access to this section." }, { status: 403 });
 
   const filters = readFilters(request.url);
   const page = Math.max(1, Math.min(10000, Number(new URL(request.url).searchParams.get("page")) || 1));

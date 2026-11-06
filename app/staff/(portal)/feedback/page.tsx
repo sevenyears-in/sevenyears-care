@@ -8,6 +8,7 @@ import { formatDateTime } from "@/lib/helpers";
 import { canSeeFeedback, feedbackScope } from "@/lib/feedback-access";
 import { answerLabel, FORM_TITLES, feedbackQuestions, type FeedbackFormKind } from "@/lib/feedback-forms";
 import { FeedbackFollowUp } from "@/components/FeedbackFollowUp";
+import { hasSection } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,7 @@ const KIND_COLOUR: Record<string, string> = {
 export default async function FeedbackReportPage({ searchParams }: { searchParams: Promise<{ tab?: string; days?: string }> }) {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
-  if (!canSeeFeedback(staff.role)) redirect("/staff");
+  if (!hasSection(staff, "feedback")) redirect("/staff");
 
   after(() => markAlertsRead(staff.id, { titleLike: "%feedback%" }));
   const { tab: tabParam, days: daysParam } = await searchParams;

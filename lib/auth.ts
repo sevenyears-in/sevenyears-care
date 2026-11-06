@@ -10,6 +10,8 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { asRole, isAdmin, type Role } from "@/lib/roles";
+import { EMPTY_ACCESS_CONFIG, resolveAccess, type StaffAccess } from "@/lib/access";
+import { loadAccessConfig } from "@/lib/access-config";
 
 export const SESSION_COOKIE = "sy_staff_session";
 const SESSION_HOURS = 7 * 24; // stay logged in for a week (the app is used on personal phones)
@@ -26,6 +28,8 @@ export type StaffUser = {
   directorStores: string[];
   /** First login with a temporary password: must choose their own. */
   mustChangePassword: boolean;
+  /** Roles & Access: sections this person can open, and the role name to show. */
+  access: StaffAccess;
 };
 
 // ------------------------------------------------------------------
@@ -146,11 +150,15 @@ export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
   const session = readSessionValue(cookieStore.get(SESSION_COOKIE)?.value);
   if (!session) return null;
 
-  const full = await supabaseAdmin
+  const COLS = "id, user_id, full_name, role, store_name, email, whatsapp_number, is_active, session_version, director_stores, must_change_password";
+  const withAccess = await supabaseAdmin
     .from("staff_users")
-    .select("id, user_id, full_name, role, store_name, email, whatsapp_number, is_active, session_version, director_stores, must_change_password")
+    .select(`${COLS}, custom_role_id, extra_sections`)
     .eq("id", session.sid)
     .maybeSingle();
+  const full = withAccess.error
+    ? await supabaseAdmin.from("staff_users").select(COLS).eq("id", session.sid).maybeSingle()
+    : withAccess;
 
   // Database not upgraded yet (supabase/workflow-upgrade.sql not run): keep logins working.
   const result = full.error
@@ -173,15 +181,26 @@ export const getCurrentStaff = cache(async (): Promise<StaffUser | null> => {
     session_version: number;
     director_stores?: string[] | null;
     must_change_password?: boolean | null;
+    custom_role_id?: string | null;
+    extra_sections?: string[] | null;
   } | null;
 
   if (!staff || !staff.is_active || staff.session_version !== session.v) return null;
+
+  const role = asRole(staff.role);
+  const access = resolveAccess(await loadAccessConfig().catch(() => EMPTY_ACCESS_CONFIG), {
+    role,
+    storeName: staff.store_name ?? null,
+    customRoleId: staff.custom_role_id ?? null,
+    extraSections: staff.extra_sections ?? [],
+  });
 
   return {
     id: staff.id,
     userId: staff.user_id,
     fullName: staff.full_name,
-    role: asRole(staff.role),
+    role,
+    access,
     storeName: staff.store_name ?? null,
     email: staff.email ?? null,
     whatsappNumber: staff.whatsapp_number ?? null,

@@ -3,6 +3,7 @@ import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { canSeeFeedback, feedbackScope } from "@/lib/feedback-access";
 import { sameStore } from "@/lib/roles";
+import { hasSection } from "@/lib/access";
 
 // POST /api/staff/feedback  { id, note? }  → mark a feedback follow-up as done.
 
@@ -10,7 +11,7 @@ export async function POST(request: Request) {
   const auth = await requireStaff("staff");
   if (auth.response) return auth.response;
   const staff = auth.staff;
-  if (!canSeeFeedback(staff.role)) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
+  if (!hasSection(staff, "feedback")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const scope = feedbackScope(staff);
   if (!scope.canMarkDone) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
 

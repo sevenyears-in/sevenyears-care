@@ -4,6 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { canSeeExtensions } from "@/lib/extended-access";
 import { markAlertsRead } from "@/lib/alerts";
 import { ExtendedWarrantySection } from "@/components/ExtendedWarrantySection";
+import { hasSection } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function ExtendedWarrantyStaffPage() {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
-  if (!canSeeExtensions(staff.role)) redirect("/staff");
+  if (!hasSection(staff, "extended")) redirect("/staff");
   after(() => markAlertsRead(staff.id, { titleLike: "%extended warranty%" }));
   return <ExtendedWarrantySection staff={staff} full />;
 }

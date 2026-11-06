@@ -21,9 +21,9 @@ export function canSeeFeedback(role: Role) {
   return FEEDBACK_ROLES.includes(role);
 }
 
-export function feedbackScope(staff: { role: Role; storeName: string | null }) {
+export function feedbackScope(staff: { role: Role; storeName: string | null; access?: { allStores: boolean } }) {
   return {
-    allStores: isCorporateStaff(staff) || staff.role === "service_head" || staff.role === "hr_head",
+    allStores: isCorporateStaff(staff) || staff.role === "service_head" || staff.role === "hr_head" || Boolean(staff.access?.allStores),
     confidential: CONFIDENTIAL_FEEDBACK_ROLES.includes(staff.role),
     onlyConfidential: staff.role === "hr_executive",
     canMarkDone: isAdmin(staff.role) || staff.role !== "director",
