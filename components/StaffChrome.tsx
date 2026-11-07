@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AlertSoundSettings, LiveAlerts, useUnreadCount } from "@/components/LiveAlerts";
 import { isAdmin, type Role } from "@/lib/roles";
 import type { Section } from "@/lib/access";
+import { afterLogout } from "@/lib/in-app";
 
 /** Logo colours, used in turn for the menu items. */
 export const LOGO_COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"]; // orange & teal slightly deeper so white text stays readable
@@ -98,7 +99,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   const logout = async () => {
     setLoggingOut(true);
     await fetch("/api/staff/logout", { method: "POST" }).catch(() => null);
-    router.replace("/staff/login");
+    router.replace(afterLogout("/staff/login"));
     router.refresh();
   };
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { afterLogout } from "@/lib/in-app";
 
 // Top-right of the customer site: "My Account" link, or the logged-in name with a Log out button.
 export function CustomerMenu() {
@@ -46,7 +47,7 @@ export function CustomerMenu() {
         onClick={async () => {
           setBusy(true);
           await fetch("/api/account/logout", { method: "POST" }).catch(() => null);
-          window.location.assign("/");
+          window.location.assign(afterLogout("/"));
         }}
         className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/60 transition hover:bg-black hover:text-white disabled:opacity-50"
       >
