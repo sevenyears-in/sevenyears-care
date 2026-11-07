@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
-import { attendanceSettings, hashKey, newSyncKey, saveAttendanceSettings } from "@/lib/attendance";
+import { attendanceCode, attendanceSettings, hashKey, newSyncKey, saveAttendanceSettings } from "@/lib/attendance";
 
 // Settings → Attendance (Super Admin).
 // GET  → status (last sync, punches today, codes not linked to a staff user)
@@ -18,10 +18,10 @@ export async function GET() {
       .select("emp_code")
       .gte("punch_time", `${todayISO()}T00:00:00+05:30`)
       .limit(5000),
-    supabaseAdmin.from("staff_users").select("employee_code").not("employee_code", "is", null),
+    supabaseAdmin.from("staff_users").select("user_id").eq("is_active", true),
   ]);
-  const linked = new Set((staff.data ?? []).map((s) => String(s.employee_code).trim().toUpperCase()));
-  const codesToday = [...new Set((punches.data ?? []).map((p) => String(p.emp_code)))];
+  const userIds = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
+  const codesToday = [...new Set((punches.data ?? []).map((p) => attendanceCode(p.emp_code)))];
   return NextResponse.json({
     hasKey: Boolean(settings.keyHash),
     keyCreatedAt: settings.keyCreatedAt ?? null,
@@ -29,8 +29,8 @@ export async function GET() {
     lastSyncCount: settings.lastSyncCount ?? 0,
     punchesToday: punches.data?.length ?? 0,
     peopleToday: codesToday.length,
-    unlinkedCodes: codesToday.filter((c) => !linked.has(c)).sort(),
-    linkedStaff: linked.size,
+    unlinkedCodes: codesToday.filter((c) => !userIds.has(c)).sort(),
+    linkedStaff: codesToday.filter((c) => userIds.has(c)).length,
     tableReady: !punches.error,
   });
 }

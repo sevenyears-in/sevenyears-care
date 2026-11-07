@@ -113,13 +113,14 @@ export default function AttendanceSetupPage() {
             <p className="mt-1 text-2xl font-bold">{status.peopleToday}</p>
           </div>
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-black/45">Staff linked</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-black/45">Matched to staff today</p>
             <p className="mt-1 text-2xl font-bold">{status.linkedStaff}</p>
           </div>
           {status.unlinkedCodes.length > 0 && (
             <p className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-4">
-              Employee codes punching today but not linked to a staff user: <b>{status.unlinkedCodes.join(", ")}</b>. Add
-              them on <a href="/staff/admin/users" className="font-bold underline">Staff Users</a> (Employee code).
+              Employee codes punching today that don&apos;t match any staff User ID: <b>{status.unlinkedCodes.join(", ")}</b>. The
+              User ID on <a href="/staff/admin/users" className="font-bold underline">Staff Users</a> must be the same as the
+              eTimeTrackLite employee code.
             </p>
           )}
         </div>
@@ -184,8 +185,8 @@ export default function AttendanceSetupPage() {
             <code className="mt-1 block break-all rounded-xl bg-[#161616] p-3 font-mono text-xs text-white">{cmd("-Install")}</code>
           </li>
           <li>
-            Link staff: on <a href="/staff/admin/users" className="font-bold text-[#0b7f90] underline">Staff Users</a>, add
-            each person&apos;s eTimeTrackLite <b>Employee code</b>.
+            Nothing else to link: staff are matched by their <b>User ID</b>, which is the same as their eTimeTrackLite
+            employee code.
           </li>
         </ol>
         <p className="mt-4 text-xs text-black/45">

@@ -25,14 +25,20 @@ export async function saveAttendanceSettings(change: Partial<AttendanceSettings>
   return value;
 }
 
+/** eTimeTrackLite employee code ⇄ staff User ID (same number; "01009" = "1009"). */
+export function attendanceCode(code: unknown) {
+  const c = String(code ?? "").trim().toUpperCase();
+  return /^\d+$/.test(c) ? String(Number(c)) : c;
+}
+
 let cache: { at: number; value: Map<string, Presence> } | null = null;
 
-/** Presence today by staff id (only staff with an employee code). */
+/** Presence today by staff id (matched by User ID). */
 export async function presenceToday(): Promise<Map<string, Presence>> {
   if (cache && Date.now() - cache.at < 30_000) return cache.value;
   const result = new Map<string, Presence>();
   const [{ data: staff }, { data: punches }] = await Promise.all([
-    supabaseAdmin.from("staff_users").select("id, employee_code").eq("is_active", true).not("employee_code", "is", null),
+    supabaseAdmin.from("staff_users").select("id, user_id").eq("is_active", true),
     supabaseAdmin
       .from("attendance_punches")
       .select("emp_code, punch_time")
@@ -46,11 +52,11 @@ export async function presenceToday(): Promise<Map<string, Presence>> {
   }
   const byCode = new Map<string, string[]>();
   for (const p of punches as { emp_code: string; punch_time: string }[]) {
-    const code = p.emp_code.trim().toUpperCase();
+    const code = attendanceCode(p.emp_code);
     byCode.set(code, [...(byCode.get(code) ?? []), p.punch_time]);
   }
-  for (const s of staff as { id: string; employee_code: string }[]) {
-    const times = byCode.get(String(s.employee_code).trim().toUpperCase());
+  for (const s of staff as { id: string; user_id: string }[]) {
+    const times = byCode.get(attendanceCode(s.user_id));
     if (!times?.length) continue;
     // Two punches within 2 minutes are one (a double press on the machine).
     const clean = times.filter((t, i) => i === 0 || new Date(t).getTime() - new Date(times[i - 1]).getTime() > 120_000);
@@ -65,11 +71,9 @@ export async function presenceToday(): Promise<Map<string, Presence>> {
   return result;
 }
 
-/** Is attendance set up (any staff with an employee code)? */
-export async function attendanceEnabled() {
-  const { count } = await supabaseAdmin
-    .from("staff_users")
-    .select("id", { count: "exact", head: true })
-    .not("employee_code", "is", null);
-  return (count ?? 0) > 0;
+/** User IDs (normalised) that have punched in the last 31 days. */
+export async function recentAttendanceCodes(): Promise<Set<string>> {
+  const since = new Date(Date.now() - 31 * 86400_000).toISOString();
+  const { data } = await supabaseAdmin.from("attendance_punches").select("emp_code").gte("punch_time", since).limit(20000);
+  return new Set((data ?? []).map((p) => attendanceCode(p.emp_code)));
 }

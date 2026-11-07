@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { presenceToday } from "@/lib/attendance";
+import { attendanceCode, presenceToday, recentAttendanceCodes } from "@/lib/attendance";
 import { isCorporateStaff, ROLE_LABELS, sameStore, asRole } from "@/lib/roles";
 import type { StaffUser } from "@/lib/auth";
 
@@ -12,11 +12,14 @@ const STORE_COLOURS = ["#ff5e79", "#8883d7", "#0fa8bf", "#f39237", "#16a34a"];
 export async function WhoIsIn({ staff }: { staff: StaffUser }) {
   const { data } = await supabaseAdmin
     .from("staff_users")
-    .select("id, full_name, role, store_name")
+    .select("id, user_id, full_name, role, store_name")
     .eq("is_active", true)
-    .not("employee_code", "is", null)
     .order("full_name");
-  const people = (data ?? []) as { id: string; full_name: string; role: string; store_name: string | null }[];
+  // Only staff whose User ID is used on the punching machine (punched in the last month).
+  const codes = await recentAttendanceCodes();
+  const people = ((data ?? []) as { id: string; user_id: string; full_name: string; role: string; store_name: string | null }[]).filter((p) =>
+    codes.has(attendanceCode(p.user_id)),
+  );
   if (people.length === 0) return null;
 
   const all = isCorporateStaff(staff) || staff.access?.allStores;
