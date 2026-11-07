@@ -77,6 +77,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
     ...(role === "super_admin"
       ? [
           { href: "/staff/admin/roles", label: "Roles & Access", icon: "🔐" },
+          { href: "/staff/admin/attendance", label: "Attendance (eTimeTrackLite)", icon: "🕒" },
           { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
           { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
           { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },

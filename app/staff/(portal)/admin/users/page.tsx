@@ -20,6 +20,8 @@ type StaffRow = {
   is_active: boolean;
   last_login_at: string | null;
   custom_role_id?: string | null;
+  employee_code?: string | null;
+  can_edit_warranties?: boolean | null;
   extra_sections?: Section[] | null;
 };
 
@@ -314,6 +316,22 @@ export default function StaffUsersPage() {
                             </optgroup>
                           )}
                         </select>
+                        {isSuper && u.role === "store_manager" && !u.custom_role_id && (
+                          <label className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-black/60">
+                            <input
+                              type="checkbox"
+                              checked={u.can_edit_warranties !== false}
+                              onChange={(e) =>
+                                patch(
+                                  u.id,
+                                  { canEditWarranties: e.target.checked },
+                                  e.target.checked ? "Can edit warranties again." : "Warranty editing suspended."
+                                )
+                              }
+                            />
+                            Can edit warranties
+                          </label>
+                        )}
                         {isSuper && !self && u.role !== "super_admin" && (
                           <div className="mt-1">
                             <button
@@ -404,6 +422,17 @@ export default function StaffUsersPage() {
                             />
                             <button type="button" disabled={locked} onClick={() => ask(u, "WhatsApp number", u.whatsapp_number, "whatsappNumber")} className="hover:underline">
                               {u.whatsapp_number ? `WA ${u.whatsapp_number}` : <span className="text-black/40">Add WhatsApp</span>}
+                            </button>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span aria-hidden>🕒</span>
+                            <button
+                              type="button"
+                              disabled={locked}
+                              onClick={() => ask(u, "eTimeTrackLite employee code", u.employee_code ?? null, "employeeCode")}
+                              className="hover:underline"
+                            >
+                              {u.employee_code ? `Emp. code ${u.employee_code}` : <span className="text-black/40">Add employee code</span>}
                             </button>
                           </span>
                         </div>

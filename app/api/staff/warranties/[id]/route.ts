@@ -1,4 +1,7 @@
 import { deleteWarranty } from "@/lib/admin-delete";
+import { warrantyEditLevel } from "@/lib/warranty-edit";
+import { isISODate } from "@/lib/helpers";
+import { loadActiveCategories } from "@/lib/warranty-rules";
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -22,6 +25,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const body = await request.json().catch(() => ({}));
   if (body.action === "user") return setProductUser(id, body, auth.staff.fullName);
+  if (body.action === "edit") return editWarranty(id, body, auth.staff);
   if (body.action === "void" || body.action === "unvoid") {
     if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can do this." }, { status: 403 });
     const reason = String(body.reason ?? "").trim().slice(0, 300);
@@ -149,4 +153,91 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     console.error("Delete warranty error:", error);
     return NextResponse.json({ error: "Unable to delete. Please try again." }, { status: 500 });
   }
+}
+
+// ------------------------------------------------------------------
+// Edit a warranty. Store Manager: customer + product details of their store.
+// Super Admin: also serial number and warranty dates.
+// ------------------------------------------------------------------
+async function editWarranty(
+  id: string,
+  body: Record<string, unknown>,
+  staff: { id: string; role: import("@/lib/roles").Role; storeName: string | null; fullName: string }
+) {
+  const { data: w } = await supabaseAdmin
+    .from("warranties")
+    .select("id, store_name, bill_number, customer_mobile, serial_number, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!w) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const level = await warrantyEditLevel(staff, w.store_name);
+  if (!level) return NextResponse.json({ error: "You don't have permission to edit this warranty." }, { status: 403 });
+
+  const text = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
+  const update: Record<string, unknown> = {};
+  const errors: string[] = [];
+
+  const customerName = text(body.customerName, 120);
+  const customerMobile = cleanMobile(body.customerMobile);
+  const customerAddress = text(body.customerAddress, 500);
+  const productName = text(body.productName, 200);
+  const modelNumber = text(body.modelNumber, 80);
+  const categoryName = text(body.categoryName, 80);
+
+  if (!customerName) errors.push("Enter the customer name.");
+  if (!isValidMobile(customerMobile)) errors.push("Enter a valid 10-digit customer mobile.");
+  if (customerAddress.length < 5) errors.push("Enter the customer address.");
+  if (!productName) errors.push("Enter the product name.");
+  if (!modelNumber) errors.push("Enter the model number.");
+  if (categoryName) {
+    const cats = await loadActiveCategories().catch(() => new Map());
+    if (!cats.has(categoryName.toLowerCase())) errors.push("Choose a valid category.");
+  }
+  Object.assign(update, {
+    customer_name: customerName,
+    customer_mobile: customerMobile,
+    customer_address: customerAddress,
+    product_name: productName,
+    model_number: modelNumber,
+    ...(categoryName ? { category_name: categoryName } : {}),
+  });
+
+  if (level === "full") {
+    const serial = text(body.serialNumber, 80);
+    const start = String(body.warrantyStartDate ?? "");
+    const standardUntil = String(body.standardExpiry ?? "");
+    const coveredUntil = String(body.coveredUntil ?? "");
+    if (!serial) errors.push("Enter the serial number.");
+    if (![start, standardUntil, coveredUntil].every(isISODate)) errors.push("Enter valid warranty dates.");
+    else if (standardUntil < start || coveredUntil < standardUntil) errors.push("Dates are in the wrong order (start → standard → covered until).");
+    if (serial && serial !== w.serial_number) {
+      const { data: used } = await supabaseAdmin.from("warranties").select("warranty_number").eq("serial_number", serial).neq("id", id).limit(1);
+      if (used?.length) errors.push(`Serial number already used on ${used[0].warranty_number}.`);
+    }
+    Object.assign(update, {
+      serial_number: serial,
+      warranty_start_date: start,
+      standard_warranty_expiry_date: standardUntil,
+      warranty_expiry_date: coveredUntil,
+    });
+  }
+  if (errors.length) return NextResponse.json({ error: errors.join(" ") }, { status: 400 });
+
+  update.edited_at = new Date().toISOString();
+  update.edited_by = staff.fullName;
+  let { error } = await supabaseAdmin.from("warranties").update(update).eq("id", id);
+  if (error && /edited_/.test(error.message)) {
+    delete update.edited_at;
+    delete update.edited_by;
+    ({ error } = await supabaseAdmin.from("warranties").update(update).eq("id", id));
+  }
+  if (error) {
+    console.error("Edit warranty error:", error);
+    return NextResponse.json({ error: "Unable to save. Please try again." }, { status: 500 });
+  }
+  // New customer mobile: make sure they can log in.
+  if (customerMobile !== w.customer_mobile) {
+    after(() => ensureCustomerAccount(customerMobile, customerName, String(w.bill_number)).then(() => undefined).catch(() => undefined));
+  }
+  return NextResponse.json({ success: true });
 }

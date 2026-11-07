@@ -72,7 +72,7 @@ export async function GET() {
   const COLS =
     "id, user_id, full_name, role, store_name, director_stores, email, whatsapp_number, notify_email, notify_whatsapp, is_active, last_login_at, created_at";
   const [withAccess, storeList, access] = await Promise.all([
-    supabaseAdmin.from("staff_users").select(`${COLS}, custom_role_id, extra_sections`).order("created_at", { ascending: true }),
+    supabaseAdmin.from("staff_users").select(`${COLS}, custom_role_id, extra_sections, employee_code, can_edit_warranties`).order("created_at", { ascending: true }),
     getStores(),
     loadAccessConfig(),
   ]);
@@ -225,6 +225,27 @@ export async function PATCH(request: Request) {
       const whatsapp = whatsappValue(body.whatsappNumber);
       if (whatsapp.error) return NextResponse.json({ error: whatsapp.error }, { status: 400 });
       update.whatsapp_number = whatsapp.value;
+    }
+
+    // Store Manager's right to edit warranties (Super Admin decides)
+    if (typeof body.canEditWarranties === "boolean") {
+      if (!actorIsSuper) return NextResponse.json({ error: "Only the Super Admin can change this." }, { status: 403 });
+      update.can_edit_warranties = body.canEditWarranties;
+    }
+
+    // eTimeTrackLite employee code (attendance)
+    if (typeof body.employeeCode === "string") {
+      const code = body.employeeCode.trim().toUpperCase().slice(0, 40);
+      if (code) {
+        const { data: other } = await supabaseAdmin
+          .from("staff_users")
+          .select("full_name")
+          .eq("employee_code", code)
+          .neq("id", id)
+          .maybeSingle();
+        if (other) return NextResponse.json({ error: `Employee code ${code} is already given to ${other.full_name}.` }, { status: 409 });
+      }
+      update.employee_code = code || null;
     }
 
     if (typeof body.notifyEmail === "boolean") update.notify_email = body.notifyEmail;

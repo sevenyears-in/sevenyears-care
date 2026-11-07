@@ -1,3 +1,4 @@
+import { WhoIsIn } from "@/components/WhoIsIn";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { getCurrentStaff } from "@/lib/auth";
@@ -122,6 +123,8 @@ export default async function StaffDashboard() {
       )}
 
       {hasSection(staff, "extended") && <ExtendedWarrantySection staff={staff} />}
+
+      <WhoIsIn staff={staff} />
 
       <section className="space-y-4">
         <h2 className="text-xl font-bold">Warranties</h2>

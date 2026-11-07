@@ -41,6 +41,7 @@ import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { hasSection } from "@/lib/access";
 import { ExplanationsPanel } from "@/components/ExplanationsPanel";
 import { AdminDangerZone } from "@/components/AdminDangerZone";
+import { presenceToday, type Presence } from "@/lib/attendance";
 import { canRequestExplanation, explanationsForTicket } from "@/lib/explanations";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
@@ -138,12 +139,13 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
   after(() => markAlertsRead(staff.id, { ticketId: ticket.id }));
 
   const canAsk = canRequestExplanation(staff.role);
-  const [history, people, everyone] = await Promise.all([
+  const [history, people, everyone, presence] = await Promise.all([
     getHistory(type, id),
     assignableStaff(type, ticket.storeName, ticket.title, isCorporateStaff(staff)),
     canAsk
       ? supabaseAdmin.from("staff_users").select("id, full_name, role, store_name").eq("is_active", true).order("full_name")
       : Promise.resolve({ data: [] as { id: string; full_name: string; role: string; store_name: string | null }[] }),
+    presenceToday().catch(() => new Map<string, Presence>()),
   ]);
   const actions = availableActions(staff, ticket);
 
@@ -388,10 +390,18 @@ export async function TicketDetailPage({ type, params }: { type: TicketType; par
           type={type}
           id={ticket.id}
           actions={actions}
-          people={people.map((p) => ({
-            id: p.id,
-            label: `${p.fullName} — ${ROLE_LABELS[p.role]}${p.storeName ? `, ${p.storeName}` : ""}`,
-          }))}
+          people={[...people]
+            // In the store now (eTimeTrackLite) first, keeping the store order.
+            .sort((a, b) => Number(presence.get(b.id)?.status === "in") - Number(presence.get(a.id)?.status === "in"))
+            .map((p) => {
+              const here = presence.get(p.id);
+              return {
+                id: p.id,
+                label: `${here?.status === "in" ? "🟢 " : here ? "🟠 " : ""}${p.fullName} — ${ROLE_LABELS[p.role]}${p.storeName ? `, ${p.storeName}` : ""}${
+                  here?.status === "in" ? " · in store" : here ? " · left" : ""
+                }`,
+              };
+            })}
           currentAssigneeId={ticket.assigneeId}
           currentStaffId={staff.id}
           pendingExplanations={explanations.filter((e) => !e.explainedAt).map((e) => e.staffName)}

@@ -7,6 +7,9 @@ import { ResetCustomerLogin } from "@/components/ResetCustomerLogin";
 import { CompleteWarrantyDetails } from "@/components/CompleteWarrantyDetails";
 import { ProductUserEditor } from "@/components/ProductUserEditor";
 import { AdminDangerZone } from "@/components/AdminDangerZone";
+import { EditWarranty } from "@/components/EditWarranty";
+import { warrantyEditLevel } from "@/lib/warranty-edit";
+import { loadActiveCategories } from "@/lib/warranty-rules";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
 
 // Staff: full details of one warranty (opened from Warranties → View).
@@ -27,6 +30,8 @@ type Row = {
   alternate_mobile: string | null;
   void_reason: string | null;
   voided_by: string | null;
+  edited_at?: string | null;
+  edited_by?: string | null;
   customer_name: string;
   customer_mobile: string;
   customer_address: string;
@@ -49,13 +54,10 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
-  const { data, error } = await supabaseAdmin
-    .from("warranties")
-    .select(
-      "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)"
-    )
-    .eq("id", id)
-    .maybeSingle();
+  const COLS =
+    "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)";
+  const first = await supabaseAdmin.from("warranties").select(`${COLS}, edited_at, edited_by`).eq("id", id).maybeSingle();
+  const { data, error } = first.error ? await supabaseAdmin.from("warranties").select(COLS).eq("id", id).maybeSingle() : first;
 
   if (error) console.error("Warranty detail error:", error);
   if (!data) notFound();
@@ -63,6 +65,8 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   const w = data as unknown as Row;
   const registeredBy = one(w.staff_users);
   const status = w.status === "active" && w.warranty_expiry_date < todayISO() ? "expired" : w.status;
+  const editLevel = await warrantyEditLevel(staff, w.store_name);
+  const categories = editLevel ? [...(await loadActiveCategories().catch(() => new Map())).values()].map((c) => String(c.category_name)).sort() : [];
 
   const sections: { title: string; rows: { label: string; value: string | null }[] }[] = [
     {
@@ -112,6 +116,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
       rows: [
         { label: "Registered on", value: formatDateTime(w.created_at) },
         { label: "Registered by", value: registeredBy ? `${registeredBy.full_name} (${registeredBy.user_id})` : null },
+        ...(w.edited_at ? [{ label: "Last edited", value: `${formatDateTime(w.edited_at)} by ${w.edited_by ?? "—"}` }] : []),
       ],
     },
   ];
@@ -129,6 +134,25 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {editLevel && (
+            <EditWarranty
+              full={editLevel === "full"}
+              categories={categories}
+              w={{
+                id: w.id,
+                customerName: w.customer_name,
+                customerMobile: w.customer_mobile,
+                customerAddress: w.customer_address,
+                productName: w.product_name,
+                modelNumber: w.model_number,
+                categoryName: w.category_name,
+                serialNumber: w.serial_number,
+                warrantyStartDate: w.warranty_start_date,
+                standardExpiry: w.standard_warranty_expiry_date,
+                coveredUntil: w.warranty_expiry_date,
+              }}
+            />
+          )}
           <a
             href={`/api/certificate/${w.verification_token}/pdf`}
             className="rounded-2xl bg-[#161616] px-4 py-3 text-sm font-bold text-white"
