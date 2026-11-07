@@ -168,7 +168,7 @@ export default function StaffUsersPage() {
         </div>
         <div>
           <label htmlFor="uid" className={labelClass}>User ID *</label>
-          <input id="uid" autoCapitalize="none" value={userId} onChange={(e) => setUserId(e.target.value)} className={inputClass} placeholder="e.g. safna" />
+          <input id="uid" autoCapitalize="none" inputMode="numeric" value={userId} onChange={(e) => setUserId(e.target.value)} className={inputClass} placeholder="4-digit number, e.g. 1010" />
         </div>
         <div>
           <label htmlFor="pw" className={labelClass}>Password *</label>

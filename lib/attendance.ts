@@ -1,5 +1,5 @@
 // "Who's in the store now", from eTimeTrackLite punches (server only).
-// A person is IN when they have an odd number of punches today (in, out, in…).
+// First punch of the day = arrival; last punch = leaving; punches in between are breaks.
 
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -61,7 +61,11 @@ export async function presenceToday(): Promise<Map<string, Presence>> {
     // Two punches within 2 minutes are one (a double press on the machine).
     const clean = times.filter((t, i) => i === 0 || new Date(t).getTime() - new Date(times[i - 1]).getTime() > 120_000);
     result.set(String(s.id), {
-      status: clean.length % 2 === 1 ? "in" : "out",
+      // First punch = arrival, last punch of the day = leaving. Punches in between are
+      // lunch / tea breaks, so a person stays "in" through them. They count as gone only when
+      // their last punch was an out-punch and nothing has followed for 3 hours.
+      status:
+        clean.length % 2 === 1 || Date.now() - new Date(clean[clean.length - 1]).getTime() < 3 * 3600_000 ? "in" : "out",
       firstIn: clean[0],
       lastPunch: clean[clean.length - 1],
       punches: clean.length,
