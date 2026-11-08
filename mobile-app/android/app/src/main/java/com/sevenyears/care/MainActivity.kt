@@ -13,6 +13,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.view.View
 import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -69,6 +70,20 @@ class MainActivity : ComponentActivity() {
         askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    // Location for the website's "use my current location" button
+    private var geoOrigin: String? = null
+    private var geoCallback: GeolocationPermissions.Callback? = null
+    private val askLocation = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val granted = result.values.any { it }
+        geoCallback?.invoke(geoOrigin, granted, false)
+        geoCallback = null
+        geoOrigin = null
+    }
+
+    private fun hasLocation() =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback ?: return@registerForActivityResult
         fileCallback = null
@@ -122,6 +137,7 @@ class MainActivity : ComponentActivity() {
             displayZoomControls = false
             allowFileAccess = false
             mediaPlaybackRequiresUserGesture = true
+            setGeolocationEnabled(true)
             // Lets the website know it is running inside the app.
             userAgentString = "$userAgentString $APP_TAG/${BuildConfigInfo.versionName(this@MainActivity)}"
         }
@@ -272,6 +288,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private inner class AppChromeClient : WebChromeClient() {
+        override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+            if (callback == null) return
+            val ours = origin?.let { Uri.parse(it).host == HOST } == true
+            when {
+                !ours -> callback.invoke(origin, false, false)
+                hasLocation() -> callback.invoke(origin, true, false)
+                else -> {
+                    geoOrigin = origin
+                    geoCallback = callback
+                    askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                }
+            }
+        }
+
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             progress.progress = newProgress
             progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE

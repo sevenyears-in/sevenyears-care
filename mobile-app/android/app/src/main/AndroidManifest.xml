@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Alerts for new requests (staff) and service updates (customers) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- "Use my current location" for home-visit service requests -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="false"

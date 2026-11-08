@@ -54,7 +54,6 @@ export default function LoginPage() {
               autoComplete="username"
               autoCapitalize="none"
               className={inputClass}
-              placeholder="Mobile number or staff User ID"
             />
           </label>
           <label className="block">
@@ -65,13 +64,10 @@ export default function LoginPage() {
           <button type="submit" disabled={loading} className={`${primaryButtonClass} w-full disabled:opacity-50`}>
             {loading ? "Logging in…" : "Login"}
           </button>
-          <p className="text-center text-xs text-black/50">
-            Customers: your User ID is your mobile number.{" "}
+          <p className="text-center text-xs">
             <Link href="/account/forgot" className="font-semibold text-[#0b7f90] underline">
               Forgot password?
             </Link>
-            <br />
-            Staff: ask your administrator to reset your password.
           </p>
         </form>
         <div className="mt-6 grid grid-cols-2 gap-3 text-center text-sm font-semibold">
