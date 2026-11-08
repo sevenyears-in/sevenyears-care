@@ -208,6 +208,28 @@ export function StopOfferButton({ id }: { id: string }) {
   );
 }
 
+export function ResendOfferButton({ id }: { id: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        if (!confirm("Send this offer's notification again to the same people?")) return;
+        setBusy(true);
+        const { ok, data } = await post({ action: "resend", id });
+        setBusy(false);
+        alert(ok ? data.note || data.warning || "Sent again." : data.error || "Could not resend.");
+        router.refresh();
+      }}
+      className="font-bold text-[#8883d7] hover:underline disabled:opacity-50"
+    >
+      {busy ? "Sending…" : "🔁 Resend"}
+    </button>
+  );
+}
+
 /** Super Admin: paste the Firebase key file once. */
 export function PushSetup() {
   const router = useRouter();

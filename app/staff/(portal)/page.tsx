@@ -13,6 +13,7 @@ import { listTickets, needsActionFrom, rawSla, seesAllStores, type Ticket } from
 import type { StaffUser } from "@/lib/auth";
 import { TicketTable } from "@/components/TicketUI";
 import { InstallAppCard } from "@/components/InstallApp";
+import { WebPushButton } from "@/components/WebPushButton";
 import { ExtendedWarrantySection } from "@/components/ExtendedWarrantySection";
 import { canSeeExtensions } from "@/lib/extended-access";
 import { hasSection } from "@/lib/access";
@@ -50,6 +51,7 @@ export default async function StaffDashboard() {
   return (
     <div className="space-y-8">
       <InstallAppCard />
+      <WebPushButton text="🔔 Get offers and alerts as notifications on this phone / computer" />
       <div className="brand-wash soft-card relative overflow-hidden rounded-3xl bg-white px-6 py-6 ring-1 ring-black/5 sm:px-8 sm:py-8">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Welcome back</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">{staff.fullName}</h1>

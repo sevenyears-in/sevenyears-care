@@ -50,6 +50,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true });
   }
 
+  if (body.action === "resend") {
+    const id = String(body.id ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid offer." }, { status: 400 });
+    const { data: o } = await supabaseAdmin.from("offers").select("id, title, message, audience, target_mobiles").eq("id", id).maybeSingle();
+    if (!o) return NextResponse.json({ error: "Offer not found." }, { status: 404 });
+    // Resending also shows it on the Offers page again if it was hidden.
+    await supabaseAdmin.from("offers").update({ is_active: true }).eq("id", id);
+    const result = await deliver(o.id, o.title, o.message, o.audience === "selected" ? "selected" : "all", o.target_mobiles ?? [], by);
+    return NextResponse.json(result);
+  }
+
   const title = clean(body.title, 80);
   const message = clean(body.message, 400);
   const linkRaw = clean(body.link, 300);
@@ -96,22 +107,29 @@ export async function POST(request: Request) {
     });
   }
 
+  const result = await deliver(offer.id, title, message, audience, mobiles, by);
+  if (result.sent) return NextResponse.json({ ...result, note: result.note + waNote });
+  return NextResponse.json({ ...result, warning: result.warning + waNote });
+}
+
+/** Phone & browser notifications for one offer (used for new offers and "Resend"). */
+async function deliver(id: string, title: string, message: string, audience: "all" | "selected", mobiles: string[], by: string) {
   try {
     const msg = { title, body: message, url: `${siteUrl()}/offers` };
-    let note = "";
+    let note = "Sent! Customers and staff with notifications on will get it in a few seconds.";
     if (audience === "all") await pushToAll(msg);
     else {
       let reached = 0;
       for (const m of mobiles) reached += await pushToCustomer(m, msg);
       note = reached
-        ? `Sent to ${reached} phone${reached === 1 ? "" : "s"}. Customers without the app will see it on the Offers page after logging in.`
-        : "None of these customers have the app with notifications yet — they will see the offer on the Offers page after logging in.";
+        ? `Sent to ${reached} phone${reached === 1 ? "" : "s"}/browser${reached === 1 ? "" : "s"}. Customers without notifications will see it on the Offers page after logging in.`
+        : "None of these customers have notifications switched on yet — they will see the offer on the Offers page after logging in.";
     }
-    await supabaseAdmin.from("offers").update({ sent_at: new Date().toISOString(), sent_by: by, send_error: null }).eq("id", offer.id);
-    return NextResponse.json({ success: true, sent: true, note: (note || "Sent! Customers will get the notification in a few seconds.") + waNote });
+    await supabaseAdmin.from("offers").update({ sent_at: new Date().toISOString(), sent_by: by, send_error: null }).eq("id", id);
+    return { success: true, sent: true, note, warning: "" };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Sending failed";
-    await supabaseAdmin.from("offers").update({ send_error: msg }).eq("id", offer.id);
-    return NextResponse.json({ success: true, sent: false, warning: `Offer saved and shown in the app, but the app notification was not sent: ${msg}.${waNote}` });
+    await supabaseAdmin.from("offers").update({ send_error: msg }).eq("id", id);
+    return { success: true, sent: false, note: "", warning: `Offer saved and shown in the app, but the notification was not sent: ${msg}.` };
   }
 }

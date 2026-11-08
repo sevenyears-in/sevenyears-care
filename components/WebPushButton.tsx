@@ -35,7 +35,13 @@ function supported() {
  * Website / home-screen app: lets the person switch on notifications (offers, wishes, request updates).
  * Hidden inside the Android app (it has its own) and when already switched on.
  */
-export function WebPushButton({ compact = false }: { compact?: boolean }) {
+export function WebPushButton({
+  compact = false,
+  text = "🔔 Get offers, birthday wishes and request updates as notifications",
+}: {
+  compact?: boolean;
+  text?: string;
+}) {
   const [state, setState] = useState<"hidden" | "ask" | "busy" | "done" | "error">("hidden");
 
   useEffect(() => {
@@ -68,7 +74,7 @@ export function WebPushButton({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-[#8883d7]/10 px-4 py-3 ring-1 ring-[#8883d7]/20">
-      <span className="text-sm font-semibold">🔔 Get offers, birthday wishes and request updates as notifications</span>
+      <span className="text-sm font-semibold">{text}</span>
       <button
         type="button"
         onClick={turnOn}

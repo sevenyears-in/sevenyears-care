@@ -3,7 +3,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadServiceAccount } from "@/lib/push";
 import { formatDate, formatDateTime } from "@/lib/helpers";
-import { DeleteOfferButton, OffersManager, PushSetup, StopOfferButton, WishesSettings } from "@/components/OffersManager";
+import { DeleteOfferButton, OffersManager, ResendOfferButton, PushSetup, StopOfferButton, WishesSettings } from "@/components/OffersManager";
 import { loadWishSettings } from "@/lib/wishes";
 import type { Offer } from "@/lib/offers";
 
@@ -86,7 +86,10 @@ export default async function OffersAdminPage() {
                       Not notified
                     </span>
                   )}
-                  <p className="mt-2">{o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}</p>
+                  <p className="mt-2">
+                    <ResendOfferButton id={o.id} />
+                  </p>
+                  <p className="mt-1">{o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}</p>
                   <p className="mt-1">
                     <DeleteOfferButton id={o.id} />
                   </p>
