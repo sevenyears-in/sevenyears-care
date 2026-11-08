@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const [customer, staff] = await Promise.all([getCurrentCustomer(), getCurrentStaff()]);
   const { error } = await supabaseAdmin.from("push_tokens").upsert({
     token,
-    platform: body.platform === "ios" ? "ios" : "android",
+    platform: ["ios", "web"].includes(String(body.platform)) ? String(body.platform) : "android",
     customer_mobile: customer?.mobile ?? null,
     staff_id: staff?.id ?? null,
     updated_at: new Date().toISOString(),

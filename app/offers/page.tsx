@@ -3,6 +3,7 @@ import { PageShell } from "@/components/SiteChrome";
 import { currentOffers } from "@/lib/offers";
 import { getCurrentCustomer } from "@/lib/customer-auth";
 import { formatDate } from "@/lib/helpers";
+import { WebPushButton } from "@/components/WebPushButton";
 
 export const metadata: Metadata = { title: "Offers" };
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ export default async function OffersPage() {
   const offers = await currentOffers(customer?.mobile);
   return (
     <PageShell eyebrow="Seven Years" title="Offers for you 🎁" intro="Special offers from Seven Years stores. Turn on notifications in the app so you never miss one.">
+      <div className="mb-5">
+        <WebPushButton />
+      </div>
       {offers.length === 0 ? (
         <p className="rounded-3xl bg-white p-6 text-center text-sm text-black/55 soft-card ring-1 ring-black/5">No offers right now — check back soon!</p>
       ) : (

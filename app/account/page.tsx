@@ -11,6 +11,7 @@ import { complaintKind, customerComplaintStatus } from "@/lib/sla";
 import { loadFamily } from "@/lib/family";
 import { FamilyDatesEditor } from "@/components/FamilyDatesEditor";
 import { FeedbackPrompt, type PendingFeedback } from "@/components/FeedbackPrompt";
+import { WebPushButton } from "@/components/WebPushButton";
 import { zohoBillFeedbackId } from "@/lib/feedback";
 import { fetchInvoicesForMobile } from "@/lib/zoho";
 
@@ -137,7 +138,8 @@ export default async function AccountPage() {
         <CustomerLogoutButton />
       </div>
 
-      <div className="mb-8">
+      <div className="mb-8 space-y-3">
+        <WebPushButton />
         <InstallAppCard audience="customer" />
       </div>
 

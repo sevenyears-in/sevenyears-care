@@ -2,7 +2,7 @@
 // Keeps the app installable and shows a friendly page when there is no internet.
 // Pages and data always come fresh from the server (nothing private is cached).
 
-const CACHE = "sy-care-v3";
+const CACHE = "sy-care-v4";
 const OFFLINE_URL = "/offline.html";
 const SHELL = [OFFLINE_URL, "/app-icon-192.png", "/seven-years-logo-2026.png"];
 
@@ -48,6 +48,28 @@ self.addEventListener("notificationclick", (event) => {
         }
       }
       return self.clients.openWindow(target);
+    })
+  );
+});
+
+// Phone/computer notifications from Firebase (offers, wishes, request updates) for website & home-screen app users.
+self.addEventListener("push", (event) => {
+  let p = {};
+  try {
+    p = event.data ? event.data.json() : {};
+  } catch (e) {
+    p = { notification: { title: "Seven Years", body: event.data ? event.data.text() : "" } };
+  }
+  const n = p.notification || {};
+  const d = p.data || {};
+  const title = n.title || d.title || "Seven Years";
+  const url = (p.fcmOptions && p.fcmOptions.link) || d.url || n.click_action || "/offers";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: n.body || d.body || "",
+      icon: n.icon || "/app-icon-192.png",
+      badge: "/app-icon-192.png",
+      data: { url },
     })
   );
 });

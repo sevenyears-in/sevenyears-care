@@ -49,13 +49,17 @@ export async function saveServiceAccount(raw: string): Promise<{ ok: true; email
 
 let cached: { token: string; until: number } | null = null;
 
-async function accessToken(sa: ServiceAccount, fresh = false) {
-  if (!fresh && cached && cached.until > Date.now()) return cached.token;
+const MESSAGING_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+const READ_SCOPE = "https://www.googleapis.com/auth/firebase.readonly";
+
+async function accessToken(sa: ServiceAccount, fresh = false, scope = MESSAGING_SCOPE) {
+  const useCache = scope === MESSAGING_SCOPE;
+  if (useCache && !fresh && cached && cached.until > Date.now()) return cached.token;
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({
     iss: sa.client_email,
-    scope: "https://www.googleapis.com/auth/firebase.messaging",
+    scope,
     aud: "https://oauth2.googleapis.com/token",
     iat: now,
     exp: now + 3600,
@@ -69,7 +73,7 @@ async function accessToken(sa: ServiceAccount, fresh = false) {
   });
   const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
   if (!res.ok || !data.access_token) throw new Error(data.error_description || data.error || `HTTP ${res.status}`);
-  if (!fresh) cached = { token: data.access_token, until: Date.now() + ((data.expires_in ?? 3600) - 300) * 1000 };
+  if (useCache && !fresh) cached = { token: data.access_token, until: Date.now() + ((data.expires_in ?? 3600) - 300) * 1000 };
   return data.access_token;
 }
 
@@ -87,6 +91,7 @@ async function send(target: { topic: string } | { token: string }, msg: PushMess
         notification: { title: msg.title.slice(0, 120), body: msg.body.slice(0, 500) },
         data: { url: msg.url ?? "" },
         android: { priority: "high", notification: { channel_id: "offers" } },
+        webpush: { notification: { icon: "/app-icon-192.png", badge: "/app-icon-192.png" }, fcm_options: msg.url ? { link: msg.url } : undefined },
       },
     }),
     signal: AbortSignal.timeout(15_000),
@@ -99,9 +104,45 @@ async function send(target: { topic: string } | { token: string }, msg: PushMess
   }
 }
 
-/** Everyone who has the app (they all follow the "offers" topic). */
+/** Everyone: Android app users follow the "offers" topic; website/PWA users are sent one by one. */
 export async function pushToAll(msg: PushMessage) {
   await send({ topic: OFFERS_TOPIC }, msg);
+  const { data } = await supabaseAdmin.from("push_tokens").select("token").eq("platform", "web");
+  await Promise.all(
+    (data ?? []).map((t) =>
+      send({ token: t.token }, msg).catch(async (error) => {
+        const status = (error as { status?: string }).status;
+        if (status === "NOT_FOUND" || status === "UNREGISTERED" || status === "INVALID_ARGUMENT")
+          await supabaseAdmin.from("push_tokens").delete().eq("token", t.token);
+      })
+    )
+  );
+}
+
+let webConfigCache: { at: number; value: Record<string, string> } | null = null;
+
+/**
+ * Public Firebase settings for the website (the same values every Firebase web page carries),
+ * read from Firebase with the server key so they never need to be copied by hand.
+ */
+export async function webPushConfig(): Promise<Record<string, string> | null> {
+  if (webConfigCache && Date.now() - webConfigCache.at < 6 * 3600_000) return webConfigCache.value;
+  const sa = await loadServiceAccount();
+  if (!sa) return null;
+  const token = await accessToken(sa, false, READ_SCOPE);
+  const base = `https://firebase.googleapis.com/v1beta1/projects/${sa.project_id}`;
+  const list = (await fetch(`${base}/webApps`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) }).then((r) =>
+    r.json()
+  )) as { apps?: { appId: string; state?: string }[] };
+  const app = (list.apps ?? []).find((a) => a.state !== "DELETED");
+  if (!app) return null;
+  const cfg = (await fetch(`${base}/webApps/${app.appId}/config`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) }).then(
+    (r) => r.json()
+  )) as Record<string, string>;
+  if (!cfg.apiKey || !cfg.appId) return null;
+  const value = { apiKey: cfg.apiKey, appId: cfg.appId, projectId: cfg.projectId, messagingSenderId: cfg.messagingSenderId };
+  webConfigCache = { at: Date.now(), value };
+  return value;
 }
 
 /** One customer's phones (e.g. "your service is complete"). Removes tokens Google says are dead. Returns phones reached. */
