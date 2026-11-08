@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { pushToAll, pushToCustomer, saveServiceAccount } from "@/lib/push";
 import { saveWishSettings } from "@/lib/wishes";
-import { siteUrl } from "@/lib/notify";
+import { sendWhatsApp, siteUrl, whatsappConfigured } from "@/lib/notify";
 
 const clean = (v: unknown, max: number) => String(v ?? "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max);
 
@@ -62,6 +62,11 @@ export async function POST(request: Request) {
   }
   if (linkRaw && !/^https:\/\/[^\s]+$/i.test(linkRaw)) return NextResponse.json({ error: "The link must start with https://" }, { status: 400 });
 
+  const viaWhatsApp = body.whatsapp === true;
+  if (viaWhatsApp && !(await whatsappConfigured())) {
+    return NextResponse.json({ error: "WhatsApp is not connected yet (Settings → Alerts Setup). Untick “Also send on WhatsApp” or set it up first." }, { status: 400 });
+  }
+
   const { data: offer, error } = await supabaseAdmin
     .from("offers")
     .insert({ title, message, link: linkRaw || null, valid_until: validUntil, created_by: by, audience, target_mobiles: mobiles })
@@ -70,6 +75,25 @@ export async function POST(request: Request) {
   if (error || !offer) {
     console.error("Create offer error:", error);
     return NextResponse.json({ error: "Could not save the offer. Ask the Super Admin to run the latest database update." }, { status: 500 });
+  }
+
+  // WhatsApp (template "sy_offer": {{1}} name · {{2}} offer title · {{3}} details) — sent in the background.
+  let waNote = "";
+  if (viaWhatsApp) {
+    const targets =
+      audience === "selected"
+        ? ((await supabaseAdmin.from("customer_accounts").select("mobile, full_name").in("mobile", mobiles)).data ?? []).concat(
+            mobiles.map((m) => ({ mobile: m, full_name: null }))
+          )
+        : (await supabaseAdmin.from("customer_accounts").select("mobile, full_name").limit(20000)).data ?? [];
+    const unique = [...new Map(targets.reverse().map((t) => [t.mobile, t])).values()];
+    waNote = ` WhatsApp is going out to ${unique.length} customer${unique.length === 1 ? "" : "s"}.`;
+    after(async () => {
+      for (const t of unique) {
+        const name = String(t.full_name ?? "").split(" ")[0] || "there";
+        await sendWhatsApp(t.mobile, "sy_offer", [name, title, message], { audience: "customer", ticketNumber: "offer" });
+      }
+    });
   }
 
   try {
@@ -84,10 +108,10 @@ export async function POST(request: Request) {
         : "None of these customers have the app with notifications yet — they will see the offer on the Offers page after logging in.";
     }
     await supabaseAdmin.from("offers").update({ sent_at: new Date().toISOString(), sent_by: by, send_error: null }).eq("id", offer.id);
-    return NextResponse.json({ success: true, sent: true, note });
+    return NextResponse.json({ success: true, sent: true, note: (note || "Sent! Customers will get the notification in a few seconds.") + waNote });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Sending failed";
     await supabaseAdmin.from("offers").update({ send_error: msg }).eq("id", offer.id);
-    return NextResponse.json({ success: true, sent: false, warning: `Offer saved and shown in the app, but the notification was not sent: ${msg}` });
+    return NextResponse.json({ success: true, sent: false, warning: `Offer saved and shown in the app, but the app notification was not sent: ${msg}.${waNote}` });
   }
 }

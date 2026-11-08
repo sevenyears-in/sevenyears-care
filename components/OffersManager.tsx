@@ -22,14 +22,16 @@ export function OffersManager() {
   const [validUntil, setValidUntil] = useState("");
   const [audience, setAudience] = useState<"all" | "selected">("all");
   const [mobiles, setMobiles] = useState("");
+  const [whatsapp, setWhatsapp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   const send = async () => {
-    if (!confirm(audience === "all" ? "Send this offer to everyone who has the app?" : "Send this offer to the customers you listed?")) return;
+    const who = audience === "all" ? "everyone" : "the customers you listed";
+    if (!confirm(`Send this offer to ${who}${whatsapp ? " — in the app AND on WhatsApp (Meta charges about ₹0.80 per WhatsApp message)" : ""}?`)) return;
     setBusy(true);
     setNote(null);
-    const { ok, data } = await post({ action: "send", title, message, link, validUntil, audience, mobiles });
+    const { ok, data } = await post({ action: "send", title, message, link, validUntil, audience, mobiles, whatsapp });
     setBusy(false);
     if (!ok) return setNote({ ok: false, text: data.error || "Could not send." });
     setNote({ ok: data.sent, text: data.sent ? data.note || "Sent! Customers will get the notification in a few seconds." : data.warning });
@@ -92,6 +94,10 @@ export function OffersManager() {
             />
           )}
         </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" checked={whatsapp} onChange={(e) => setWhatsapp(e.target.checked)} className="h-5 w-5 accent-[#25D366]" />
+          Also send on WhatsApp <span className="font-normal text-black/45">(reaches customers without the app · paid per message)</span>
+        </label>
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={send} disabled={busy} className="rounded-2xl bg-[#ff5e79] px-6 py-3 text-sm font-bold text-white disabled:opacity-50">
             {busy ? "Sending…" : audience === "all" ? "📣 Send to all customers" : "🎯 Send to these customers"}
@@ -124,14 +130,14 @@ export function DeleteOfferButton({ id }: { id: string }) {
   );
 }
 
-type Wishes = { enabled: boolean; child: string; father: string; mother: string; anniversary: string };
+type Wishes = { enabled: boolean; whatsapp: boolean; child: string; father: string; mother: string; anniversary: string };
 
 /** Automatic birthday & anniversary wishes. */
 export function WishesSettings({ initial }: { initial: Wishes }) {
   const [w, setW] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
-  const field = (key: keyof Omit<Wishes, "enabled">, title: string, hint: string) => (
+  const field = (key: keyof Omit<Wishes, "enabled" | "whatsapp">, title: string, hint: string) => (
     <label className="block">
       <span className={label}>
         {title} <span className="font-normal text-black/40">{hint}</span>
@@ -149,8 +155,13 @@ export function WishesSettings({ initial }: { initial: Wishes }) {
         </label>
       </div>
       <p className="mt-1 text-sm text-black/55">
-        Sent automatically at 8 am on the day, to customers who saved these dates (at warranty registration or in My Account) and have the app.
+        Sent automatically at 8 am on the day, to customers who saved these dates (at warranty registration or in My Account) — as an app
+        notification, and on WhatsApp when switched on below.
       </p>
+      <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-semibold">
+        <input type="checkbox" checked={w.whatsapp} onChange={(e) => setW({ ...w, whatsapp: e.target.checked })} className="h-5 w-5 accent-[#25D366]" />
+        Also send on WhatsApp <span className="font-normal text-black/45">(uses the approved WhatsApp greeting templates — their wording is fixed)</span>
+      </label>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         {field("child", "Child's birthday", "— {child} = child's name")}
         {field("anniversary", "Wedding anniversary", "")}
