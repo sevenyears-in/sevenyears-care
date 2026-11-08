@@ -86,14 +86,12 @@ export default async function OffersAdminPage() {
                       Not notified
                     </span>
                   )}
-                  <p className="mt-2">
-                    <ResendOfferButton id={o.id} />
-                  </p>
-                  <p className="mt-1">{o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}</p>
-                  <p className="mt-1">
-                    <DeleteOfferButton id={o.id} />
-                  </p>
                 </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-black/5 pt-3 text-sm">
+                <ResendOfferButton id={o.id} />
+                {o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}
+                <DeleteOfferButton id={o.id} />
               </div>
             </div>
           ))
