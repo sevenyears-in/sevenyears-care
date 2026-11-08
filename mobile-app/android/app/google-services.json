@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "369046867873",
+    "project_id": "seven-years-57487",
+    "storage_bucket": "seven-years-57487.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:369046867873:android:d5324d9f5dd3707871c5e0",
+        "android_client_info": {
+          "package_name": "in.sevenyears.care"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDi-KnCm7Ko_yXMPlYMXocdXUkzUlKEspI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
