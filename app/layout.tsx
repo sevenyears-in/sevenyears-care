@@ -3,6 +3,7 @@ import { Geist_Mono, Poppins } from "next/font/google";
 import "./globals.css";
 import { AppSetup } from "@/components/InstallApp";
 import { AppPushRegister } from "@/components/AppPushRegister";
+import { Heartbeat } from "@/components/Heartbeat";
 
 // Same typeface as sevenyears.in (Poppins 400 / 500 / 600 / 700).
 const poppins = Poppins({
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <AppSetup />
         <AppPushRegister />
+        <Heartbeat />
         {children}
       </body>
     </html>

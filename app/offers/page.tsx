@@ -4,6 +4,7 @@ import { currentOffers } from "@/lib/offers";
 import { getCurrentCustomer } from "@/lib/customer-auth";
 import { formatDate } from "@/lib/helpers";
 import { WebPushButton } from "@/components/WebPushButton";
+import { RichText } from "@/components/RichText";
 import { after } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { recordOfferTap, recordOfferViews } from "@/lib/offer-views";
@@ -34,7 +35,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
             <article key={o.id} className="relative overflow-hidden rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5">
               <span className="absolute inset-x-0 top-0 h-1.5" style={{ backgroundColor: COLOURS[i % COLOURS.length] }} aria-hidden />
               <h2 className="text-lg font-bold">{o.title}</h2>
-              <p className="mt-2 whitespace-pre-line text-sm leading-6 text-black/70">{o.message}</p>
+              <p className="mt-2 text-sm leading-6 text-black/70">
+                <RichText text={o.message} />
+              </p>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-black/45">{o.valid_until ? `Valid till ${formatDate(o.valid_until)}` : formatDate(o.created_at.slice(0, 10))}</p>
                 {o.link && (

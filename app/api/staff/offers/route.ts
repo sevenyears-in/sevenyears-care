@@ -5,7 +5,19 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { pushToAll, pushToCustomer, saveServiceAccount } from "@/lib/push";
 import { saveWishSettings } from "@/lib/wishes";
 import { sendWhatsApp, siteUrl, whatsappConfigured } from "@/lib/notify";
+import { plainText, whatsAppText } from "@/components/RichText";
 
+// Keeps the line breaks the person typed (at most one empty line in a row).
+const cleanLines = (v: unknown, max: number) =>
+  String(v ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, max);
 const clean = (v: unknown, max: number) => String(v ?? "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max);
 
 // POST /api/staff/offers
@@ -62,7 +74,7 @@ export async function POST(request: Request) {
   }
 
   const title = clean(body.title, 80);
-  const message = clean(body.message, 400);
+  const message = cleanLines(body.message, 1000);
   const linkRaw = clean(body.link, 300);
   const validUntil = /^\d{4}-\d{2}-\d{2}$/.test(String(body.validUntil ?? "")) ? String(body.validUntil) : null;
   if (title.length < 3 || message.length < 5) return NextResponse.json({ error: "Enter a title and a message." }, { status: 400 });
@@ -102,7 +114,7 @@ export async function POST(request: Request) {
     after(async () => {
       for (const t of unique) {
         const name = String(t.full_name ?? "").split(" ")[0] || "there";
-        await sendWhatsApp(t.mobile, "sy_offer", [name, title, message], { audience: "customer", ticketNumber: "offer" });
+        await sendWhatsApp(t.mobile, "sy_offer", [name, title, whatsAppText(message)], { audience: "customer", ticketNumber: "offer" });
       }
     });
   }
@@ -115,7 +127,7 @@ export async function POST(request: Request) {
 /** Phone & browser notifications for one offer (used for new offers and "Resend"). */
 async function deliver(id: string, title: string, message: string, audience: "all" | "selected", mobiles: string[], by: string) {
   try {
-    const msg = { title, body: message, url: `${siteUrl()}/offers?n=${id}` };
+    const msg = { title, body: plainText(message), url: `${siteUrl()}/offers?n=${id}` };
     let note = "Sent! Customers and staff with notifications on will get it in a few seconds.";
     if (audience === "all") await pushToAll(msg);
     else {

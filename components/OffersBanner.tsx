@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { recordOfferViews } from "@/lib/offer-views";
 import { currentOffers } from "@/lib/offers";
 import { formatDate } from "@/lib/helpers";
+import { RichText } from "@/components/RichText";
 
 const COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"];
 
@@ -38,7 +39,9 @@ export async function OffersBanner({
           >
             <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: COLOURS[i % COLOURS.length] }} aria-hidden />
             <p className="font-bold">{o.title}</p>
-            <p className="mt-1 line-clamp-3 text-sm text-black/65">{o.message}</p>
+            <p className="mt-1 line-clamp-4 text-sm leading-6 text-black/65">
+              <RichText text={o.message} />
+            </p>
             {o.valid_until && <p className="mt-2 text-xs text-black/45">Valid till {formatDate(o.valid_until)}</p>}
           </Link>
         ))}

@@ -10,11 +10,36 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "App usage" };
 
 type Token = { platform: string; customer_mobile: string | null; staff_id: string | null; updated_at: string };
-type StaffRow = { id: string; user_id: string; full_name: string; role: Role; store_name: string | null; last_login_at: string | null };
+type StaffRow = { id: string; user_id: string; full_name: string; role: Role; store_name: string | null; last_login_at: string | null; last_seen_at: string | null };
 type View = { offer_id: string; viewer: string; customer_mobile: string | null; staff_id: string | null; first_seen_at: string; tapped_at: string | null };
 type Alert = { staff_id: string; title: string; read_at: string | null; created_at: string };
 
 const DAY = 86_400_000;
+const ONLINE_MS = 3 * 60_000; // seen in the last 3 minutes = online now
+const isOnline = (t?: string | null) => !!t && Date.now() - new Date(t).getTime() < ONLINE_MS;
+
+function ago(t: string) {
+  const m = Math.round((Date.now() - new Date(t).getTime()) / 60_000);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hr ago`;
+  return formatDateTime(t);
+}
+
+function Presence({ seen }: { seen: string | null }) {
+  if (isOnline(seen))
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-800">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-600" />
+        </span>
+        Online now
+      </span>
+    );
+  if (seen) return <span className="text-xs text-black/50">Seen {ago(seen)}</span>;
+  return <span className="text-xs text-black/30">—</span>;
+}
 const since = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 
 function Card({ title, value, note, colour }: { title: string; value: number | string; note?: string; colour: string }) {
@@ -40,8 +65,8 @@ function Section({ title, intro, children }: { title: string; intro?: string; ch
   );
 }
 
-const th = "px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-black/45";
-const td = "px-3 py-2 align-top";
+const th = "whitespace-nowrap px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wide text-black/45";
+const td = "px-4 py-3 align-middle";
 const yes = (on: boolean, label = "Yes") =>
   on ? <span className="font-bold text-green-700">✓ {label}</span> : <span className="text-black/30">—</span>;
 
@@ -52,9 +77,9 @@ export default async function AppUsagePage() {
 
   const [tokensRes, staffRes, custCount, custRecent, offersRes, viewsRes, alertsRes] = await Promise.all([
     supabaseAdmin.from("push_tokens").select("platform, customer_mobile, staff_id, updated_at").limit(20000),
-    supabaseAdmin.from("staff_users").select("id, user_id, full_name, role, store_name, last_login_at").eq("is_active", true).order("full_name"),
+    supabaseAdmin.from("staff_users").select("id, user_id, full_name, role, store_name, last_login_at, last_seen_at").eq("is_active", true).order("full_name"),
     supabaseAdmin.from("customer_accounts").select("mobile", { count: "exact", head: true }),
-    supabaseAdmin.from("customer_accounts").select("mobile, full_name, last_login_at").not("last_login_at", "is", null).order("last_login_at", { ascending: false }).limit(5000),
+    supabaseAdmin.from("customer_accounts").select("mobile, full_name, last_login_at, last_seen_at").not("last_login_at", "is", null).order("last_login_at", { ascending: false }).limit(5000),
     supabaseAdmin.from("offers").select("id, title, created_at, audience").order("created_at", { ascending: false }).limit(10),
     supabaseAdmin.from("offer_views").select("offer_id, viewer, customer_mobile, staff_id, first_seen_at, tapped_at").gte("first_seen_at", since(120)).limit(20000),
     supabaseAdmin.from("staff_notifications").select("staff_id, title, read_at, created_at").gte("created_at", since(30)).order("created_at", { ascending: false }).limit(5000),
@@ -62,7 +87,7 @@ export default async function AppUsagePage() {
 
   const tokens = (tokensRes.data ?? []) as Token[];
   const staffRows = (staffRes.data ?? []) as StaffRow[];
-  const customers = (custRecent.data ?? []) as { mobile: string; full_name: string | null; last_login_at: string }[];
+  const customers = (custRecent.data ?? []) as { mobile: string; full_name: string | null; last_login_at: string; last_seen_at: string | null }[];
   const views = (viewsRes.data ?? []) as View[];
   const alerts = (alertsRes.data ?? []) as Alert[];
   const viewsMissing = Boolean(viewsRes.error);
@@ -87,6 +112,15 @@ export default async function AppUsagePage() {
   }
 
   const staffName = new Map(staffRows.map((s) => [s.id, s.full_name]));
+  const staffOnline = staffRows.filter((s) => isOnline(s.last_seen_at));
+  const custOnline = customers.filter((c) => isOnline(c.last_seen_at));
+  // Online first, then most recently seen, then name.
+  staffRows.sort(
+    (a, b) =>
+      Number(isOnline(b.last_seen_at)) - Number(isOnline(a.last_seen_at)) ||
+      (b.last_seen_at ?? b.last_login_at ?? "").localeCompare(a.last_seen_at ?? a.last_login_at ?? "") ||
+      a.full_name.localeCompare(b.full_name)
+  );
   const custName = new Map(customers.map((c) => [c.mobile, c.full_name]));
   const week = since(7);
   const month = since(30);
@@ -105,6 +139,7 @@ export default async function AppUsagePage() {
     .map((m) => ({
       mobile: m,
       name: custName.get(m) ?? null,
+      seen: customers.find((c) => c.mobile === m)?.last_seen_at ?? null,
       lastLogin: customers.find((c) => c.mobile === m)?.last_login_at ?? null,
       app: custApp.get(m) ?? null,
       web: custWeb.has(m),
@@ -136,7 +171,13 @@ export default async function AppUsagePage() {
       </div>
 
       <Section title="Staff">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Card
+            title="Online now"
+            value={staffOnline.length}
+            note={staffOnline.length ? staffOnline.map((s) => s.full_name).join(", ") : "Nobody right now"}
+            colour="#16a34a"
+          />
           <Card title="Active staff" value={staffRows.length} colour="#8883d7" />
           <Card
             title="Logged in · last 7 days"
@@ -148,34 +189,41 @@ export default async function AppUsagePage() {
           <Card title="Notifications on (browser)" value={staffWeb.size} colour="#f39237" />
         </div>
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b border-black/5 bg-[#f7f9fb]">
               <tr>
                 <th className={th}>Name</th>
+                <th className={th}>Status</th>
                 <th className={th}>Role · store</th>
                 <th className={th}>Last login</th>
-                <th className={th}>Android app (last used)</th>
-                <th className={th}>Browser notifications</th>
-                <th className={th}>Alerts seen (30 days)</th>
+                <th className={th}>Android app</th>
+                <th className={th}>Browser alerts</th>
+                <th className={th}>Alerts seen · 30 days</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
               {staffRows.map((s) => {
                 const a = alertStats.get(s.id);
                 return (
-                  <tr key={s.id}>
+                  <tr key={s.id} className={isOnline(s.last_seen_at) ? "bg-green-50/60" : ""}>
                     <td className={td}>
-                      <p className="font-semibold">{s.full_name}</p>
+                      <p className="whitespace-nowrap font-semibold">
+                        {isOnline(s.last_seen_at) && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-green-600 align-middle" />}
+                        {s.full_name}
+                      </p>
                       <p className="text-xs text-black/45">{s.user_id}</p>
+                    </td>
+                    <td className={`${td} whitespace-nowrap`}>
+                      <Presence seen={s.last_seen_at} />
                     </td>
                     <td className={`${td} text-xs text-black/60`}>
                       {ROLE_LABELS[s.role] ?? s.role}
                       {s.store_name ? ` · ${s.store_name}` : ""}
                     </td>
-                    <td className={`${td} text-xs`}>{s.last_login_at ? formatDateTime(s.last_login_at) : <span className="text-red-600">Never</span>}</td>
-                    <td className={`${td} text-xs`}>{staffApp.has(s.id) ? yes(true, formatDateTime(staffApp.get(s.id)!)) : yes(false)}</td>
-                    <td className={`${td} text-xs`}>{yes(staffWeb.has(s.id))}</td>
-                    <td className={`${td} text-xs`}>
+                    <td className={`${td} whitespace-nowrap text-xs`}>{s.last_login_at ? formatDateTime(s.last_login_at) : <span className="font-semibold text-red-600">Never</span>}</td>
+                    <td className={`${td} whitespace-nowrap text-xs`}>{staffApp.has(s.id) ? yes(true, ago(staffApp.get(s.id)!)) : yes(false)}</td>
+                    <td className={`${td} whitespace-nowrap text-xs`}>{yes(staffWeb.has(s.id), "On")}</td>
+                    <td className={`${td} whitespace-nowrap text-xs`}>
                       {a ? (
                         <span className={a.seen < a.sent ? "font-bold text-amber-700" : "font-bold text-green-700"}>
                           {a.seen} of {a.sent}
@@ -193,7 +241,13 @@ export default async function AppUsagePage() {
       </Section>
 
       <Section title="Customers">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Card
+            title="Online now"
+            value={custOnline.length}
+            note={custOnline.length ? custOnline.map((c) => c.full_name || c.mobile).join(", ") : "Nobody right now"}
+            colour="#16a34a"
+          />
           <Card title="Customer accounts" value={custCount.count ?? 0} colour="#8883d7" />
           <Card
             title="Logged in · last 30 days"
@@ -212,9 +266,10 @@ export default async function AppUsagePage() {
                 <thead className="border-b border-black/5 bg-[#f7f9fb]">
                   <tr>
                     <th className={th}>Customer</th>
+                    <th className={th}>Status</th>
                     <th className={th}>Last login</th>
-                    <th className={th}>Android app (last used)</th>
-                    <th className={th}>Browser notifications</th>
+                    <th className={th}>Android app</th>
+                    <th className={th}>Browser alerts</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-black/5">
@@ -224,9 +279,12 @@ export default async function AppUsagePage() {
                         <p className="font-semibold">{c.name || "—"}</p>
                         <p className="text-xs text-black/45">{c.mobile}</p>
                       </td>
-                      <td className={`${td} text-xs`}>{c.lastLogin ? formatDateTime(c.lastLogin) : "—"}</td>
-                      <td className={`${td} text-xs`}>{c.app ? yes(true, formatDateTime(c.app)) : yes(false)}</td>
-                      <td className={`${td} text-xs`}>{yes(c.web)}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        <Presence seen={c.seen} />
+                      </td>
+                      <td className={`${td} whitespace-nowrap text-xs`}>{c.lastLogin ? formatDateTime(c.lastLogin) : "—"}</td>
+                      <td className={`${td} whitespace-nowrap text-xs`}>{c.app ? yes(true, ago(c.app)) : yes(false)}</td>
+                      <td className={`${td} whitespace-nowrap text-xs`}>{yes(c.web, "On")}</td>
                     </tr>
                   ))}
                 </tbody>

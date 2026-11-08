@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { RichText } from "@/components/RichText";
 
 const input =
   "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none focus:border-[#8883d7] focus:ring-2 focus:ring-[#8883d7]/20";
@@ -25,6 +26,21 @@ export function OffersManager() {
   const [whatsapp, setWhatsapp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  /** Wrap the selected words in ** (bold) or _ (italic). */
+  const wrap = (mark: string, sample: string) => {
+    const el = box.current;
+    if (!el) return;
+    const { selectionStart: a, selectionEnd: b } = el;
+    const picked = message.slice(a, b) || sample;
+    const next = message.slice(0, a) + mark + picked + mark + message.slice(b);
+    setMessage(next.slice(0, 1000));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(a + mark.length, a + mark.length + picked.length);
+    });
+  };
 
   const send = async () => {
     const who = audience === "all" ? "everyone" : "the customers you listed";
@@ -52,9 +68,36 @@ export function OffersManager() {
           <input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} className={input} placeholder="e.g. Weekend Sale — 20% off strollers" />
         </label>
         <label className="block">
-          <span className={label}>Message</span>
-          <textarea value={message} maxLength={400} rows={3} onChange={(e) => setMessage(e.target.value)} className={input} placeholder="e.g. This Saturday and Sunday at all Seven Years stores." />
+          <span className={label}>Message — press Enter for a new line</span>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => wrap("**", "bold text")} className="rounded-lg bg-[#f7f9fb] px-3 py-1 text-sm font-black ring-1 ring-black/10 hover:bg-white" title="Bold">
+              B
+            </button>
+            <button type="button" onClick={() => wrap("_", "italic text")} className="rounded-lg bg-[#f7f9fb] px-3 py-1 text-sm italic ring-1 ring-black/10 hover:bg-white" title="Italic">
+              I
+            </button>
+            <span className="text-xs text-black/45">Select words, then tap B or I</span>
+          </div>
+          <textarea
+            ref={box}
+            value={message}
+            maxLength={1000}
+            rows={6}
+            onChange={(e) => setMessage(e.target.value)}
+            className={input}
+            placeholder={"e.g. 🎉 **FLASH OFFER — 50% OFF!**\nFirst 5 customers only, 3 PM – 4 PM today."}
+          />
         </label>
+        {message.trim() && (
+          <div className="rounded-2xl bg-[#f7f9fb] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/40">Preview</p>
+            {title && <p className="mt-1 font-bold">{title}</p>}
+            <p className="mt-1 text-sm leading-6 text-black/70">
+              <RichText text={message} />
+            </p>
+            <p className="mt-2 text-[11px] text-black/40">Phone notifications show the text without bold / italic.</p>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block">
             <span className={label}>Last date (optional)</span>

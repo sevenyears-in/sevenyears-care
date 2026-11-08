@@ -6,6 +6,7 @@ import { loadServiceAccount } from "@/lib/push";
 import { formatDate, formatDateTime } from "@/lib/helpers";
 import { DeleteOfferButton, OffersManager, ResendOfferButton, PushSetup, StopOfferButton, WishesSettings } from "@/components/OffersManager";
 import { loadWishSettings } from "@/lib/wishes";
+import { RichText } from "@/components/RichText";
 import type { Offer } from "@/lib/offers";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,9 @@ export default async function OffersAdminPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-bold">{o.title}</p>
-                  <p className="mt-1 text-sm text-black/65">{o.message}</p>
+                  <p className="mt-2 text-sm leading-6 text-black/70">
+                    <RichText text={o.message} />
+                  </p>
                   <p className="mt-2 text-xs text-black/45">
                     {formatDateTime(o.created_at)} · {o.created_by}
                     {o.valid_until ? ` · valid till ${formatDate(o.valid_until)}` : ""}
