@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageShell } from "@/components/SiteChrome";
 import { currentOffers } from "@/lib/offers";
+import { getCurrentCustomer } from "@/lib/customer-auth";
 import { formatDate } from "@/lib/helpers";
 
 export const metadata: Metadata = { title: "Offers" };
@@ -9,7 +10,8 @@ export const dynamic = "force-dynamic";
 const COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"];
 
 export default async function OffersPage() {
-  const offers = await currentOffers();
+  const customer = await getCurrentCustomer();
+  const offers = await currentOffers(customer?.mobile);
   return (
     <PageShell eyebrow="Seven Years" title="Offers for you 🎁" intro="Special offers from Seven Years stores. Turn on notifications in the app so you never miss one.">
       {offers.length === 0 ? (

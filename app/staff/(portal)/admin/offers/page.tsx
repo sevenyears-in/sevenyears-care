@@ -3,7 +3,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadServiceAccount } from "@/lib/push";
 import { formatDate, formatDateTime } from "@/lib/helpers";
-import { OffersManager, PushSetup, StopOfferButton } from "@/components/OffersManager";
+import { DeleteOfferButton, OffersManager, PushSetup, StopOfferButton, WishesSettings } from "@/components/OffersManager";
+import { loadWishSettings } from "@/lib/wishes";
 import type { Offer } from "@/lib/offers";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +12,11 @@ export const dynamic = "force-dynamic";
 export default async function OffersAdminPage() {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
-  const [{ data, error }, sa] = await Promise.all([
+  const [{ data, error }, sa, wishSettings, recentWishes] = await Promise.all([
     supabaseAdmin.from("offers").select("*").order("created_at", { ascending: false }).limit(50),
     loadServiceAccount().catch(() => null),
+    loadWishSettings(),
+    supabaseAdmin.from("customer_wishes_sent").select("mobile, kind, detail, wish_date, sent, error").order("created_at", { ascending: false }).limit(15),
   ]);
   const offers = (data ?? []) as Offer[];
 
@@ -40,6 +43,24 @@ export default async function OffersAdminPage() {
 
       <OffersManager />
 
+      <WishesSettings initial={wishSettings} />
+      {(recentWishes.data ?? []).length > 0 && (
+        <details className="rounded-3xl bg-white p-5 text-sm soft-card ring-1 ring-black/5">
+          <summary className="cursor-pointer font-bold">Recent wishes ({(recentWishes.data ?? []).length})</summary>
+          <ul className="mt-3 space-y-1 text-black/65">
+            {(recentWishes.data ?? []).map((w, i) => (
+              <li key={i}>
+                {formatDate(w.wish_date)} · +91 {w.mobile} ·{" "}
+                {{ child_birthday: `Birthday of ${w.detail}`, father_birthday: "Father's birthday", mother_birthday: "Mother's birthday", anniversary: "Anniversary" }[
+                  w.kind as string
+                ] ?? w.kind}{" "}
+                · {w.sent ? <span className="text-green-700">sent</span> : <span className="text-black/40">{w.error ?? "pending"}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       <section className="space-y-3">
         <h2 className="text-xl font-bold">Sent offers</h2>
         {offers.length === 0 ? (
@@ -54,6 +75,7 @@ export default async function OffersAdminPage() {
                   <p className="mt-2 text-xs text-black/45">
                     {formatDateTime(o.created_at)} · {o.created_by}
                     {o.valid_until ? ` · valid till ${formatDate(o.valid_until)}` : ""}
+                    {o.audience === "selected" ? ` · to ${(o.target_mobiles ?? []).length} chosen customer(s)` : " · to all customers"}
                   </p>
                 </div>
                 <div className="text-right text-xs">
@@ -65,6 +87,9 @@ export default async function OffersAdminPage() {
                     </span>
                   )}
                   <p className="mt-2">{o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}</p>
+                  <p className="mt-1">
+                    <DeleteOfferButton id={o.id} />
+                  </p>
                 </div>
               </div>
             </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { runEscalations } from "@/lib/escalation";
+import { runWishes } from "@/lib/wishes";
 import { alertSettings } from "@/lib/alert-settings";
 
 // GET /api/cron/sla?key=YOUR_CRON_SECRET
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
 
   try {
     const result = await runEscalations();
+    await runWishes().catch((e) => console.error("Wishes run failed:", e)); // birthdays & anniversaries, once a day
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Escalation run failed:", error);

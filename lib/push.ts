@@ -104,16 +104,19 @@ export async function pushToAll(msg: PushMessage) {
   await send({ topic: OFFERS_TOPIC }, msg);
 }
 
-/** One customer's phones (e.g. "your service is complete"). Removes tokens Google says are dead. */
+/** One customer's phones (e.g. "your service is complete"). Removes tokens Google says are dead. Returns phones reached. */
 export async function pushToCustomer(mobile: string, msg: PushMessage) {
   const { data } = await supabaseAdmin.from("push_tokens").select("token").eq("customer_mobile", mobile);
+  let delivered = 0;
   for (const t of data ?? []) {
     try {
       await send({ token: t.token }, msg);
+      delivered++;
     } catch (error) {
       if ((error as { status?: string }).status === "NOT_FOUND" || (error as { status?: string }).status === "UNREGISTERED") {
         await supabaseAdmin.from("push_tokens").delete().eq("token", t.token);
       } else console.error("Push to customer failed:", error);
     }
   }
+  return delivered;
 }

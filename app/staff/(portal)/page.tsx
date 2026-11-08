@@ -1,4 +1,6 @@
 import { WhoIsIn } from "@/components/WhoIsIn";
+import { after } from "next/server";
+import { runWishes } from "@/lib/wishes";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { getCurrentStaff } from "@/lib/auth";
@@ -17,6 +19,8 @@ import { hasSection } from "@/lib/access";
 
 export default async function StaffDashboard() {
   const staff = await getCurrentStaff();
+  // Birthday & anniversary wishes go out once a day even without a scheduled job.
+  after(() => runWishes().catch((e) => console.error("Wishes run failed:", e)));
   if (!staff) return null;
   const today = todayISO();
 

@@ -12,10 +12,12 @@ export type Offer = {
   sent_at: string | null;
   send_error: string | null;
   is_active: boolean;
+  audience?: "all" | "selected";
+  target_mobiles?: string[];
 };
 
-/** Offers customers can see now (active and not past their last date). */
-export async function currentOffers(): Promise<Offer[]> {
+/** Offers a customer can see now: for everyone, plus ones sent to their own mobile. */
+export async function currentOffers(mobile?: string | null): Promise<Offer[]> {
   const { data, error } = await supabaseAdmin
     .from("offers")
     .select("*")
@@ -24,5 +26,7 @@ export async function currentOffers(): Promise<Offer[]> {
     .order("created_at", { ascending: false })
     .limit(30);
   if (error) return [];
-  return (data ?? []) as Offer[];
+  return ((data ?? []) as Offer[]).filter(
+    (o) => (o.audience ?? "all") === "all" || (!!mobile && (o.target_mobiles ?? []).includes(mobile))
+  );
 }

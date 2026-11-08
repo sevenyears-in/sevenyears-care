@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { pushToAll, saveServiceAccount } from "@/lib/push";
+import { pushToAll, pushToCustomer, saveServiceAccount } from "@/lib/push";
+import { saveWishSettings } from "@/lib/wishes";
 import { siteUrl } from "@/lib/notify";
 
 const clean = (v: unknown, max: number) => String(v ?? "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -25,6 +26,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, email: result.email });
   }
 
+  if (body.action === "wishes") {
+    try {
+      const settings = await saveWishSettings(body.settings as Record<string, unknown>);
+      return NextResponse.json({ success: true, settings });
+    } catch {
+      return NextResponse.json({ error: "Could not save." }, { status: 500 });
+    }
+  }
+
+  if (body.action === "delete") {
+    const id = String(body.id ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid offer." }, { status: 400 });
+    const { error } = await supabaseAdmin.from("offers").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: "Could not delete." }, { status: 500 });
+    return NextResponse.json({ success: true });
+  }
+
   if (body.action === "stop") {
     const id = String(body.id ?? "");
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid offer." }, { status: 400 });
@@ -37,11 +55,16 @@ export async function POST(request: Request) {
   const linkRaw = clean(body.link, 300);
   const validUntil = /^\d{4}-\d{2}-\d{2}$/.test(String(body.validUntil ?? "")) ? String(body.validUntil) : null;
   if (title.length < 3 || message.length < 5) return NextResponse.json({ error: "Enter a title and a message." }, { status: 400 });
+  const audience = body.audience === "selected" ? "selected" : "all";
+  const mobiles = [...new Set(String(body.mobiles ?? "").split(/[^0-9]+/).map((m) => m.slice(-10)).filter((m) => /^[6-9]\d{9}$/.test(m)))];
+  if (audience === "selected" && mobiles.length === 0) {
+    return NextResponse.json({ error: "Enter at least one 10-digit customer mobile number." }, { status: 400 });
+  }
   if (linkRaw && !/^https:\/\/[^\s]+$/i.test(linkRaw)) return NextResponse.json({ error: "The link must start with https://" }, { status: 400 });
 
   const { data: offer, error } = await supabaseAdmin
     .from("offers")
-    .insert({ title, message, link: linkRaw || null, valid_until: validUntil, created_by: by })
+    .insert({ title, message, link: linkRaw || null, valid_until: validUntil, created_by: by, audience, target_mobiles: mobiles })
     .select("id")
     .single();
   if (error || !offer) {
@@ -50,9 +73,18 @@ export async function POST(request: Request) {
   }
 
   try {
-    await pushToAll({ title, body: message, url: `${siteUrl()}/offers` });
+    const msg = { title, body: message, url: `${siteUrl()}/offers` };
+    let note = "";
+    if (audience === "all") await pushToAll(msg);
+    else {
+      let reached = 0;
+      for (const m of mobiles) reached += await pushToCustomer(m, msg);
+      note = reached
+        ? `Sent to ${reached} phone${reached === 1 ? "" : "s"}. Customers without the app will see it on the Offers page after logging in.`
+        : "None of these customers have the app with notifications yet — they will see the offer on the Offers page after logging in.";
+    }
     await supabaseAdmin.from("offers").update({ sent_at: new Date().toISOString(), sent_by: by, send_error: null }).eq("id", offer.id);
-    return NextResponse.json({ success: true, sent: true });
+    return NextResponse.json({ success: true, sent: true, note });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Sending failed";
     await supabaseAdmin.from("offers").update({ send_error: msg }).eq("id", offer.id);
