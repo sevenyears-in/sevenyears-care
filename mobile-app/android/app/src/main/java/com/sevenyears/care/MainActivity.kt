@@ -35,6 +35,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.firebase.messaging.FirebaseMessaging
 import java.io.File
 
 /**
@@ -61,13 +62,19 @@ class MainActivity : ComponentActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraPhoto: Uri? = null
 
-    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val askStartupPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
-    /** Android 13+: ask once to allow notifications. */
-    private fun askForNotifications() {
-        if (Build.VERSION.SDK_INT < 33) return
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    /** First time the app opens: ask for notifications and location together. */
+    private fun askStartupPermissions() {
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        if (prefs.getBoolean("asked_permissions", false)) return
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        prefs.edit().putBoolean("asked_permissions", true).apply()
+        if (wanted.isNotEmpty()) askStartupPermissions.launch(wanted.toTypedArray())
     }
 
     // Location for the website's "use my current location" button
@@ -146,6 +153,8 @@ class MainActivity : ComponentActivity() {
             setAcceptThirdPartyCookies(web, true)
         }
 
+        web.addJavascriptInterface(AppBridge(this), "SevenYearsApp")
+        setUpPush()
         web.webViewClient = AppWebViewClient()
         web.webChromeClient = AppChromeClient()
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -167,7 +176,7 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        if (savedInstanceState == null) window.decorView.postDelayed({ askForNotifications() }, 1500)
+        if (savedInstanceState == null) window.decorView.postDelayed({ askStartupPermissions() }, 1500)
 
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState)
@@ -191,8 +200,25 @@ class MainActivity : ComponentActivity() {
         CookieManager.getInstance().flush() // stay logged in
     }
 
-    /** A care.sevenyears.in link the app was opened with (e.g. tapped in WhatsApp). */
+    /** Every app user follows "offers"; the token lets the website send personal updates. */
+    private fun setUpPush() {
+        PushService.createChannel(this)
+        try {
+            FirebaseMessaging.getInstance().subscribeToTopic("offers")
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                getSharedPreferences("app", MODE_PRIVATE).edit().putString("push_token", token).apply()
+            }
+        } catch (e: Exception) {
+            // Firebase not available — the app still works without notifications.
+        }
+    }
+
+    /** A care.sevenyears.in link the app was opened with (WhatsApp link or a notification tap). */
     private fun linkFrom(intent: Intent?): String? {
+        intent?.getStringExtra("url")?.let { u ->
+            val p = Uri.parse(u)
+            if (p.scheme == "https" && p.host == HOST) return u
+        }
         val uri = intent?.data ?: return null
         return if (uri.scheme == "https" && uri.host == HOST) uri.toString() else null
     }

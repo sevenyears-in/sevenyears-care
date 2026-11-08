@@ -13,6 +13,7 @@ import {
 import { complaintKind, STAFF_BEHAVIOUR_CATEGORY } from "@/lib/sla";
 import { findDirectors, findRecipients, findStaffByIds, notifyStaff, type Recipient } from "@/lib/notify";
 import type { Role } from "@/lib/roles";
+import { afterFeedbackSaved, cleanDisplayName } from "@/lib/reviews";
 
 export type FeedbackSubject = {
   kind: FeedbackKind;
@@ -295,15 +296,29 @@ export async function submitFeedback(subject: FeedbackSubject, raw: Record<strin
     rated_at: new Date().toISOString(),
   };
 
-  const { error } = saved
+  const { data: savedRow, error } = saved
     ? await supabaseAdmin
         .from("customer_feedback")
         .update({ ...row, needs_followup: needsFollowup || undefined })
         .eq("id", saved.id)
-    : await supabaseAdmin.from("customer_feedback").insert(row);
+        .select("id")
+        .maybeSingle()
+    : await supabaseAdmin.from("customer_feedback").insert(row).select("id").maybeSingle();
   if (error) {
     console.error("Save feedback error:", error);
     return { ok: false, error: "Unable to save your feedback. Please try again.", status: 500 };
+  }
+
+  // Website review: consent + optional name, then the summary (and auto-publish when eligible).
+  const feedbackId = String(savedRow?.id ?? saved?.id ?? "");
+  if (feedbackId) {
+    const consent = raw.publicConsent === true && !subject.confidential;
+    const { error: consentError } = await supabaseAdmin
+      .from("customer_feedback")
+      .update({ public_consent: consent, display_name: consent ? cleanDisplayName(raw.displayName) || null : null })
+      .eq("id", feedbackId);
+    if (consentError) console.error("Save review consent error (feedback is saved):", consentError);
+    await afterFeedbackSaved(feedbackId);
   }
 
   if (needsFollowup) {

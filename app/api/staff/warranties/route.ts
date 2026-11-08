@@ -5,6 +5,7 @@ import { notifyCustomer, siteUrl } from "@/lib/notify";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/auth";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
+import { cleanFamily, familyIsEmpty, saveFamily } from "@/lib/family";
 import { addMonths, cleanMobile, isISODate, isValidMobile, todayISO } from "@/lib/helpers";
 import { extendedSettings } from "@/lib/extended-warranty";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
@@ -48,6 +49,8 @@ export async function POST(request: Request) {
     const billNumber = String(body.billNumber ?? "").trim();
     const billDate = String(body.billDate ?? "").trim();
     const items: IncomingItem[] = Array.isArray(body.items) ? body.items : [];
+    const familyInput = cleanFamily(body.family);
+    if (!familyInput.ok) return NextResponse.json({ error: familyInput.error }, { status: 400 });
 
     if (!billNumber || !isISODate(billDate)) {
       return NextResponse.json({ error: "Bill number and date are required." }, { status: 400 });
@@ -204,6 +207,13 @@ export async function POST(request: Request) {
         created: result.created,
         password: result.created ? billPassword(bill.billNumber) : null,
       });
+    }
+
+    // Family special dates go to the login of this bill (the product user for a gift).
+    if (!familyIsEmpty(familyInput.value) && people[0]) {
+      await saveFamily(people[0].mobile, familyInput.value, `staff ${auth.staff.userId}`, true).catch((error) =>
+        console.error("Save family dates (registration) error:", error)
+      );
     }
 
     // Gift: tell the product user their warranty is registered, with their login.

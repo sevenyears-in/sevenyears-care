@@ -418,6 +418,15 @@ export async function notifyCustomer(input: {
     );
   }
 
+  if (input.mobile) {
+    // Also a phone notification when they have the Seven Years Care app.
+    jobs.push(
+      import("@/lib/push")
+        .then(({ pushToCustomer }) => pushToCustomer(input.mobile!, { title: `Seven Years · ${input.ticketNumber}`, body: input.message, url: link }))
+        .catch((error) => console.error("App notification failed:", error))
+    );
+  }
+
   if (input.email) {
     jobs.push(
       sendEmail(

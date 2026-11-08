@@ -4,6 +4,7 @@
 // warranty was registered (e.g. bill VDK26-SI1-8504 → 8504). They can change it.
 // Session: HttpOnly cookie signed with HMAC (separate from the staff cookie).
 
+import { fetchInvoicesForMobile } from "@/lib/zoho";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
@@ -129,6 +130,14 @@ export async function customerLogin(mobile: string, password: string): Promise<L
     if (match) {
       await ensureCustomerAccount(mobile, String(match.customer_name ?? ""), String(match.bill_number));
       ok = true;
+    } else {
+      // Bought from us but no warranty registered: check their bills in Zoho POS.
+      const bills = await fetchInvoicesForMobile(mobile).catch(() => []);
+      const bill = bills.find((b) => billPassword(b.billNumber) === password);
+      if (bill) {
+        await ensureCustomerAccount(mobile, bill.customerName, bill.billNumber);
+        ok = true;
+      }
     }
   }
 

@@ -79,6 +79,7 @@ export function SiteFooter() {
           <Link href="/register-complaint" className="hover:text-white">Complaints</Link>
           <Link href="/track-request" className="hover:text-white">Track Request</Link>
           <Link href="/feedback" className="hover:text-white">Give Feedback</Link>
+          <Link href="/offers" className="hover:text-white">Offers</Link>
           <Link href="/privacy" className="hover:text-white">Privacy policy</Link>
           <a href="https://sevenyears.in" className="hover:text-white">sevenyears.in ↗</a>
         </div>

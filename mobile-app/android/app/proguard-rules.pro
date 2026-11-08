@@ -1,1 +1,4 @@
-# Default Android rules are enough for this app (it has no JavaScript bridge).
+# Keep the bridge the website uses inside the app (window.SevenYearsApp).
+-keepclassmembers class com.sevenyears.care.AppBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

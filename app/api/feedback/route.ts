@@ -11,6 +11,8 @@ export async function POST(request: Request) {
       token?: string;
       confirm?: string;
       answers?: Record<string, unknown>;
+      publicConsent?: boolean;
+      displayName?: string;
     };
     const ref = readFeedbackToken(String(body.token ?? ""));
     if (!ref) return NextResponse.json({ error: "This link is not valid." }, { status: 400 });
@@ -20,7 +22,7 @@ export async function POST(request: Request) {
     const result =
       body.confirm !== undefined
         ? await confirmComplaint(subject, String(body.confirm))
-        : await submitFeedback(subject, body.answers ?? {});
+        : await submitFeedback(subject, { ...(body.answers ?? {}), publicConsent: body.publicConsent === true, displayName: body.displayName });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status ?? 400 });
     return NextResponse.json({ success: true, message: result.message });
   } catch (error) {

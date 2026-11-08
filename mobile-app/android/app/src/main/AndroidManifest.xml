@@ -37,6 +37,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Phone notifications (offers, service updates) -->
+        <service android:name=".PushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_notify" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/brand_purple" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="offers" />
+
         <!-- Lets the camera save a photo the app can attach to a service request -->
         <provider
             android:name="androidx.core.content.FileProvider"

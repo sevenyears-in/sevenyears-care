@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useState, type ReactNode } from "react";
+import { FamilyDatesFields } from "@/components/FamilyDatesFields";
+import { EMPTY_FAMILY, type FamilyDates } from "@/lib/family-types";
 import Link from "next/link";
 import { ErrorBox, inputClass, labelClass, phoneInputClass } from "@/components/SiteChrome";
 import { addMonths, formatDate, todayISO } from "@/lib/helpers";
@@ -80,6 +82,7 @@ export default function RegisterWarrantyStaffPage() {
   const [entries, setEntries] = useState<Record<string, Entry>>({});
 
   const [saving, setSaving] = useState(false);
+  const [family, setFamily] = useState<FamilyDates>(EMPTY_FAMILY);
   const [errorMessage, setErrorMessage] = useState("");
   const [errorList, setErrorList] = useState<string[]>([]);
   const [saved, setSaved] = useState<Saved[] | null>(null);
@@ -211,6 +214,7 @@ export default function RegisterWarrantyStaffPage() {
         body: JSON.stringify({
           billNumber: lookup.bill.billNumber,
           billDate: lookup.bill.billDate,
+          family,
           items: pendingRows.map((row) => {
             const { userSame, ...e } = entries[row.key];
             return { key: row.key, ...e, ...(userSame ? { alternateName: "", alternateMobile: "" } : {}) };
@@ -260,6 +264,7 @@ export default function RegisterWarrantyStaffPage() {
   };
 
   const startOver = () => {
+    setFamily(EMPTY_FAMILY);
     setLookup(null);
     setSaved(null);
     setEntries({});
@@ -612,6 +617,14 @@ export default function RegisterWarrantyStaffPage() {
                   </section>
                 );
               })}
+
+              <section className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
+                <h3 className="font-bold">Family special dates <span className="text-xs font-semibold text-black/40">(optional)</span></h3>
+                <p className="mb-4 mt-1 text-xs text-black/50">
+                  Ask the customer — used for birthday and anniversary wishes and offers. They can also add or change these in My Account.
+                </p>
+                <FamilyDatesFields value={family} onChange={setFamily} />
+              </section>
 
               <ErrorBox message={errorMessage} />
               {errorList.length > 0 && (

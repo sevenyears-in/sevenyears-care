@@ -51,6 +51,8 @@ export default async function FeedbackPage({ params }: { params: Promise<{ token
         needsConfirmation={needsConfirmation}
         canRate={canRate}
         alreadyDone={Boolean(saved?.rated) && !needsConfirmation}
+        canShare={!subject.confidential}
+        defaultName={subject.customerName ? subject.customerName.split(" ")[0] : ""}
       />
     </PageShell>
   );

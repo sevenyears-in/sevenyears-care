@@ -510,3 +510,39 @@ function demoBill(billNumber: string, billDate: string): Bill {
     demo: true,
   };
 }
+
+/**
+ * Bills in Zoho for a customer's mobile number (for customers who bought from us but have
+ * no warranty registered). Finds the Zoho contact(s) with that number, then their invoices.
+ */
+export async function fetchInvoicesForMobile(mobile: string): Promise<{ billNumber: string; customerName: string; billDate: string }[]> {
+  if (!(await zohoConfigured())) return [];
+  const digits = (v: unknown) => str(v).replace(/\D/g, "");
+  const sameNumber = (c: Obj) => [c.phone, c.mobile].some((v) => digits(v).endsWith(mobile));
+
+  const contacts = new Map<string, Obj>();
+  const queries: Record<string, string>[] = [{ phone_contains: mobile }, { mobile_contains: mobile }, { search_text: mobile }];
+  for (const query of queries) {
+    try {
+      const list = await zohoGet("contacts", { ...query, per_page: "25" });
+      for (const c of arr(list.contacts)) if (sameNumber(c)) contacts.set(str(c.contact_id), c);
+    } catch (error) {
+      console.warn("Zoho contact search failed (continuing):", error);
+    }
+    if (contacts.size) break;
+  }
+
+  const bills: { billNumber: string; customerName: string; billDate: string }[] = [];
+  for (const [id, c] of [...contacts].slice(0, 5)) {
+    try {
+      const list = await zohoGet("invoices", { customer_id: id, per_page: "200" });
+      for (const inv of arr(list.invoices)) {
+        if (str(inv.status) === "void") continue;
+        bills.push({ billNumber: str(inv.invoice_number), customerName: str(inv.customer_name) || str(c.contact_name), billDate: str(inv.date) });
+      }
+    } catch (error) {
+      console.warn("Zoho invoice list failed (continuing):", error);
+    }
+  }
+  return bills;
+}

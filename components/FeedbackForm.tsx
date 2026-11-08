@@ -17,6 +17,8 @@ export function FeedbackForm({
   needsConfirmation,
   canRate,
   alreadyDone,
+  canShare = false,
+  defaultName = "",
 }: {
   token: string;
   kind: FeedbackFormKind;
@@ -24,7 +26,11 @@ export function FeedbackForm({
   needsConfirmation: boolean;
   canRate: boolean;
   alreadyDone: boolean;
+  canShare?: boolean;
+  defaultName?: string;
 }) {
+  const [share, setShare] = useState(false);
+  const [displayName, setDisplayName] = useState(defaultName);
   const [confirmed, setConfirmed] = useState<string | null>(needsConfirmation ? null : "done");
   const [confirmMessage, setConfirmMessage] = useState("");
   const [answers, setAnswers] = useState<Record<string, string | number>>({});
@@ -67,7 +73,7 @@ export function FeedbackForm({
         return;
       }
     }
-    const msg = await post({ answers });
+    const msg = await post({ answers, publicConsent: canShare && share, displayName: canShare && share ? displayName : "" });
     if (msg) setThanks(msg);
   }
 
@@ -160,6 +166,31 @@ export function FeedbackForm({
                 </div>
               ))}
             </div>
+            {canShare && (
+              <div className="mt-7 rounded-2xl bg-[#f7f9fb] p-4 ring-1 ring-black/5">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} className="mt-1 h-5 w-5 accent-[#8883d7]" />
+                  <span className="text-sm">
+                    <span className="font-semibold">You may share my review on sevenyears.in</span>
+                    <span className="block text-xs text-black/50">
+                      Only a summary of your ratings and comment is shown — never your phone number. Reviews with a 4 or 5 star overall rating are shown.
+                    </span>
+                  </span>
+                </label>
+                {share && (
+                  <label className="mt-3 block">
+                    <span className="mb-1.5 block text-xs font-bold text-black/60">Name to show (optional)</span>
+                    <input
+                      value={displayName}
+                      maxLength={40}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. Fathima"
+                    />
+                  </label>
+                )}
+              </div>
+            )}
             <ErrorBox message={confirmed === null ? "" : error} />
             <button type="button" disabled={busy} onClick={submit} className={`${primaryButtonClass} mt-8`}>
               {busy ? "Sending…" : "Send feedback"}

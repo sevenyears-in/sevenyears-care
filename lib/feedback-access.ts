@@ -29,3 +29,8 @@ export function feedbackScope(staff: { role: Role; storeName: string | null; acc
     canMarkDone: isAdmin(staff.role) || staff.role !== "director",
   };
 }
+
+/** Who may publish, unpublish, approve or reject website reviews. */
+export function canManageReviews(role: Role) {
+  return isAdmin(role) || role === "director";
+}

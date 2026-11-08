@@ -71,7 +71,7 @@ export default function LoginPage() {
           </p>
         </form>
         <div className="mt-6 grid grid-cols-2 gap-3 text-center text-sm font-semibold">
-          <Link href="/request-service" className="rounded-2xl bg-white px-3 py-3 ring-1 ring-black/10">
+          <Link href="/" className="rounded-2xl bg-white px-3 py-3 ring-1 ring-black/10">
             Request Service
           </Link>
           <Link href="/track-request" className="rounded-2xl bg-white px-3 py-3 ring-1 ring-black/10">

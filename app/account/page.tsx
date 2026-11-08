@@ -8,6 +8,21 @@ import { InstallAppCard } from "@/components/InstallApp";
 import { formatDate, formatDateTime, statusLabel, todayISO } from "@/lib/helpers";
 import { feedbackLink } from "@/lib/feedback-token";
 import { complaintKind, customerComplaintStatus } from "@/lib/sla";
+import { loadFamily } from "@/lib/family";
+import { FamilyDatesEditor } from "@/components/FamilyDatesEditor";
+import { FeedbackPrompt, type PendingFeedback } from "@/components/FeedbackPrompt";
+import { zohoBillFeedbackId } from "@/lib/feedback";
+import { fetchInvoicesForMobile } from "@/lib/zoho";
+
+// Zoho bills for customers with no registered warranty (cached so the page stays quick).
+const billCache = new Map<string, { at: number; bills: { billNumber: string; billDate: string }[] }>();
+async function zohoBills(mobile: string) {
+  const hit = billCache.get(mobile);
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.bills;
+  const bills = await fetchInvoicesForMobile(mobile).catch(() => []);
+  billCache.set(mobile, { at: Date.now(), bills });
+  return bills;
+}
 
 export const metadata = { title: "My Account" };
 
@@ -16,7 +31,7 @@ export default async function AccountPage() {
   const customer = await getCurrentCustomer();
   if (!customer) redirect("/account/login");
 
-  const [warranties, services, complaints, feedback] = await Promise.all([
+  const [warranties, services, complaints, feedback, family] = await Promise.all([
     supabaseAdmin
       .from("warranties")
       .select(
@@ -36,6 +51,7 @@ export default async function AccountPage() {
       .eq("contact_mobile", customer.mobile)
       .order("created_at", { ascending: false }),
     supabaseAdmin.from("customer_feedback").select("kind, ref_id, ref_number, resolved, answers").eq("mobile", customer.mobile),
+    loadFamily(customer.mobile),
   ]);
 
   // Plus requests on products they bought (e.g. raised by the person they gifted it to).
@@ -68,6 +84,33 @@ export default async function AccountPage() {
   };
   const rateButton = "rounded-xl bg-amber-400 px-3 py-2 text-xs font-bold text-[#161616]";
 
+  // Ask for feedback right after login: purchases, finished services and closed complaints not rated yet.
+  const pending: PendingFeedback[] = [];
+  const promptBills = new Set<string>();
+  for (const w of warranties.data ?? []) {
+    if (promptBills.has(w.bill_number)) continue;
+    promptBills.add(w.bill_number);
+    if (!rated("sales", w.id, w.bill_number))
+      pending.push({ label: "Your purchase", detail: `Bill ${w.bill_number} · ${w.store_name ?? "Seven Years"}`, href: feedbackLink("sales", w.id) });
+  }
+  if ((warranties.data ?? []).length === 0) {
+    const recent = new Date(Date.now() - 120 * 86400_000).toISOString().slice(0, 10);
+    for (const b of (await zohoBills(customer.mobile)).filter((b) => b.billDate >= recent).slice(0, 3)) {
+      if (given.some((f) => f.kind === "sales" && String(f.ref_number).toUpperCase() === b.billNumber.toUpperCase())) continue;
+      pending.push({
+        label: "Your purchase",
+        detail: `Bill ${b.billNumber} · ${formatDate(b.billDate)}`,
+        href: feedbackLink("sales", zohoBillFeedbackId(b.billNumber, customer.mobile)),
+      });
+    }
+  }
+  for (const r of serviceList)
+    if (["resolved", "closed"].includes(r.status) && !rated("service", r.id))
+      pending.push({ label: "Service", detail: `${r.request_number} · ${r.product_name ?? ""}`, href: feedbackLink("service", r.id) });
+  for (const c of complaints.data ?? [])
+    if (["resolved", "closed"].includes(c.status) && !rated("complaint", c.id))
+      pending.push({ label: "Complaint handling", detail: c.complaint_number, href: feedbackLink("complaint", c.id) });
+
   const today = todayISO();
   const card = "rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5 sm:p-6";
 
@@ -77,12 +120,16 @@ export default async function AccountPage() {
       title={`Hello${customer.name ? `, ${customer.name}` : ""}`}
       intro={`Logged in with +91 ${customer.mobile}.`}
     >
+      <FeedbackPrompt items={pending} sessionKey={`sy-feedback-ask-${customer.mobile}`} />
       <div className="mb-6 flex flex-wrap gap-2">
         <Link href="/request-service" className="rounded-2xl bg-[#ff5e79] px-4 py-2.5 text-sm font-bold text-white">
           Request Service
         </Link>
         <Link href="/register-complaint" className="rounded-2xl bg-[#161616] px-4 py-2.5 text-sm font-bold text-white">
           Register a Complaint
+        </Link>
+        <Link href="/offers" className="rounded-2xl bg-[#8883d7] px-4 py-2.5 text-sm font-bold text-white">
+          🎁 Offers
         </Link>
         <Link href="/account/password" className="rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-sm font-bold">
           Change Password
@@ -242,6 +289,16 @@ export default async function AccountPage() {
             </div>
           ))
         )}
+      </section>
+
+      <section id="special-dates" className="mt-8 space-y-3">
+        <h2 className="text-xl font-bold">Our special dates 🎉</h2>
+        <div className={card}>
+          <p className="mb-4 text-sm text-black/55">
+            Tell us your little one&apos;s birthday and other family celebrations — we&apos;ll remember them with wishes and offers.
+          </p>
+          <FamilyDatesEditor initial={family} />
+        </div>
       </section>
     </PageShell>
   );

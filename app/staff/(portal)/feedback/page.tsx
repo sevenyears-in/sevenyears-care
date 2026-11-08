@@ -5,7 +5,10 @@ import { markAlertsRead } from "@/lib/alerts";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/helpers";
-import { canSeeFeedback, feedbackScope } from "@/lib/feedback-access";
+import { canManageReviews, canSeeFeedback, feedbackScope } from "@/lib/feedback-access";
+import { ReviewControls } from "@/components/ReviewControls";
+import { eligibility, STATUS_LABELS, type PublicationStatus } from "@/lib/reviews";
+import { overallStars, reviewSummary } from "@/lib/review-summary";
 import { answerLabel, FORM_TITLES, feedbackQuestions, type FeedbackFormKind } from "@/lib/feedback-forms";
 import { FeedbackFollowUp } from "@/components/FeedbackFollowUp";
 import { hasSection } from "@/lib/access";
@@ -30,14 +33,38 @@ type Row = {
   followup_by: string | null;
   followup_note: string | null;
   created_at: string;
+  summary?: string | null;
+  public_consent?: boolean | null;
+  display_name?: string | null;
+  publication_status?: PublicationStatus | null;
+  published_at?: string | null;
 };
 
-const TABS: { value: "all" | FeedbackFormKind | "followup"; label: string }[] = [
+const PUB_FILTERS: { value: string; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "published", label: "Published" },
+  { value: "eligible", label: "Eligible, not live" },
+  { value: "unpublished", label: "Unpublished" },
+  { value: "rejected", label: "Rejected" },
+  { value: "not_eligible", label: "Not eligible" },
+];
+
+const STATUS_STYLE: Record<string, string> = {
+  published: "bg-green-100 text-green-800",
+  approved: "bg-sky-100 text-sky-800",
+  pending_review: "bg-amber-100 text-amber-800",
+  unpublished: "bg-black/5 text-black/60",
+  rejected: "bg-red-100 text-red-700",
+  not_eligible: "bg-black/5 text-black/45",
+};
+
+const TABS: { value: "all" | FeedbackFormKind | "followup" | "website"; label: string }[] = [
   { value: "followup", label: "Needs follow-up" },
   { value: "all", label: "All" },
   { value: "sales", label: "Sales" },
   { value: "service", label: "Service" },
   { value: "complaint", label: "Complaint handling" },
+  { value: "website", label: "Website reviews" },
 ];
 
 function avgNum(list: (number | null)[]) {
@@ -58,25 +85,27 @@ const KIND_COLOUR: Record<string, string> = {
   service: "#8883d7",
   complaint: "#f39237",
   followup: "#ff5e79",
+  website: "#16a34a",
   all: "#161616",
 };
 
-export default async function FeedbackReportPage({ searchParams }: { searchParams: Promise<{ tab?: string; days?: string }> }) {
+export default async function FeedbackReportPage({ searchParams }: { searchParams: Promise<{ tab?: string; days?: string; pub?: string; stars?: string; store?: string }> }) {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
   if (!hasSection(staff, "feedback")) redirect("/staff");
 
   after(() => markAlertsRead(staff.id, { titleLike: "%feedback%" }));
-  const { tab: tabParam, days: daysParam } = await searchParams;
+  const { tab: tabParam, days: daysParam, pub: pubParam, stars: starsParam, store: storeParam } = await searchParams;
+  const pub = PUB_FILTERS.some((f) => f.value === pubParam) ? String(pubParam) : "all";
+  const starsFilter = [1, 2, 3, 4, 5].includes(Number(starsParam)) ? Number(starsParam) : null;
+  const canManage = canManageReviews(staff.role);
   const tab = TABS.some((t) => t.value === tabParam) ? (tabParam as (typeof TABS)[number]["value"]) : "followup";
   const days = [7, 30, 90, 365].includes(Number(daysParam)) ? Number(daysParam) : 30;
   const scope = feedbackScope(staff);
 
   let query = supabaseAdmin
     .from("customer_feedback")
-    .select(
-      "id, kind, ref_id, ref_number, mobile, store_name, staff_name, confidential, answers, overall, resolved, comment, needs_followup, followup_done_at, followup_by, followup_note, created_at"
-    )
+    .select("id")
     .gte("created_at", new Date(Date.now() - days * 86400_000).toISOString())
     .order("created_at", { ascending: false })
     .limit(1000);
@@ -84,7 +113,11 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
   if (!scope.confidential) query = query.eq("confidential", false);
   if (scope.onlyConfidential) query = query.eq("confidential", true);
 
-  const { data, error } = await query;
+  const REVIEW_COLS = ", summary, public_consent, display_name, publication_status, published_at";
+  const BASE_COLS =
+    "id, kind, ref_id, ref_number, mobile, store_name, staff_name, confidential, answers, overall, resolved, comment, needs_followup, followup_done_at, followup_by, followup_note, created_at";
+  const first = await query.select(BASE_COLS + REVIEW_COLS);
+  const { data, error } = first.error ? await query.select(BASE_COLS) : first;
   const rows = (data ?? []) as Row[];
   const rated = rows.filter((r) => r.answers && Object.keys(r.answers).length > 0);
 
@@ -104,9 +137,27 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
     }))
     .sort((a, b) => a.store.localeCompare(b.store));
 
-  const list = rows.filter((r) =>
-    tab === "followup" ? r.needs_followup && !r.followup_done_at : tab === "all" ? true : r.kind === tab
-  );
+  const storeNames = [...new Set(rows.map((r) => r.store_name).filter((x): x is string => !!x))].sort();
+  const storeFilter = storeParam && storeNames.includes(storeParam) ? storeParam : null;
+  const statusOf = (r: Row) => (r.publication_status ?? "not_eligible") as PublicationStatus;
+  const list = rows.filter((r) => {
+    if (tab === "followup" ? !(r.needs_followup && !r.followup_done_at) : tab !== "all" && tab !== "website" && r.kind !== tab) return false;
+    if (tab === "website" && !(r.answers && Object.keys(r.answers).length)) return false;
+    if (storeFilter && r.store_name !== storeFilter) return false;
+    if (starsFilter && overallStars(r.answers ?? {}) !== starsFilter) return false;
+    if (tab === "website" && pub !== "all") {
+      const st = statusOf(r);
+      const elig = eligibility(r).ok;
+      if (pub === "eligible" ? !(elig && st !== "published") : st !== pub) return false;
+    }
+    return true;
+  });
+  const qs = (patch: Record<string, string | number | null>) => {
+    const p = new URLSearchParams();
+    const cur: Record<string, string | number | null> = { tab, days, pub: tab === "website" ? pub : null, stars: starsFilter, store: storeFilter, ...patch };
+    for (const [k, v] of Object.entries(cur)) if (v !== null && v !== "" && !(k === "pub" && v === "all")) p.set(k, String(v));
+    return `/staff/feedback?${p.toString()}`;
+  };
   const openFollowups = rows.filter((r) => r.needs_followup && !r.followup_done_at).length;
 
   const card = "rounded-3xl bg-white soft-card ring-1 ring-black/5";
@@ -133,7 +184,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
         {[7, 30, 90, 365].map((d) => (
           <Link
             key={d}
-            href={`/staff/feedback?tab=${tab}&days=${d}`}
+            href={qs({ days: d })}
             className={`rounded-full px-3 py-1.5 text-xs font-bold ${d === days ? "bg-[#161616] text-white" : "bg-white ring-1 ring-black/10"}`}
           >
             {d === 365 ? "1 year" : `${d} days`}
@@ -199,7 +250,7 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
         {TABS.map((t) => (
           <Link
             key={t.value}
-            href={`/staff/feedback?tab=${t.value}&days=${days}`}
+            href={qs({ tab: t.value, pub: null })}
             className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
               t.value === tab ? "bg-[#161616] text-white shadow-sm" : "bg-white text-black/60 ring-1 ring-black/10 hover:text-black"
             }`}
@@ -210,6 +261,52 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
           </Link>
         ))}
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-bold text-black/45">Overall:</span>
+        {[null, 5, 4, 3, 2, 1].map((n) => (
+          <Link
+            key={String(n)}
+            href={qs({ stars: n })}
+            className={`rounded-full px-3 py-1.5 font-bold ${starsFilter === n ? "bg-[#161616] text-white" : "bg-white ring-1 ring-black/10"}`}
+          >
+            {n === null ? "Any" : `${n}★`}
+          </Link>
+        ))}
+        {scope.allStores && storeNames.length > 1 && (
+          <>
+            <span className="ml-2 font-bold text-black/45">Store:</span>
+            {[null, ...storeNames].map((st) => (
+              <Link
+                key={String(st)}
+                href={qs({ store: st })}
+                className={`rounded-full px-3 py-1.5 font-bold ${storeFilter === st ? "bg-[#161616] text-white" : "bg-white ring-1 ring-black/10"}`}
+              >
+                {st ?? "All"}
+              </Link>
+            ))}
+          </>
+        )}
+      </div>
+      {tab === "website" && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 text-xs">
+            {PUB_FILTERS.map((f) => (
+              <Link
+                key={f.value}
+                href={qs({ pub: f.value })}
+                className={`rounded-full px-3 py-1.5 font-bold ${pub === f.value ? "bg-green-700 text-white" : "bg-white ring-1 ring-black/10"}`}
+              >
+                {f.label}
+              </Link>
+            ))}
+          </div>
+          <p className="text-xs text-black/50">
+            Reviews go live on sevenyears.in automatically when the overall rating is 4 or 5 and the customer agreed.
+            {canManage ? " You can unpublish, reject or publish again here." : " Only the Super Admin, Admin or a Director can change them."}
+          </p>
+        </div>
+      )}
 
       {list.length === 0 ? (
         <p className={`${card} p-6 text-center text-sm text-black/55`}>
@@ -276,6 +373,30 @@ export default async function FeedbackReportPage({ searchParams }: { searchParam
                     })}
                 </dl>
                 {r.comment && <p className="mt-3 rounded-2xl bg-[#f7f9fb] p-3 text-sm">“{r.comment}”</p>}
+
+                {r.answers && Object.keys(r.answers).length > 0 && !r.confidential && (
+                  <div className="mt-3 rounded-2xl border border-green-700/10 bg-green-50/50 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-green-800">Review summary</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${STATUS_STYLE[statusOf(r)]}`}>
+                        {STATUS_LABELS[statusOf(r)]}
+                      </span>
+                      <span className="text-[11px] text-black/45">
+                        {r.public_consent ? `Customer agreed to publish${r.display_name ? ` as “${r.display_name}”` : ""}` : "No consent to publish"}
+                        {!eligibility(r).ok ? ` · ${eligibility(r).reason}` : ""}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm leading-6">
+                      {r.summary || reviewSummary(r.kind, r.answers ?? {}, r.comment, r.resolved)}
+                      {!r.summary && <span className="text-xs text-black/40"> (preview — not saved yet)</span>}
+                    </p>
+                    {"publication_status" in r && (
+                      <div className="mt-2">
+                        <ReviewControls id={r.id} status={statusOf(r)} eligible={eligibility(r).ok} canManage={canManage} />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {r.needs_followup && (
                   <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-black/5 pt-3">
