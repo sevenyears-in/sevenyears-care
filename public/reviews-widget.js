@@ -1,6 +1,6 @@
 /* Seven Years — customer reviews for sevenyears.in
    Usage (WordPress "Custom HTML" block):
-     <div id="sy-reviews"></div>
+     <div id="sy-reviews"></div>            (add data-heading="none" inside an existing reviews section)
      <script src="https://care.sevenyears.in/reviews-widget.js" defer></script>
 */
 (function () {
@@ -52,10 +52,13 @@
   var wrap = el("div", "wrap");
   root.appendChild(wrap);
 
+  // data-heading="none" when the page already has its own heading (e.g. "Parents tell the story").
   var head = el("div", "head");
-  head.appendChild(el("p", "eyebrow", "Little ones love it"));
-  head.appendChild(el("h2", "title", "Parents tell the story"));
-  head.appendChild(el("p", "sub", "Real feedback from Seven Years families."));
+  if (host.getAttribute("data-heading") !== "none") {
+    head.appendChild(el("p", "eyebrow", "Little ones love it"));
+    head.appendChild(el("h2", "title", "Parents tell the story"));
+    head.appendChild(el("p", "sub", "Real feedback from Seven Years families."));
+  }
   wrap.appendChild(head);
 
   fetch(API)
