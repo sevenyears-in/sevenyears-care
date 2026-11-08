@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -12,12 +13,20 @@ export const dynamic = "force-dynamic";
 export default async function OffersAdminPage() {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
-  const [{ data, error }, sa, wishSettings, recentWishes] = await Promise.all([
+  const [{ data, error }, sa, wishSettings, recentWishes, viewsRes] = await Promise.all([
     supabaseAdmin.from("offers").select("*").order("created_at", { ascending: false }).limit(50),
     loadServiceAccount().catch(() => null),
     loadWishSettings(),
     supabaseAdmin.from("customer_wishes_sent").select("mobile, kind, detail, wish_date, sent, error").order("created_at", { ascending: false }).limit(15),
+    supabaseAdmin.from("offer_views").select("offer_id, tapped_at").limit(50000),
   ]);
+  const seen = new Map<string, { seen: number; tapped: number }>();
+  for (const v of (viewsRes.data ?? []) as { offer_id: string; tapped_at: string | null }[]) {
+    const s = seen.get(v.offer_id) ?? { seen: 0, tapped: 0 };
+    s.seen++;
+    if (v.tapped_at) s.tapped++;
+    seen.set(v.offer_id, s);
+  }
   const offers = (data ?? []) as Offer[];
 
   return (
@@ -29,6 +38,9 @@ export default async function OffersAdminPage() {
           Send an offer to every customer who has the Seven Years Care app. It arrives as a phone notification and stays on the
           Offers page (care.sevenyears.in/offers) until its last date.
         </p>
+        <Link href="/staff/admin/app-usage" className="mt-3 inline-block text-sm font-bold text-[#8883d7] hover:underline">
+          📊 App usage — who uses the app and who saw each offer →
+        </Link>
       </div>
 
       {error && (
@@ -89,6 +101,10 @@ export default async function OffersAdminPage() {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-black/5 pt-3 text-sm">
+                <Link href="/staff/admin/app-usage" className="font-bold text-black/60 hover:underline">
+                  👀 Seen by {seen.get(o.id)?.seen ?? 0}
+                  {seen.get(o.id)?.tapped ? ` · 🔔 ${seen.get(o.id)!.tapped} opened` : ""}
+                </Link>
                 <ResendOfferButton id={o.id} />
                 {o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}
                 <DeleteOfferButton id={o.id} />

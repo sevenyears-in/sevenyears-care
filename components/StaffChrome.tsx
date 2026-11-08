@@ -74,6 +74,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
           { href: "/staff/admin/categories", label: "Warranty Categories", icon: "🗂️" },
           { href: "/staff/admin/service-setup", label: "Service Setup", icon: "🛠️" },
           { href: "/staff/admin/offers", label: "Offers & Notifications", icon: "📣" },
+          { href: "/staff/admin/app-usage", label: "App usage", icon: "📊" },
         ]
       : []),
     ...(role === "super_admin"

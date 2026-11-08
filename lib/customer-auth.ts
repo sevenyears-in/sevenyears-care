@@ -291,6 +291,18 @@ export async function resetCustomerPasswordWithProof(mobile: string, proof: stri
     const hit = w.data?.[0]?.customer_name ?? sr.data?.[0]?.contact_name ?? c.data?.[0]?.contact_name;
     matched = Boolean(w.data?.length || sr.data?.length || c.data?.length);
     name = hit ? String(hit) : null;
+    // Bills in Zoho POS (customers who never registered a warranty).
+    if (!matched) {
+      try {
+        const bill = (await fetchInvoicesForMobile(mobile)).find((b) => b.billNumber.toUpperCase().replace(/[^A-Z0-9\-/]/g, "") === ref);
+        if (bill) {
+          matched = true;
+          name = bill.customerName || null;
+        }
+      } catch (e) {
+        console.warn("Zoho check for password reset failed:", e);
+      }
+    }
   }
 
   if (!matched) {

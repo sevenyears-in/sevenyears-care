@@ -12,6 +12,7 @@ import { loadFamily } from "@/lib/family";
 import { FamilyDatesEditor } from "@/components/FamilyDatesEditor";
 import { FeedbackPrompt, type PendingFeedback } from "@/components/FeedbackPrompt";
 import { WebPushButton } from "@/components/WebPushButton";
+import { OffersBanner } from "@/components/OffersBanner";
 import { zohoBillFeedbackId } from "@/lib/feedback";
 import { fetchInvoicesForMobile } from "@/lib/zoho";
 
@@ -26,6 +27,7 @@ async function zohoBills(mobile: string) {
 }
 
 export const metadata = { title: "My Account" };
+export const dynamic = "force-dynamic";
 
 // Customer portal: warranties, service requests and complaints for the logged-in mobile number.
 export default async function AccountPage() {
@@ -137,6 +139,8 @@ export default async function AccountPage() {
         </Link>
         <CustomerLogoutButton />
       </div>
+
+      <OffersBanner mobile={customer.mobile} className="mb-6" />
 
       <div className="mb-8 space-y-3">
         <WebPushButton />

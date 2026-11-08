@@ -3,6 +3,10 @@ import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { HomeTrackForm } from "@/components/HomeTrackForm";
 import { InstallAppCard } from "@/components/InstallApp";
 import { ACK_HOURS } from "@/lib/sla";
+import { OffersBanner } from "@/components/OffersBanner";
+
+// Offers change from the staff portal, so the home page is refreshed every minute.
+export const dynamic = "force-dynamic"; // offers & figures always current
 
 const steps = [
   {
@@ -144,7 +148,8 @@ export default function HomePage() {
         </section>
         </div>
 
-        <div className="mx-auto w-full max-w-7xl px-5 pb-10 sm:px-8">
+        <div className="mx-auto w-full max-w-7xl space-y-6 px-5 pb-10 sm:px-8">
+          <OffersBanner />
           <InstallAppCard audience="customer" />
         </div>
 

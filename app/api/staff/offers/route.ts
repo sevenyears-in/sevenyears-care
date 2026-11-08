@@ -115,7 +115,7 @@ export async function POST(request: Request) {
 /** Phone & browser notifications for one offer (used for new offers and "Resend"). */
 async function deliver(id: string, title: string, message: string, audience: "all" | "selected", mobiles: string[], by: string) {
   try {
-    const msg = { title, body: message, url: `${siteUrl()}/offers` };
+    const msg = { title, body: message, url: `${siteUrl()}/offers?n=${id}` };
     let note = "Sent! Customers and staff with notifications on will get it in a few seconds.";
     if (audience === "all") await pushToAll(msg);
     else {

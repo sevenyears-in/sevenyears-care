@@ -73,7 +73,7 @@ export default function ForgotPasswordPage() {
                 className={inputClass}
                 placeholder="e.g. VDK26-SI1-8504, SY-WAR-…, SY-SRV-… or SY-CMP-…"
               />
-              <p className="mt-2 text-xs text-black/50">Any one number registered with this mobile — it proves the account is yours.</p>
+              <p className="mt-2 text-xs text-black/50">Any one number registered with this mobile (any Seven Years bill works) — it proves the account is yours.</p>
             </div>
             <div>
               <label htmlFor="password" className={labelClass}>
@@ -95,6 +95,9 @@ export default function ForgotPasswordPage() {
           </form>
         )}
       </div>
+      <p className="mt-5 text-center text-sm text-black/55">
+        Staff member? Ask your Super Admin or Admin to set a new password for your User ID.
+      </p>
     </PageShell>
   );
 }

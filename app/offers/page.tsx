@@ -4,15 +4,23 @@ import { currentOffers } from "@/lib/offers";
 import { getCurrentCustomer } from "@/lib/customer-auth";
 import { formatDate } from "@/lib/helpers";
 import { WebPushButton } from "@/components/WebPushButton";
+import { after } from "next/server";
+import { getCurrentStaff } from "@/lib/auth";
+import { recordOfferTap, recordOfferViews } from "@/lib/offer-views";
 
 export const metadata: Metadata = { title: "Offers" };
 export const dynamic = "force-dynamic";
 
 const COLOURS = ["#ff5e79", "#8883d7", "#f39237", "#0fa8bf"];
 
-export default async function OffersPage() {
-  const customer = await getCurrentCustomer();
+export default async function OffersPage({ searchParams }: { searchParams: Promise<{ n?: string }> }) {
+  const [customer, staff, { n }] = await Promise.all([getCurrentCustomer(), getCurrentStaff(), searchParams]);
   const offers = await currentOffers(customer?.mobile);
+  const viewer = { customerMobile: customer?.mobile ?? null, staffId: staff?.id ?? null };
+  after(async () => {
+    if (n) await recordOfferTap(String(n), viewer);
+    await recordOfferViews(offers.map((o) => o.id), viewer);
+  });
   return (
     <PageShell eyebrow="Seven Years" title="Offers for you 🎁" intro="Special offers from Seven Years stores. Turn on notifications in the app so you never miss one.">
       <div className="mb-5">

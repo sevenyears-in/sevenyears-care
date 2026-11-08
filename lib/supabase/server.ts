@@ -17,6 +17,8 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     try {
       const response = await fetch(input, {
         ...init,
+        // Always fresh data from the database (never a stored copy).
+        cache: "no-store",
         // A normal read takes well under a second: give up on a stuck one quickly and retry.
         signal: init?.signal ?? AbortSignal.timeout(safe ? 6_000 : 20_000),
       });
