@@ -1,6 +1,8 @@
 package com.sevenyears.care
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -57,6 +59,15 @@ class MainActivity : ComponentActivity() {
     // Photo picking for <input type="file"> (service request photos)
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraPhoto: Uri? = null
+
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /** Android 13+: ask once to allow notifications. */
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback ?: return@registerForActivityResult
@@ -139,6 +150,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
+
+        if (savedInstanceState == null) window.decorView.postDelayed({ askForNotifications() }, 1500)
 
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState)
