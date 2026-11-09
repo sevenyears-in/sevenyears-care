@@ -257,7 +257,7 @@ export default function StaffUsersPage() {
           <p className="p-5 text-sm text-black/60">Loading...</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-left text-sm">
+            <table className="w-full min-w-[1080px] text-left text-sm">
               <thead className="bg-[#f7f9fb] text-xs uppercase tracking-wider text-black/45">
                 <tr>
                   <th className="px-4 py-3">Name</th>
@@ -341,7 +341,7 @@ export default function StaffUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         {!locked && (
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
                             <button
                               type="button"
                               disabled={Boolean(editing)}

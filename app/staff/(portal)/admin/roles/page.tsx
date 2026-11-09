@@ -133,7 +133,7 @@ export default function RolesAccessPage() {
       access: { ...draft.access, sections: draft.access.sections.includes(k) ? draft.access.sections.filter((s) => s !== k) : [...draft.access.sections, k] },
     });
 
-  const th = "whitespace-nowrap px-3 py-3 text-[11px] font-bold uppercase tracking-wide text-black/45";
+  const th = "whitespace-nowrap px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-black/45";
   const cols = SECTIONS.length + 4;
 
   const editRow = (d: Draft) => {
@@ -159,13 +159,13 @@ export default function RolesAccessPage() {
             </div>
           )}
         </td>
-        <td className="px-3 py-3 text-center align-top text-xs text-black/50">{d.isNew ? "—" : rows.find((x) => x.key === d.key)?.staff ?? 0}</td>
+        <td className="px-2 py-2.5 text-center align-top text-xs text-black/50">{d.isNew ? "—" : rows.find((x) => x.key === d.key)?.staff ?? 0}</td>
         {SECTIONS.map((s) => (
-          <td key={s.key} className="px-3 py-3 text-center align-top">
+          <td key={s.key} className="px-2 py-2.5 text-center align-top">
             <input type="checkbox" className={tick} checked={d.access.sections.includes(s.key)} onChange={() => toggleSection(s.key)} aria-label={s.label} />
           </td>
         ))}
-        <td className="px-3 py-3 text-center align-top">
+        <td className="px-2 py-2.5 text-center align-top">
           <input
             type="checkbox"
             className="h-5 w-5 cursor-pointer accent-[#0fa8bf]"
@@ -210,17 +210,17 @@ export default function RolesAccessPage() {
 
       {config && (
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
-          <table className="w-full min-w-[1080px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="border-b border-black/5 bg-[#f7f9fb]">
               <tr>
-                <th className={`${th} w-[260px] text-left`}>Role</th>
+                <th className={`${th} w-[220px] text-left`}>Role</th>
                 <th className={`${th} text-center`}>Staff</th>
                 {SECTIONS.map((s) => (
-                  <th key={s.key} className={`${th} text-center`}>
+                  <th key={s.key} className={`${th} w-[88px] whitespace-normal text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
-                <th className={`${th} text-center text-[#0b7f90]`}>All stores</th>
+                <th className={`${th} w-[80px] whitespace-normal text-center leading-tight text-[#0b7f90]`}>All stores</th>
                 <th className={`${th} text-left`}> </th>
               </tr>
             </thead>
@@ -231,7 +231,7 @@ export default function RolesAccessPage() {
                 ) : (
                   <Fragment key={row.key}>
                     <tr className={draft ? "opacity-60" : ""}>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2.5" title={ROLE_HELP[row.baseRole]}>
                         <p className="font-bold">
                           {row.name}
                           {row.kind === "custom" && (
@@ -241,13 +241,11 @@ export default function RolesAccessPage() {
                             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Changed</span>
                           )}
                         </p>
-                        <p className="mt-0.5 text-[11px] leading-4 text-black/45">
-                          {row.kind === "custom" ? `Works like ${ROLE_LABELS[row.baseRole]}` : ROLE_HELP[row.baseRole]}
-                        </p>
+                        {row.kind === "custom" && <p className="mt-0.5 text-[11px] text-black/45">Works like {ROLE_LABELS[row.baseRole]}</p>}
                       </td>
-                      <td className="px-3 py-3 text-center text-xs font-semibold text-black/60">{row.staff}</td>
+                      <td className="px-2 py-2.5 text-center text-xs font-semibold text-black/60">{row.staff}</td>
                       {SECTIONS.map((s) => (
-                        <td key={s.key} className="px-3 py-3 text-center">
+                        <td key={s.key} className="px-2 py-2.5 text-center">
                           {row.access.sections.includes(s.key) ? (
                             <span className="text-base font-bold text-green-700" aria-label="Yes">
                               ✓
@@ -259,7 +257,7 @@ export default function RolesAccessPage() {
                           )}
                         </td>
                       ))}
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-2.5 text-center">
                         {row.access.allStores ? (
                           <span className="text-base font-bold text-[#0b7f90]">✓</span>
                         ) : (
