@@ -131,13 +131,6 @@ export default function RolesAccessPage() {
     await save({ ...config, custom: config.custom.filter((c) => c.id !== row.key) }, `"${row.name}" deleted.`);
   };
 
-  const resetDefault = async (row: Row) => {
-    if (!config || !confirm(`Put "${row.name}" back to its standard access?`)) return;
-    const builtin = { ...config.builtin };
-    if (isBuiltIn(row.key)) delete builtin[row.key];
-    await save({ ...config, builtin }, `"${row.name}" is back to its standard access.`);
-  };
-
   const toggleSection = (k: Section) =>
     draft &&
     setDraft({
@@ -222,17 +215,17 @@ export default function RolesAccessPage() {
       {config && (
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
           <div className="h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
-          <table className="w-full min-w-[880px] text-sm">
+          <table className="w-full min-w-[960px] table-fixed text-sm">
             <thead className="border-b border-black/5">
               <tr>
-                <th className={`${th} w-[200px] pl-6 text-left`}>Role</th>
+                <th className={`${th} w-[190px] pl-6 text-left`}>Role</th>
                 {SECTIONS.map((s) => (
-                  <th key={s.key} className={`${th} w-[74px] whitespace-normal text-center leading-tight`}>
+                  <th key={s.key} className={`${th} whitespace-normal text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
-                <th className={`${th} w-[60px] whitespace-normal text-center leading-tight`}>Stores</th>
-                <th className={`${th} text-left`}> </th>
+                <th className={`${th} w-[70px] whitespace-normal text-center leading-tight`}>Stores</th>
+                <th className={`${th} w-[170px] text-left`}> </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/[0.04]">
@@ -250,9 +243,6 @@ export default function RolesAccessPage() {
                           {row.name}
                           {row.kind === "custom" && (
                             <span className="ml-2 rounded-full bg-[#8883d7]/15 px-2 py-0.5 text-[10px] font-bold uppercase text-[#5d58b5]">Custom</span>
-                          )}
-                          {row.kind === "builtin" && isBuiltIn(row.key) && config.builtin[row.key] && (
-                            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Changed</span>
                           )}
                         </p>
                         <p className="mt-0.5 text-[11px] text-black/45">
@@ -274,7 +264,7 @@ export default function RolesAccessPage() {
                         )}
                       </td>
                       <td className="py-3 pl-2 pr-5">
-                        <div className="flex flex-nowrap items-center justify-end gap-2">
+                        <div className="flex flex-nowrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => startEdit(row)}
@@ -291,16 +281,6 @@ export default function RolesAccessPage() {
                               className="rounded-xl px-3 py-1.5 text-xs font-bold text-red-700 ring-1 ring-red-200 disabled:opacity-40"
                             >
                               Delete
-                            </button>
-                          )}
-                          {row.kind === "builtin" && isBuiltIn(row.key) && config.builtin[row.key] && (
-                            <button
-                              type="button"
-                              onClick={() => resetDefault(row)}
-                              disabled={Boolean(draft) || saving}
-                              className="text-xs font-semibold text-[#0b7f90] hover:underline disabled:opacity-40"
-                            >
-                              Reset
                             </button>
                           )}
                         </div>
