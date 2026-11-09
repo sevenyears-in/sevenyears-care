@@ -18,6 +18,18 @@ type Row = { key: string; kind: "builtin" | "custom"; name: string; baseRole: Ro
 type Draft = { key: string; isNew: boolean; name: string; baseRole: Role; access: RoleAccess };
 
 const tick = "h-5 w-5 cursor-pointer accent-[#161616]";
+const DOTS = ["#ff5e79", "#8883d7", "#0fa8bf", "#f39237"];
+
+function Yes() {
+  return (
+    <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-100 text-sm font-black text-green-700" aria-label="Yes">
+      ✓
+    </span>
+  );
+}
+function No() {
+  return <span className="inline-block h-1.5 w-1.5 rounded-full bg-black/15" aria-label="No" />;
+}
 
 export default function RolesAccessPage() {
   const [config, setConfig] = useState<AccessConfig | null>(null);
@@ -134,7 +146,7 @@ export default function RolesAccessPage() {
     });
 
   const th = "whitespace-nowrap px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-black/45";
-  const cols = SECTIONS.length + 4;
+  const cols = SECTIONS.length + 3;
 
   const editRow = (d: Draft) => {
     const builtinRow = isBuiltIn(d.key);
@@ -159,7 +171,6 @@ export default function RolesAccessPage() {
             </div>
           )}
         </td>
-        <td className="px-2 py-2.5 text-center align-top text-xs text-black/50">{d.isNew ? "—" : rows.find((x) => x.key === d.key)?.staff ?? 0}</td>
         {SECTIONS.map((s) => (
           <td key={s.key} className="px-2 py-2.5 text-center align-top">
             <input type="checkbox" className={tick} checked={d.access.sections.includes(s.key)} onChange={() => toggleSection(s.key)} aria-label={s.label} />
@@ -210,29 +221,32 @@ export default function RolesAccessPage() {
 
       {config && (
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
+          <div className="h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
           <table className="w-full min-w-[980px] text-sm">
-            <thead className="border-b border-black/5 bg-[#f7f9fb]">
+            <thead className="border-b border-black/5">
               <tr>
-                <th className={`${th} w-[220px] text-left`}>Role</th>
-                <th className={`${th} text-center`}>Staff</th>
+                <th className={`${th} w-[230px] pl-6 text-left`}>Role</th>
                 {SECTIONS.map((s) => (
                   <th key={s.key} className={`${th} w-[88px] whitespace-normal text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
-                <th className={`${th} w-[80px] whitespace-normal text-center leading-tight text-[#0b7f90]`}>All stores</th>
+                <th className={`${th} w-[96px] whitespace-normal text-center leading-tight`}>Stores</th>
                 <th className={`${th} text-left`}> </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/5">
-              {rows.map((row) =>
+            <tbody className="divide-y divide-black/[0.04]">
+              {rows.map((row, idx) =>
                 draft && !draft.isNew && draft.key === row.key ? (
                   editRow(draft)
                 ) : (
                   <Fragment key={row.key}>
-                    <tr className={draft ? "opacity-60" : ""}>
-                      <td className="px-4 py-2.5" title={ROLE_HELP[row.baseRole]}>
-                        <p className="font-bold">
+                    <tr className={`transition hover:bg-[#fafbfd] ${draft ? "opacity-50" : ""}`}>
+                      <td className="py-3 pl-6 pr-3">
+                        <div className="flex items-center gap-3">
+                          <span className="h-9 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: DOTS[idx % DOTS.length] }} aria-hidden />
+                          <div>
+                        <p className="font-bold leading-tight">
                           {row.name}
                           {row.kind === "custom" && (
                             <span className="ml-2 rounded-full bg-[#8883d7]/15 px-2 py-0.5 text-[10px] font-bold uppercase text-[#5d58b5]">Custom</span>
@@ -241,27 +255,22 @@ export default function RolesAccessPage() {
                             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Changed</span>
                           )}
                         </p>
-                        {row.kind === "custom" && <p className="mt-0.5 text-[11px] text-black/45">Works like {ROLE_LABELS[row.baseRole]}</p>}
+                        <p className="mt-0.5 text-[11px] text-black/45">
+                          {row.staff} staff{row.kind === "custom" ? ` · works like ${ROLE_LABELS[row.baseRole]}` : ""}
+                        </p>
+                          </div>
+                        </div>
                       </td>
-                      <td className="px-2 py-2.5 text-center text-xs font-semibold text-black/60">{row.staff}</td>
                       {SECTIONS.map((s) => (
                         <td key={s.key} className="px-2 py-2.5 text-center">
-                          {row.access.sections.includes(s.key) ? (
-                            <span className="text-base font-bold text-green-700" aria-label="Yes">
-                              ✓
-                            </span>
-                          ) : (
-                            <span className="text-black/20" aria-label="No">
-                              —
-                            </span>
-                          )}
+                          {row.access.sections.includes(s.key) ? <Yes /> : <No />}
                         </td>
                       ))}
                       <td className="px-2 py-2.5 text-center">
                         {row.access.allStores ? (
-                          <span className="text-base font-bold text-[#0b7f90]">✓</span>
+                          <span className="rounded-full bg-[#0fa8bf]/15 px-2.5 py-1 text-[11px] font-bold text-[#0b7f90]">All</span>
                         ) : (
-                          <span className="text-[11px] text-black/40">Own store</span>
+                          <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-semibold text-black/50">Own</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -270,9 +279,9 @@ export default function RolesAccessPage() {
                             type="button"
                             onClick={() => startEdit(row)}
                             disabled={Boolean(draft) || saving}
-                            className="rounded-xl bg-[#161616] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40"
+                            className="rounded-xl px-3 py-1.5 text-xs font-bold ring-1 ring-black/15 transition hover:bg-[#161616] hover:text-white disabled:opacity-40"
                           >
-                            Edit
+                            ✎ Edit
                           </button>
                           {row.kind === "custom" && (
                             <button
@@ -311,6 +320,24 @@ export default function RolesAccessPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {config && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-bold">What each role does</h2>
+          <p className="text-sm text-black/55">
+            This decides who receives complaints, escalations and approvals. A role you create works like the built-in role you choose for it.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {BUILT_IN.map((r, i) => (
+              <div key={r} className="relative overflow-hidden rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
+                <span className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: DOTS[i % DOTS.length] }} aria-hidden />
+                <p className="text-sm font-bold">{ROLE_LABELS[r]}</p>
+                <p className="mt-1 text-xs leading-5 text-black/55">{ROLE_HELP[r]}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
