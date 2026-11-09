@@ -145,7 +145,7 @@ export default function RolesAccessPage() {
       access: { ...draft.access, sections: draft.access.sections.includes(k) ? draft.access.sections.filter((s) => s !== k) : [...draft.access.sections, k] },
     });
 
-  const th = "whitespace-nowrap px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-black/45";
+  const th = "whitespace-nowrap px-1.5 py-3 text-[10px] font-bold uppercase tracking-wide text-black/45";
   const cols = SECTIONS.length + 3;
 
   const editRow = (d: Draft) => {
@@ -222,16 +222,16 @@ export default function RolesAccessPage() {
       {config && (
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
           <div className="h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[880px] text-sm">
             <thead className="border-b border-black/5">
               <tr>
-                <th className={`${th} w-[230px] pl-6 text-left`}>Role</th>
+                <th className={`${th} w-[200px] pl-6 text-left`}>Role</th>
                 {SECTIONS.map((s) => (
-                  <th key={s.key} className={`${th} w-[88px] whitespace-normal text-center leading-tight`}>
+                  <th key={s.key} className={`${th} w-[74px] whitespace-normal text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
-                <th className={`${th} w-[96px] whitespace-normal text-center leading-tight`}>Stores</th>
+                <th className={`${th} w-[60px] whitespace-normal text-center leading-tight`}>Stores</th>
                 <th className={`${th} text-left`}> </th>
               </tr>
             </thead>
@@ -273,8 +273,8 @@ export default function RolesAccessPage() {
                           <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-semibold text-black/50">Own</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
+                      <td className="py-3 pl-2 pr-5">
+                        <div className="flex flex-nowrap items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => startEdit(row)}
