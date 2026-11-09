@@ -269,16 +269,16 @@ export default function RolesAccessPage() {
                             type="button"
                             onClick={() => startEdit(row)}
                             disabled={Boolean(draft) || saving}
-                            className="rounded-xl px-3 py-1.5 text-xs font-bold ring-1 ring-black/15 transition hover:bg-[#161616] hover:text-white disabled:opacity-40"
+                            className="whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-bold ring-1 ring-black/15 transition hover:bg-[#161616] hover:text-white disabled:opacity-40"
                           >
-                            ✎ Edit
+                            Edit
                           </button>
                           {row.kind === "custom" && (
                             <button
                               type="button"
                               onClick={() => remove(row)}
                               disabled={Boolean(draft) || saving}
-                              className="rounded-xl px-3 py-1.5 text-xs font-bold text-red-700 ring-1 ring-red-200 disabled:opacity-40"
+                              className="whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-bold text-red-700 ring-1 ring-red-200 disabled:opacity-40"
                             >
                               Delete
                             </button>
