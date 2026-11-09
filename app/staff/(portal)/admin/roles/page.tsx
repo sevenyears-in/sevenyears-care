@@ -138,7 +138,7 @@ export default function RolesAccessPage() {
       access: { ...draft.access, sections: draft.access.sections.includes(k) ? draft.access.sections.filter((s) => s !== k) : [...draft.access.sections, k] },
     });
 
-  const th = "whitespace-nowrap px-1.5 py-3 text-[10px] font-bold uppercase tracking-wide text-black/45";
+  const th = "px-1.5 py-3 align-bottom text-[10px] font-bold uppercase tracking-wide text-black/45";
   const cols = SECTIONS.length + 3;
 
   const editRow = (d: Draft) => {
@@ -218,7 +218,7 @@ export default function RolesAccessPage() {
           <table className="w-full min-w-[960px] table-fixed text-sm">
             <thead className="border-b border-black/5">
               <tr>
-                <th className={`${th} w-[190px] pl-6 text-left`}>Role</th>
+                <th className={`${th} w-[190px] whitespace-nowrap pl-6 text-left`}>Role</th>
                 {SECTIONS.map((s) => (
                   <th key={s.key} className={`${th} whitespace-normal text-center leading-tight`}>
                     {s.label}
