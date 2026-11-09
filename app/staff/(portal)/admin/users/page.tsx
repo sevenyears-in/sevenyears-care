@@ -40,7 +40,7 @@ export default function StaffUsersPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<Role>("admin");
   const [customRoles, setCustomRoles] = useState<CustomRoleOption[]>([]);
-  const [accessFor, setAccessFor] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
@@ -124,12 +124,6 @@ export default function StaffUsersPage() {
     setEmail("");
     setWhatsappNumber("");
     load();
-  };
-
-  const ask = (user: StaffRow, label: string, current: string | null, field: string) => {
-    const value = window.prompt(`${label} for ${user.full_name}:`, current ?? "");
-    if (value === null) return;
-    patch(user.id, { [field]: value }, `${label} updated.`);
   };
 
   const resetPassword = (user: StaffRow) => {
@@ -278,8 +272,31 @@ export default function StaffUsersPage() {
                 {users.map((u) => {
                   const self = u.id === currentUserId;
                   const locked = !isSuper && !self && PROTECTED.includes(u.role);
+                  if (editing === u.id)
+                    return (
+                      <EditStaffRow
+                        key={u.id}
+                        user={u}
+                        self={self}
+                        isSuper={isSuper}
+                        stores={stores}
+                        customRoles={customRoles}
+                        roleOptions={(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => !PROTECTED.includes(r)))
+                          .concat([u.role])
+                          .filter((r, i, all) => all.indexOf(r) === i)}
+                        onCancel={() => setEditing(null)}
+                        onSaved={(msg) => {
+                          setEditing(null);
+                          setErrorMessage("");
+                          setNotice(msg);
+                          load();
+                        }}
+                        onError={(msg) => setErrorMessage(msg)}
+                      />
+                    );
+                  const custom = u.custom_role_id ? customRoles.find((c) => c.id === u.custom_role_id) : undefined;
                   return (
-                    <tr key={u.id} className={u.is_active ? "" : "opacity-50"}>
+                    <tr key={u.id} className={`${u.is_active ? "" : "opacity-50"} ${editing ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3">
                         <p className="font-semibold">
                           {u.full_name}
@@ -288,159 +305,67 @@ export default function StaffUsersPage() {
                         <p className="font-mono text-xs text-black/50">{u.user_id}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <select
-                          value={u.custom_role_id ? `custom:${u.custom_role_id}` : u.role}
-                          disabled={self || locked || (!isSuper && Boolean(u.custom_role_id))}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v.startsWith("custom:")) patch(u.id, { customRoleId: v.slice(7) }, "Role updated.");
-                            else patch(u.id, { role: v, clearCustom: Boolean(u.custom_role_id) }, "Role updated. It applies from their next login.");
-                          }}
-                          className="rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
-                          aria-label={`Role for ${u.user_id}`}
-                        >
-                          {(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => !PROTECTED.includes(r)))
-                            .concat([u.role])
-                            .filter((r, i, all) => all.indexOf(r) === i)
-                            .map((r) => (
-                            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                          ))}
-                          {(isSuper || u.custom_role_id) && customRoles.length > 0 && (
-                            <optgroup label="Custom roles">
-                              {customRoles
-                                .filter((c) => isSuper || c.id === u.custom_role_id)
-                                .map((c) => (
-                                  <option key={c.id} value={`custom:${c.id}`}>{c.name}</option>
-                                ))}
-                            </optgroup>
-                          )}
-                        </select>
-                        {isSuper && u.role === "store_manager" && !u.custom_role_id && (
-                          <label className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-black/60">
-                            <input
-                              type="checkbox"
-                              checked={u.can_edit_warranties !== false}
-                              onChange={(e) =>
-                                patch(
-                                  u.id,
-                                  { canEditWarranties: e.target.checked },
-                                  e.target.checked ? "Can edit warranties again." : "Warranty editing suspended."
-                                )
-                              }
-                            />
-                            Can edit warranties
-                          </label>
+                        <p className="font-semibold">{custom?.name ?? ROLE_LABELS[u.role]}</p>
+                        {custom && <p className="text-[11px] text-black/45">Works like {ROLE_LABELS[custom.baseRole]}</p>}
+                        {u.role === "store_manager" && !u.custom_role_id && u.can_edit_warranties === false && (
+                          <p className="text-[11px] font-semibold text-red-700">Warranty editing suspended</p>
                         )}
-                        {isSuper && !self && u.role !== "super_admin" && (
-                          <div className="mt-1">
-                            <button
-                              type="button"
-                              onClick={() => setAccessFor(accessFor === u.id ? null : u.id)}
-                              className="text-xs font-semibold text-[#0b7f90] hover:underline"
-                            >
-                              {u.extra_sections?.length ? `Extra access (${u.extra_sections.length})` : "+ Extra access"}
-                            </button>
-                            {accessFor === u.id && (
-                              <div className="mt-2 w-52 space-y-1 rounded-xl bg-[#f7f9fb] p-2">
-                                {SECTIONS.map((sec) => {
-                                  const on = (u.extra_sections ?? []).includes(sec.key);
-                                  return (
-                                    <label key={sec.key} className="flex items-center gap-2 text-xs">
-                                      <input
-                                        type="checkbox"
-                                        checked={on}
-                                        onChange={() =>
-                                          patch(
-                                            u.id,
-                                            {
-                                              extraSections: on
-                                                ? (u.extra_sections ?? []).filter((k) => k !== sec.key)
-                                                : [...(u.extra_sections ?? []), sec.key],
-                                            },
-                                            "Extra access saved."
-                                          )
-                                        }
-                                      />
-                                      {sec.label}
-                                    </label>
-                                  );
-                                })}
-                                <p className="pt-1 text-[11px] text-black/45">On top of what their role allows.</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {u.role === "director" ? (
-                          <DirectorStores
-                            current={u.director_stores ?? []}
-                            stores={stores.filter((s) => s.name !== "CORPORATE OFFICE").map((s) => s.name)}
-                            disabled={locked}
-                            onSave={(list) => patch(u.id, { directorStores: list }, "Director's stores updated.")}
-                          />
-                        ) : (
-                        <select
-                          value={u.store_name ?? ""}
-                          disabled={locked}
-                          onChange={(e) => patch(u.id, { storeName: e.target.value }, "Store updated.")}
-                          className="max-w-[220px] rounded-xl border border-black/10 px-2 py-1 disabled:opacity-60"
-                          aria-label={`Store for ${u.user_id}`}
-                        >
-                          <option value="">— No store —</option>
-                          {u.store_name && !stores.some((s) => s.name === u.store_name) && (
-                            <option value={u.store_name}>{u.store_name} (not in Zoho — please change)</option>
-                          )}
-                          {stores.map((s) => (
-                            <option key={s.name} value={s.name}>{storeLabel(s)}</option>
-                          ))}
-                        </select>
+                        {(u.extra_sections?.length ?? 0) > 0 && (
+                          <p className="text-[11px] text-[#0b7f90]">
+                            + {u.extra_sections!.map((k) => SECTIONS.find((x) => x.key === k)?.label ?? k).join(", ")}
+                          </p>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs">
-                        <div className="flex flex-col gap-1">
-                          <span className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={u.notify_email}
-                              disabled={locked}
-                              onChange={(e) => patch(u.id, { notifyEmail: e.target.checked }, "Alert setting saved.")}
-                              aria-label="E-mail alerts on"
-                            />
-                            <button type="button" disabled={locked} onClick={() => ask(u, "E-mail", u.email, "email")} className="hover:underline">
-                              {u.email || <span className="text-black/40">Add e-mail</span>}
-                            </button>
-                          </span>
-                          <span className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={u.notify_whatsapp}
-                              disabled={locked}
-                              onChange={(e) => patch(u.id, { notifyWhatsapp: e.target.checked }, "Alert setting saved.")}
-                              aria-label="WhatsApp alerts on"
-                            />
-                            <button type="button" disabled={locked} onClick={() => ask(u, "WhatsApp number", u.whatsapp_number, "whatsappNumber")} className="hover:underline">
-                              {u.whatsapp_number ? `WA ${u.whatsapp_number}` : <span className="text-black/40">Add WhatsApp</span>}
-                            </button>
-                          </span>
-                        </div>
+                        {u.role === "director" ? (
+                          <>
+                            <p className="font-bold">CORPORATE OFFICE</p>
+                            <p className="text-black/60">Looks after: {u.director_stores?.length ? u.director_stores.join(", ") : "all stores"}</p>
+                          </>
+                        ) : (
+                          <p className="font-semibold">{u.store_name || <span className="text-black/40">No store</span>}</p>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-black/55">
+                      <td className="px-4 py-3 text-xs">
+                        <p className={u.notify_email && u.email ? "" : "text-black/35"}>
+                          {u.notify_email && u.email ? "✓ " : "✗ "}
+                          {u.email || "No e-mail"}
+                        </p>
+                        <p className={`mt-1 ${u.notify_whatsapp && u.whatsapp_number ? "" : "text-black/35"}`}>
+                          {u.notify_whatsapp && u.whatsapp_number ? "✓ " : "✗ "}
+                          {u.whatsapp_number ? `WA ${u.whatsapp_number}` : "No WhatsApp"}
+                        </p>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-black/55">
                         {u.last_login_at ? formatDateTime(u.last_login_at) : "Never"}
                       </td>
                       <td className="px-4 py-3">
                         {!locked && (
                           <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={() => resetPassword(u)} className="rounded-xl border border-black/10 px-3 py-1 text-xs font-bold hover:bg-[#f7f9fb]">
+                            <button
+                              type="button"
+                              disabled={Boolean(editing)}
+                              onClick={() => {
+                                setNotice("");
+                                setErrorMessage("");
+                                setEditing(u.id);
+                              }}
+                              className="rounded-xl bg-[#161616] px-3 py-1 text-xs font-bold text-white disabled:opacity-40"
+                            >
+                              Edit
+                            </button>
+                            <button type="button" disabled={Boolean(editing)} onClick={() => resetPassword(u)} className="rounded-xl border border-black/10 px-3 py-1 text-xs font-bold hover:bg-[#f7f9fb] disabled:opacity-40">
                               Reset password
                             </button>
                             {!self && (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  patch(u.id, { isActive: !u.is_active }, u.is_active ? `${u.user_id} disabled.` : `${u.user_id} enabled.`)
-                                }
-                                className={`rounded-xl px-3 py-1 text-xs font-bold ${u.is_active ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}
+                                disabled={Boolean(editing)}
+                                onClick={() => {
+                                  if (!confirm(`${u.is_active ? "Disable" : "Enable"} ${u.full_name}?`)) return;
+                                  patch(u.id, { isActive: !u.is_active }, u.is_active ? `${u.user_id} disabled.` : `${u.user_id} enabled.`);
+                                }}
+                                className={`rounded-xl px-3 py-1 text-xs font-bold disabled:opacity-40 ${u.is_active ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}
                               >
                                 {u.is_active ? "Disable" : "Enable"}
                               </button>
@@ -471,52 +396,189 @@ export default function StaffUsersPage() {
   );
 }
 
-function DirectorStores({
-  current,
-  stores,
-  disabled,
-  onSave,
-}: {
-  current: string[];
-  stores: string[];
-  disabled: boolean;
-  onSave: (list: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [list, setList] = useState<string[]>(current);
+type EditProps = {
+  user: StaffRow;
+  self: boolean;
+  isSuper: boolean;
+  stores: StoreOption[];
+  customRoles: CustomRoleOption[];
+  roleOptions: Role[];
+  onCancel: () => void;
+  onSaved: (message: string) => void;
+  onError: (message: string) => void;
+};
+
+/** Edit one staff member — nothing changes until Save. */
+function EditStaffRow({ user: u, self, isSuper, stores, customRoles, roleOptions, onCancel, onSaved, onError }: EditProps) {
+  const startRole = u.custom_role_id ? `custom:${u.custom_role_id}` : u.role;
+  const [fullName, setFullName] = useState(u.full_name);
+  const [roleValue, setRoleValue] = useState(startRole);
+  const [store, setStore] = useState(u.store_name ?? "");
+  const [dStores, setDStores] = useState<string[]>(u.director_stores ?? []);
+  const [email, setEmail] = useState(u.email ?? "");
+  const [wa, setWa] = useState(u.whatsapp_number ?? "");
+  const [notifyEmail, setNotifyEmail] = useState(u.notify_email);
+  const [notifyWa, setNotifyWa] = useState(u.notify_whatsapp);
+  const [canEdit, setCanEdit] = useState(u.can_edit_warranties !== false);
+  const [extra, setExtra] = useState<Section[]>(u.extra_sections ?? []);
+  const [busy, setBusy] = useState(false);
+
+  const custom = roleValue.startsWith("custom:") ? customRoles.find((c) => c.id === roleValue.slice(7)) : undefined;
+  const effectiveRole: Role = custom ? custom.baseRole : (roleValue as Role);
+  const canChangeRole = !self && (isSuper || !u.custom_role_id);
+  const showAccess = isSuper && !self && u.role !== "super_admin";
+
+  const send = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/staff/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: u.id, ...body }),
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => ({})) : {};
+    if (!res?.ok) throw new Error(d.error || "Unable to save.");
+  };
+
+  const save = async () => {
+    if (!fullName.trim()) return onError("Enter the name.");
+    setBusy(true);
+    try {
+      // 1. Role first (it can move a Director to CORPORATE OFFICE).
+      if (roleValue !== startRole) {
+        if (custom) await send({ customRoleId: custom.id });
+        else await send({ role: roleValue, clearCustom: Boolean(u.custom_role_id) });
+      }
+      // 2. Everything else that changed.
+      const body: Record<string, unknown> = {};
+      if (fullName.trim() !== u.full_name) body.fullName = fullName.trim();
+      if (effectiveRole === "director") {
+        const before = [...(u.director_stores ?? [])].sort().join("|");
+        if ([...dStores].sort().join("|") !== before) body.directorStores = dStores;
+      } else if (store !== (u.store_name ?? "")) body.storeName = store;
+      if (email.trim() !== (u.email ?? "")) body.email = email.trim();
+      if (wa.trim() !== (u.whatsapp_number ?? "")) body.whatsappNumber = wa.trim();
+      if (notifyEmail !== u.notify_email) body.notifyEmail = notifyEmail;
+      if (notifyWa !== u.notify_whatsapp) body.notifyWhatsapp = notifyWa;
+      if (isSuper && effectiveRole === "store_manager" && canEdit !== (u.can_edit_warranties !== false)) body.canEditWarranties = canEdit;
+      if (showAccess && [...extra].sort().join("|") !== [...(u.extra_sections ?? [])].sort().join("|")) body.extraSections = extra;
+      if (Object.keys(body).length) await send(body);
+      onSaved(`${fullName.trim()} saved.${roleValue !== startRole ? " The new role applies from their next login." : ""}`);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Unable to save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-black/45";
+  const box = "w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm";
+
   return (
-    <div className="max-w-[240px] text-xs">
-      <p className="font-bold">CORPORATE OFFICE</p>
-      <p className="text-black/60">Looks after: {current.length ? current.join(", ") : "all stores"}</p>
-      {!disabled && (
-        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-[#11b8d0] hover:underline">
-          {open ? "Close" : "Change stores"}
-        </button>
-      )}
-      {open && (
-        <div className="mt-2 space-y-1 rounded-xl border border-black/10 p-2">
-          {stores.map((s) => (
-            <label key={s} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={list.includes(s)}
-                onChange={(e) => setList((l) => (e.target.checked ? [...l, s] : l.filter((x) => x !== s)))}
-              />
-              {s}
+    <tr className="bg-[#fff8f9]">
+      <td colSpan={6} className="px-4 py-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <label className="block">
+            <span className={field}>Full name</span>
+            <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={box} />
+            <span className="mt-1 block font-mono text-[11px] text-black/45">User ID {u.user_id}</span>
+          </label>
+          <label className="block">
+            <span className={field}>Role</span>
+            <select value={roleValue} disabled={!canChangeRole} onChange={(e) => setRoleValue(e.target.value)} className={`${box} disabled:opacity-60`}>
+              {roleOptions.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABELS[r]}
+                </option>
+              ))}
+              {(isSuper || u.custom_role_id) && customRoles.length > 0 && (
+                <optgroup label="Custom roles">
+                  {customRoles
+                    .filter((c) => isSuper || c.id === u.custom_role_id)
+                    .map((c) => (
+                      <option key={c.id} value={`custom:${c.id}`}>
+                        {c.name}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+            </select>
+            {self && <span className="mt-1 block text-[11px] text-black/45">You can&apos;t change your own role.</span>}
+            {isSuper && effectiveRole === "store_manager" && !custom && (
+              <label className="mt-2 flex items-center gap-2 text-xs font-semibold">
+                <input type="checkbox" checked={canEdit} onChange={(e) => setCanEdit(e.target.checked)} />
+                Can edit warranties
+              </label>
+            )}
+          </label>
+          <div>
+            <span className={field}>{effectiveRole === "director" ? "Corporate office · looks after" : "Store"}</span>
+            {effectiveRole === "director" ? (
+              <div className="space-y-1 rounded-xl border border-black/10 bg-white p-2 text-xs">
+                {stores
+                  .filter((s) => s.name !== "CORPORATE OFFICE")
+                  .map((s) => (
+                    <label key={s.name} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={dStores.includes(s.name)}
+                        onChange={(e) => setDStores((l) => (e.target.checked ? [...l, s.name] : l.filter((x) => x !== s.name)))}
+                      />
+                      {storeLabel(s)}
+                    </label>
+                  ))}
+                <p className="text-[11px] text-black/45">None ticked = all stores.</p>
+              </div>
+            ) : (
+              <select value={store} onChange={(e) => setStore(e.target.value)} className={box}>
+                <option value="">— No store —</option>
+                {store && !stores.some((s) => s.name === store) && <option value={store}>{store} (not in Zoho — please change)</option>}
+                {stores.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {storeLabel(s)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="space-y-2">
+            <span className={field}>Alerts to</span>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)} aria-label="E-mail alerts on" />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={box} placeholder="name@sevenyears.in" />
             </label>
-          ))}
-          <button
-            type="button"
-            onClick={() => {
-              onSave(list);
-              setOpen(false);
-            }}
-            className="mt-1 rounded-lg bg-[#161616] px-3 py-1 font-bold text-white"
-          >
-            Save
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={notifyWa} onChange={(e) => setNotifyWa(e.target.checked)} aria-label="WhatsApp alerts on" />
+              <input type="tel" inputMode="numeric" maxLength={10} value={wa} onChange={(e) => setWa(e.target.value)} className={box} placeholder="WhatsApp, 10 digits" />
+            </label>
+          </div>
+        </div>
+
+        {showAccess && (
+          <div className="mt-4">
+            <span className={field}>Extra access (on top of the role)</span>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl bg-white p-3 text-xs ring-1 ring-black/10">
+              {SECTIONS.map((sec) => (
+                <label key={sec.key} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={extra.includes(sec.key)}
+                    onChange={(e) => setExtra((l) => (e.target.checked ? [...l, sec.key] : l.filter((k) => k !== sec.key)))}
+                  />
+                  {sec.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={save} disabled={busy} className="rounded-xl bg-[#ff5e79] px-5 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded-xl px-5 py-2 text-sm font-bold ring-1 ring-black/10">
+            Cancel
           </button>
         </div>
-      )}
-    </div>
+      </td>
+    </tr>
   );
 }
