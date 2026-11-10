@@ -546,3 +546,52 @@ export async function fetchInvoicesForMobile(mobile: string): Promise<{ billNumb
   }
   return bills;
 }
+
+// ------------------------------------------------------------------
+// Field check for the sales-performance dashboard (Super Admin only).
+// Returns field names and numbers only — never customer details.
+// ------------------------------------------------------------------
+export async function zohoSalesProbe(date: string) {
+  const pick = (o: Obj) =>
+    Object.fromEntries(
+      Object.entries(o).filter(([k, v]) => typeof v === "number" || typeof v === "boolean" || /salesperson|location|branch|status|date|discount|type|cn_|credit/i.test(k))
+        .filter(([k]) => !/customer|contact|phone|mobile|email|address|name$/i.test(k) || /salesperson|location|branch/i.test(k))
+    );
+  const out: Record<string, unknown> = {};
+  try {
+    const list = await zohoGet("invoices", { date_start: date, date_end: date, per_page: "3" });
+    const first = arr(list.invoices)[0];
+    out.listKeys = first ? Object.keys(first) : [];
+    out.listSample = first ? pick(first) : null;
+    out.pageContext = list.page_context;
+    if (first) {
+      const d = obj((await zohoGet(`invoices/${str(first.invoice_id)}`)).invoice);
+      out.detailKeys = Object.keys(d);
+      out.detailSample = pick(d);
+      const l = arr(d.line_items)[0];
+      out.lineKeys = l ? Object.keys(l) : [];
+      out.lineSample = l ? pick(l) : null;
+    }
+  } catch (e) {
+    out.invoiceError = e instanceof Error ? e.message : String(e);
+  }
+  for (const path of ["creditnotes", "salesreturns", "salespersons"]) {
+    try {
+      const r = await zohoGet(path, { per_page: "2", ...(path === "salespersons" ? {} : { date_start: date }) });
+      const key = Object.keys(r).find((k) => Array.isArray(r[k]));
+      const first = key ? arr(r[key])[0] : undefined;
+      out[path] = { listKey: key, keys: first ? Object.keys(first) : [], sample: first ? pick(first) : null };
+      if (path === "creditnotes" && first) {
+        const id = str(first.creditnote_id);
+        if (id) {
+          const d = obj((await zohoGet(`creditnotes/${id}`)).creditnote);
+          const l = arr(d.line_items)[0];
+          out.creditnoteDetail = { keys: Object.keys(d), sample: pick(d), lineKeys: l ? Object.keys(l) : [], lineSample: l ? pick(l) : null };
+        }
+      }
+    } catch (e) {
+      out[path] = { error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  return out;
+}
