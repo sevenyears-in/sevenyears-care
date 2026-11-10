@@ -260,7 +260,18 @@ export async function loadTargets(month: string) {
   };
 }
 
-export type Attendance = { duties: number; required: number; remaining: number; absences: number; share: number; found: boolean; noData: number };
+export type Attendance = {
+  /** Days present (punched) plus absent days justified by HR / the Store Manager. */
+  duties: number;
+  /** Of those, days justified (not punched). */
+  justified: number;
+  required: number;
+  remaining: number;
+  absences: number;
+  share: number;
+  found: boolean;
+  noData: number;
+};
 
 async function loadDuties(month: string) {
   const { from, to } = monthRange(month);
@@ -282,13 +293,23 @@ async function loadDuties(month: string) {
     days.get(code)!.add(day);
     withData.add(day);
   }
-  return { days, withData };
+  // Absent days justified by HR or the Store Manager count as duties.
+  const justifiedDays = new Map<string, Set<string>>();
+  const { data: just } = await supabaseAdmin.from("duty_justifications").select("user_id, day").gte("day", from).lte("day", to).limit(10000);
+  for (const j of (just ?? []) as Row[]) {
+    const code = attendanceCode(j.user_id);
+    if (!justifiedDays.has(code)) justifiedDays.set(code, new Set());
+    justifiedDays.get(code)!.add(String(j.day));
+  }
+  return { days, withData, justifiedDays };
 }
 
-function attendanceFor(month: string, days: Set<string> | undefined, withData: Set<string>, required: number): Attendance {
+function attendanceFor(month: string, punched: Set<string> | undefined, justifiedSet: Set<string> | undefined, withData: Set<string>, required: number): Attendance {
   const { days: inMonth } = monthRange(month);
   const today = todayISO();
-  const duties = days?.size ?? 0;
+  const days = new Set<string>([...(punched ?? []), ...(justifiedSet ?? [])]);
+  const justified = [...(justifiedSet ?? [])].filter((d) => !punched?.has(d)).length;
+  const duties = days.size;
   let remaining = 0;
   let past = 0;
   if (today.slice(0, 7) === month) {
@@ -309,7 +330,7 @@ function attendanceFor(month: string, days: Set<string> | undefined, withData: S
   }
   // Absences that can no longer be made up (the 26-duty rule).
   const absences = Math.max(0, required - duties - noData - remaining);
-  return { duties, required, remaining, absences, share: attendanceShare(absences), found: duties > 0, noData };
+  return { duties, justified, required, remaining, absences, share: attendanceShare(absences), found: duties > 0, noData };
 }
 
 // ------------------------------------------------------------------
@@ -450,6 +471,11 @@ type Acc = {
 
 let cache: { key: string; at: number; value: MonthReport } | null = null;
 
+/** After a change (e.g. a duty justified) the next report is worked out again. */
+export function forgetMonthReport() {
+  cache = null;
+}
+
 export async function monthReport(month: string, fresh = false): Promise<MonthReport> {
   if (!fresh && cache && cache.key === month && Date.now() - cache.at < 60_000) return cache.value;
 
@@ -485,7 +511,6 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   const staffById = new Map(staff.map((s) => [s.userId, s]));
   // Corporate Office staff can be given a store whose pool they share.
   const storeOf = (s: StaffRow) => settings.incentiveStores[s.userId]?.toUpperCase() || s.store;
-  const notInIncentive = new Set(staff.filter((s) => s.group === "none").map((s) => s.userId));
   const groupOf = (id: string): IncentiveGroup => staffById.get(id)?.group ?? (isPtCode(id) ? settings.ptPeople[id]?.group ?? "sales" : "sales");
 
   // Bills returned (any time up to now) do not earn per-bill incentives.
@@ -648,7 +673,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
         lines: [],
         lostToReturns: a.lostToReturns,
         lostNotes: [],
-        attendance: attendanceFor(month, duties.days.get(id), duties.withData, settings.dutiesRequired),
+        attendance: attendanceFor(month, duties.days.get(id), duties.justifiedDays.get(id), duties.withData, settings.dutiesRequired),
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,
@@ -712,8 +737,8 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     }
     people.sort((x, y) => y.net - x.net);
 
-    // "Others": bills without a salesperson, or billed by someone who is not in incentive.
-    const others = bills.filter((b) => !b.staff_user_id || notInIncentive.has(b.staff_user_id));
+    // "Others": bills without a salesperson on them.
+    const others = bills.filter((b) => !b.staff_user_id);
     stores.push({
       month,
       store,
@@ -929,4 +954,129 @@ export async function yearlyProgress(userId: string, group: IncentiveGroup, toda
     amount: achievement !== null ? slabFor(r.slabs, achievement)?.amount ?? 0 : 0,
     next: achievement !== null ? nextSlab(r.slabs, achievement) : null,
   }));
+}
+
+// ------------------------------------------------------------------
+// Store trends (for the action plans)
+// ------------------------------------------------------------------
+
+export type DayTotals = { date: string; net: number; bills: number; units: number; gross: number; discount: number };
+export type StoreTrends = {
+  /** Last 28 days up to today (or the month end). */
+  daily: DayTotals[];
+  last7: DayTotals;
+  prev7: DayTotals;
+  /** Average sales by weekday (0 = Sunday). */
+  weekdays: { day: number; avg: number; days: number }[];
+  /** Categories: last 7 days against the 7 before. */
+  categories: { name: string; last7: number; prev7: number; month: number; units: number }[];
+  /** Items sold this month that have no category in Zoho. */
+  uncategorized: { units: number; net: number; items: { name: string; units: number; net: number }[] };
+};
+
+const trendCache = new Map<string, { at: number; value: StoreTrends }>();
+
+export async function storeTrends(month: string, store: string): Promise<StoreTrends> {
+  const key = `${month}|${store}`;
+  const hit = trendCache.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+
+  const { from: mFrom, to: mTo } = monthRange(month);
+  const today = todayISO();
+  const end = today < mTo ? today : mTo;
+  const day = (iso: string, add: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + add * 86_400_000).toISOString().slice(0, 10);
+  const start = day(end, -27);
+  const lineFrom = start < mFrom ? start : mFrom;
+
+  const [bills, lines] = await Promise.all([
+    fetchAll<Row>((a, b) =>
+      supabaseAdmin.from("sales_invoices").select("invoice_date, net, gross, discount, quantity").eq("store", store).gte("invoice_date", start).lte("invoice_date", end).order("invoice_id").range(a, b)
+    ),
+    fetchAll<Row>((a, b) =>
+      supabaseAdmin.from("sales_invoice_lines").select("invoice_date, category, name, quantity, net").eq("store", store).gte("invoice_date", lineFrom).lte("invoice_date", end).order("line_item_id").range(a, b)
+    ),
+  ]);
+
+  const byDay = new Map<string, DayTotals>();
+  for (let i = 27; i >= 0; i--) {
+    const d = day(end, -i);
+    byDay.set(d, { date: d, net: 0, bills: 0, units: 0, gross: 0, discount: 0 });
+  }
+  for (const b of bills) {
+    const d = byDay.get(String(b.invoice_date));
+    if (!d) continue;
+    d.net += n(b.net);
+    d.bills++;
+    d.units += n(b.quantity);
+    d.gross += n(b.gross);
+    d.discount += n(b.discount);
+  }
+  const daily = [...byDay.values()];
+  const sum = (list: DayTotals[], label: string): DayTotals =>
+    list.reduce((t, d) => ({ date: label, net: t.net + d.net, bills: t.bills + d.bills, units: t.units + d.units, gross: t.gross + d.gross, discount: t.discount + d.discount }), {
+      date: label,
+      net: 0,
+      bills: 0,
+      units: 0,
+      gross: 0,
+      discount: 0,
+    });
+  const last7 = sum(daily.slice(-7), "last7");
+  const prev7 = sum(daily.slice(-14, -7), "prev7");
+
+  // Weekdays, only days that had sales (closed days / days not copied are left out).
+  const wd = new Map<number, { total: number; days: number }>();
+  for (const d of daily) {
+    if (!d.bills) continue;
+    const w = new Date(`${d.date}T00:00:00Z`).getUTCDay();
+    const x = wd.get(w) ?? { total: 0, days: 0 };
+    x.total += d.net;
+    x.days++;
+    wd.set(w, x);
+  }
+  const weekdays = [...wd.entries()].map(([w, x]) => ({ day: w, avg: x.total / x.days, days: x.days })).sort((a, b) => b.avg - a.avg);
+
+  const last7From = day(end, -6);
+  const prev7From = day(end, -13);
+  const cats = new Map<string, { name: string; last7: number; prev7: number; month: number; units: number }>();
+  const unc = new Map<string, { name: string; units: number; net: number }>();
+  let uncUnits = 0;
+  let uncNet = 0;
+  for (const l of lines) {
+    const date = String(l.invoice_date);
+    const raw = String(l.category ?? "").trim();
+    if (/carry\s*bag/i.test(raw)) continue;
+    const inMonth = date >= mFrom && date <= mTo;
+    if (!raw) {
+      if (inMonth) {
+        const name = String(l.name || "Item");
+        const u = unc.get(name) ?? { name, units: 0, net: 0 };
+        u.units += n(l.quantity);
+        u.net += n(l.net);
+        unc.set(name, u);
+        uncUnits += n(l.quantity);
+        uncNet += n(l.net);
+      }
+      continue;
+    }
+    const c = cats.get(raw) ?? { name: raw, last7: 0, prev7: 0, month: 0, units: 0 };
+    if (date >= last7From) c.last7 += n(l.net);
+    else if (date >= prev7From) c.prev7 += n(l.net);
+    if (inMonth) {
+      c.month += n(l.net);
+      c.units += n(l.quantity);
+    }
+    cats.set(raw, c);
+  }
+
+  const value: StoreTrends = {
+    daily,
+    last7,
+    prev7,
+    weekdays,
+    categories: [...cats.values()].sort((a, b) => b.month - a.month),
+    uncategorized: { units: uncUnits, net: uncNet, items: [...unc.values()].sort((a, b) => b.units - a.units).slice(0, 15) },
+  };
+  trendCache.set(key, { at: Date.now(), value });
+  return value;
 }

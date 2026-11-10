@@ -5,7 +5,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
-import { loadSalaries, monthReport, personDetail, storePreviousPeriod, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
+import { actionPlans, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
+import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from "@/lib/performance-rules";
 import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
@@ -214,9 +215,10 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     const store = report.stores.find((s) => s.store === teamStore)!;
     // Salary-based view is for management only (not the Store Manager).
     const management = isAdmin(staff.role) || staff.role === "director";
-    const [prev, salaries] = await Promise.all([
+    const [prev, salaries, trends] = await Promise.all([
       storePreviousPeriod(month, store.store, store.daysGone).catch(() => null),
       management ? loadSalaries().catch(() => null) : Promise.resolve(null),
+      storeTrends(month, store.store).catch(() => null),
     ]);
     return (
       <div className="space-y-6">
@@ -231,6 +233,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           prev={prev}
           salaries={salaries ? Object.fromEntries(salaries) : null}
           salesPerSalary={report.settings.salesPerSalary}
+          trends={trends}
         />
       </div>
     );
@@ -251,15 +254,23 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     );
   }
 
-  const [detail, yearly] = await Promise.all([
+  const [detail, yearly, myTrends] = await Promise.all([
     personDetail(month, found.person.userId, report.settings.highDiscountPct / 100, report.rules),
     yearlyProgress(found.person.userId, found.person.group, todayISO()).catch(() => [] as YearlyLine[]),
+    storeTrends(month, found.store.store).catch(() => null),
   ]);
+  const planRole: PlanRole = planRoleOf("", found.person.roleLabel, found.person.group);
+  const myPlan = myTrends ? personalPlan(planRole, found.store, myTrends, found.person) : [];
   return (
     <div className="space-y-6">
       {header}
       {switcher}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
+      {myPlan.length > 0 && (
+        <Panel title={`Action plan — ${PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
+          <PlanList items={myPlan} />
+        </Panel>
+      )}
       {yearly.length > 0 && (
         <Panel title={`Yearly incentives — financial year ${yearly[0].fy}`} intro="April to March. Worked out on the whole year's sales and targets, paid after March.">
           {yearly.map((y) => (
@@ -399,12 +410,14 @@ function PersonView({
         <Tile label="Avg bill (ABV)" value={rupees(p.abv)} note={p.abvTarget ? `Target ${rupees(p.abvTarget)}` : `Team ${rupees(teamAbv)}`} tone={teamAbv && p.abv >= teamAbv ? "good" : "default"} />
         <Tile label="Discount given" value={rupees(p.discount)} note={`${pct(p.discountPct, 1)} of sales · ${p.flaggedBills} bill(s) over ${threshold}%`} tone={p.flaggedBills ? "warn" : "default"} />
         <Tile label="Returns" value={rupees(p.returns)} note={`${p.returnCount} return(s)`} tone={p.returns ? "bad" : "default"} />
+        <Link href={`/staff/performance/duties?u=${encodeURIComponent(p.userId)}&m=${store.month}`} className="block rounded-2xl transition hover:-translate-y-0.5">
         <Tile
-          label="Duties"
+          label="Duties ›"
           value={att.found ? `${att.duties + att.noData}/${att.required}` : "—"}
           note={att.found ? (att.absences ? `${att.absences} short → ${pct(att.share)} paid` : att.noData ? `incl. ${att.noData} day(s) without punching data` : "On track") : "No attendance found"}
           tone={att.absences ? "bad" : "default"}
         />
+        </Link>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -571,6 +584,7 @@ function TeamView({
   prev,
   salaries,
   salesPerSalary,
+  trends,
 }: {
   store: StoreReport;
   base: Search;
@@ -580,7 +594,10 @@ function TeamView({
   prev: PeriodTotals | null;
   salaries: Record<string, number> | null;
   salesPerSalary: number;
+  trends: StoreTrends | null;
 }) {
+  const worth = salaries ? worthOf(store, salaries, salesPerSalary) : null;
+  const dutiesHref = (id: string) => `/staff/performance/duties?u=${encodeURIComponent(id)}&m=${store.month}`;
   const totals = store.people.reduce(
     (t, p) => ({ share: t.share + p.storeShare, bonus: t.bonus + p.bonus, spot: t.spot + p.spotTotal, total: t.total + p.total }),
     { share: 0, bonus: 0, spot: 0, total: 0 }
@@ -612,15 +629,16 @@ function TeamView({
         )}
         {store.othersBills > 0 && (
           <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            ⚑ <b>Others:</b> {store.othersBills} bill(s) worth {short(store.othersNet)} have no salesperson on the bill (or were billed by staff not in incentive). They count for the store but for nobody&apos;s
+            ⚑ <b>Others:</b> {store.othersBills} bill(s) worth {short(store.othersNet)} have no salesperson on the bill. They count for the store but for nobody&apos;s
             sales — the Store Manager should bring this down.
           </p>
         )}
       </section>
 
-      <StoreDashboard store={store} prev={prev} threshold={threshold} labels={labels} />
+      <StoreDashboard store={store} prev={prev} threshold={threshold} labels={labels} trends={trends} />
 
-      {salaries && <StaffWorth store={store} salaries={salaries} salesPerSalary={salesPerSalary} labels={labels} />}
+      {trends && <ActionPlans plans={actionPlans(store, trends, prev)} />}
+
 
       <Panel
         title="Team"
@@ -645,6 +663,13 @@ function TeamView({
                 <th className={`${thc} text-right`}>Bonus</th>
                 <th className={`${thc} text-right`}>Spot</th>
                 <th className={`${thc} text-right`}>Total</th>
+                {worth && (
+                  <>
+                    <th className={`${thc} border-l border-black/10 text-right`}>Salary</th>
+                    <th className={`${thc} text-right`}>Sales per ₹1</th>
+                    <th className={thc}>Worth</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -670,11 +695,20 @@ function TeamView({
                     {p.flaggedBills ? <span className="ml-1 text-xs">⚑{p.flaggedBills}</span> : null}
                   </td>
                   <td className={`${tdc} text-right`}>{p.returns ? rupees(p.returns) : "—"}</td>
-                  <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}>{p.attendance.found ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}</td>
+                  <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}><Link href={dutiesHref(p.userId)} className="underline decoration-dotted underline-offset-2 hover:text-[#5b55c9]">
+                      {p.attendance.found || p.attendance.justified ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}
+                    </Link></td>
                   <td className={`${tdc} text-right`}>{rupees(p.storeShare)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.bonus)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.spotTotal)}</td>
                   <td className={`${tdc} text-right font-bold text-green-700`}>{rupees(p.total)}</td>
+                  {worth && (
+                    <>
+                      <td className={`${tdc} border-l border-black/10 text-right`}>{worth.map.get(p.userId)?.salary ? rupees(worth.map.get(p.userId)!.salary) : "—"}</td>
+                      <td className={`${tdc} text-right font-semibold`}>{worth.map.get(p.userId)?.ratio ? rupees(worth.map.get(p.userId)!.ratio!) : "—"}</td>
+                      <td className={`${tdc} ${worth.map.get(p.userId)?.verdict.cls ?? ""}`}>{worth.map.get(p.userId)?.verdict.text ?? "—"}</td>
+                    </>
+                  )}
                 </tr>
               ))}
               {store.othersBills > 0 && (
@@ -694,7 +728,7 @@ function TeamView({
                     {pct(store.othersGross ? store.othersDiscount / store.othersGross : 0, 1)}
                     {store.othersFlagged ? <span className="ml-1 text-xs">⚑{store.othersFlagged}</span> : null}
                   </td>
-                  <td className={`${tdc} text-right`} colSpan={6}>
+                  <td className={`${tdc} text-right`} colSpan={worth ? 9 : 6}>
                     {pct(store.net > 0 ? store.othersNet / store.invoiceNet : 0, 1)} of store sales
                   </td>
                 </tr>
@@ -707,10 +741,24 @@ function TeamView({
                 <td className={`${tdc} text-right`}>{rupees(totals.bonus)}</td>
                 <td className={`${tdc} text-right`}>{rupees(totals.spot)}</td>
                 <td className={`${tdc} text-right text-green-700`}>{rupees(totals.total)}</td>
+                {worth && <td className={tdc} colSpan={3} />}
               </tr>
             </tbody>
           </table>
         </div>
+        {worth && (
+          <div className="mt-4 rounded-2xl bg-[#8883d7]/[0.06] p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/50">Staff worth — sales against salary (only management sees this)</p>
+            <ul className="mt-2 space-y-1 text-sm">
+              {worth.tips.map((t) => (
+                <li key={t} className="flex gap-2">
+                  <span aria-hidden>📌</span>
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {canExport && (
           <a href={`/api/staff/performance/export?m=${store.month}&store=${encodeURIComponent(store.store)}`} className="mt-4 inline-block rounded-full bg-[#8883d7] px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
             ⬇ Download payout sheet (Excel / CSV)
@@ -770,7 +818,19 @@ function Delta({ now, before, money = false, digits = 0 }: { now: number; before
   );
 }
 
-function StoreDashboard({ store, prev, threshold, labels }: { store: StoreReport; prev: PeriodTotals | null; threshold: number; labels: Partial<Record<IncentiveGroup, string>> }) {
+function StoreDashboard({
+  store,
+  prev,
+  threshold,
+  labels,
+  trends,
+}: {
+  store: StoreReport;
+  prev: PeriodTotals | null;
+  threshold: number;
+  labels: Partial<Record<IncentiveGroup, string>>;
+  trends: StoreTrends | null;
+}) {
   const running = store.daysGone < store.daysInMonth;
   const daysLeft = Math.max(0, store.daysInMonth - store.daysGone);
   const abv = store.bills ? store.net / store.bills : 0;
@@ -806,6 +866,14 @@ function StoreDashboard({ store, prev, threshold, labels }: { store: StoreReport
   if (othersPct > 0.02) act.push({ tone: "bad", text: `${pct(othersPct, 1)} of sales (${short(store.othersNet)}, ${store.othersBills} bills) are “Others” — no salesperson on the bill. Make sure every bill carries the salesperson.` });
   if (discPct > threshold / 100 / 2 || store.flagged.length)
     act.push({ tone: store.flagged.length ? "warn" : "good", text: `Discounts: ${short(store.discount)} (${pct(discPct, 1)} of sales). ${store.flagged.length} bill(s) over ${threshold}%${topDisc && topDisc.discount > 0 ? ` — most by ${topDisc.name} (${rupees(topDisc.discount)})` : ""}.` });
+  if (trends?.uncategorized.units)
+    act.push({
+      tone: "warn",
+      text: `Products not categorised: ${trends.uncategorized.units} item(s) sold this month (${short(trends.uncategorized.net)}) have no category in Zoho — e.g. ${trends.uncategorized.items
+        .slice(0, 4)
+        .map((i) => i.name)
+        .join(", ")}. Ask the back office to set them.`,
+    });
   if (retPct > 0.01) act.push({ tone: "warn", text: `Returns took ${short(store.returns)} (${pct(retPct, 1)} of sales, ${store.returnCount} return(s)). Check why with the team.` });
   if (prevUpb !== null && upb < prevUpb) act.push({ tone: "warn", text: `Items per bill fell to ${upb.toFixed(2)} from ${prevUpb.toFixed(2)}. One more add-on per bill is the quickest way to grow sales.` });
   if (lowUpb && lowUpb.units / lowUpb.bills < upb * 0.8) act.push({ tone: "warn", text: `${lowUpb.name} sells ${(lowUpb.units / lowUpb.bills).toFixed(1)} items per bill (store ${upb.toFixed(1)}) — coach on add-on selling.` });
@@ -844,30 +912,29 @@ function StoreDashboard({ store, prev, threshold, labels }: { store: StoreReport
 // Management only: sales against salary
 // ------------------------------------------------------------------
 
-function StaffWorth({ store, salaries, salesPerSalary, labels }: { store: StoreReport; salaries: Record<string, number>; salesPerSalary: number; labels: Partial<Record<IncentiveGroup, string>> }) {
-  // Salary for the days gone so far, so the middle of the month compares fairly.
+type Worth = { salary: number; ratio: number | null; incentiveShare: number | null; verdict: { text: string; cls: string } };
+
+/** Management only: sales for every ₹1 of salary (salary counted for the days gone so far). */
+function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerSalary: number) {
   const part = store.daysGone / store.daysInMonth || 1;
-  const rows = store.people
-    .map((p) => {
-      const salary = salaries[p.userId] ?? 0;
-      const cost = salary * part;
-      return { p, salary, cost, ratio: cost > 0 ? p.net / cost : null, incentiveShare: salary > 0 ? p.total / salary : null };
-    })
-    .sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1));
-  const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0);
+  const rows = store.people.map((p) => {
+    const salary = salaries[p.userId] ?? 0;
+    const cost = salary * part;
+    return { p, salary, cost, ratio: cost > 0 ? p.net / cost : null, incentiveShare: salary > 0 ? p.total / salary : null };
+  });
+  const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
   const avg = withRatio.length ? withRatio.reduce((s, r) => s + r.p.net, 0) / withRatio.reduce((s, r) => s + r.cost, 0) : 0;
   const totalSalary = rows.reduce((s, r) => s + r.cost, 0);
   const missing = rows.filter((r) => !r.salary).length;
-
   const verdict = (r: (typeof rows)[number]) => {
     if (r.ratio === null) return { text: "Salary not entered", cls: "text-black/35" };
-    if (!r.p.bills) return { text: "No sales (non-selling role?)", cls: "text-black/45" };
+    if (!r.p.bills) return { text: "No sales", cls: "text-black/45" };
     if (salesPerSalary && r.ratio < salesPerSalary) return { text: `Below ${salesPerSalary}× — review`, cls: "font-semibold text-[#d6224a]" };
-    if (avg && r.ratio >= avg * 1.25) return { text: "Star — well above store", cls: "font-semibold text-green-700" };
+    if (avg && r.ratio >= avg * 1.25) return { text: "Star", cls: "font-semibold text-green-700" };
     if (avg && r.ratio < avg * 0.75) return { text: "Below store — watch", cls: "font-semibold text-amber-700" };
-    return { text: "In line with store", cls: "text-black/60" };
+    return { text: "In line", cls: "text-black/60" };
   };
-
+  const map = new Map<string, Worth>(rows.map((r) => [r.p.userId, { salary: r.salary, ratio: r.ratio, incentiveShare: r.incentiveShare, verdict: verdict(r) }]));
   const tips: string[] = [];
   if (totalSalary) tips.push(`Salaries for these ${store.daysGone} days: ${rupees(totalSalary)} — ${pct(totalSalary / Math.max(1, store.net), 1)} of the store's net sales.`);
   if (avg) tips.push(`The store sells ${rupees(avg)} for every ₹1 of salary.`);
@@ -875,49 +942,50 @@ function StaffWorth({ store, salaries, salesPerSalary, labels }: { store: StoreR
   const low = withRatio[withRatio.length - 1];
   if (top && low && top !== low) tips.push(`Best value: ${top.p.name} (${rupees(top.ratio!)} per ₹1). Lowest: ${low.p.name} (${rupees(low.ratio!)} per ₹1).`);
   if (missing) tips.push(`${missing} person(s) have no salary entered (Settings → Sales targets & incentives → Edit targets).`);
+  return { map, tips };
+}
 
+// ------------------------------------------------------------------
+// Action plans
+// ------------------------------------------------------------------
+
+function PlanList({ items }: { items: PlanItem[] }) {
+  const order = { high: 0, medium: 1, good: 2 } as const;
   return (
-    <Panel title="Staff worth — sales against salary" intro="Only management sees this. Salary is counted for the days gone so far.">
-      <ul className="mb-4 space-y-1.5 text-sm">
-        {tips.map((t) => (
-          <li key={t} className="flex gap-2">
-            <span aria-hidden>📌</span>
-            <span>{t}</span>
+    <ol className="space-y-3">
+      {[...items]
+        .sort((a, b) => order[a.priority] - order[b.priority])
+        .map((it, i) => (
+          <li key={`${it.title}-${i}`} className="flex gap-3">
+            <span aria-hidden className="mt-0.5">
+              {it.priority === "high" ? "🔴" : it.priority === "medium" ? "🟠" : "🟢"}
+            </span>
+            <div>
+              <p className="text-sm font-semibold">{it.title}</p>
+              <p className="text-sm text-black/60">{it.detail}</p>
+            </div>
           </li>
         ))}
-      </ul>
-      <div className="-mx-2 overflow-x-auto">
-        <table className="min-w-[860px] text-sm">
-          <thead>
-            <tr>
-              <th className={thc}>Name</th>
-              <th className={thc}>Group</th>
-              <th className={`${thc} text-right`}>Salary / month</th>
-              <th className={`${thc} text-right`}>Net sales</th>
-              <th className={`${thc} text-right`}>Sales per ₹1 salary</th>
-              <th className={`${thc} text-right`}>Incentive % of salary</th>
-              <th className={thc}>Verdict</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const v = verdict(r);
-              return (
-                <tr key={r.p.userId} className="border-t border-black/5">
-                  <td className={`${tdc} font-semibold`}>
-                    {r.p.name} <span className="text-xs font-normal text-black/40">{r.p.userId}</span>
-                  </td>
-                  <td className={`${tdc} text-black/60`}>{groupName(r.p.group, labels)}</td>
-                  <td className={`${tdc} text-right`}>{r.salary ? rupees(r.salary) : "—"}</td>
-                  <td className={`${tdc} text-right`}>{rupees(r.p.net)}</td>
-                  <td className={`${tdc} text-right font-semibold`}>{r.ratio === null ? "—" : rupees(r.ratio)}</td>
-                  <td className={`${tdc} text-right`}>{r.incentiveShare === null ? "—" : pct(r.incentiveShare, 1)}</td>
-                  <td className={`${tdc} ${v.cls}`}>{v.text}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    </ol>
+  );
+}
+
+function ActionPlans({ plans }: { plans: Record<PlanRole, PlanItem[]> }) {
+  const roles: PlanRole[] = ["sm", "asm", "fm", "csa", "cre"];
+  return (
+    <Panel title="Action plans" intro="From this store's sales trend (last 7 days against the 7 before, busiest days, categories rising and falling). Open each role.">
+      <div className="space-y-2">
+        {roles.map((r, i) => (
+          <details key={r} open={i === 0} className="group rounded-2xl ring-1 ring-black/5 open:bg-black/[0.015]">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+              <span className="font-bold">{PLAN_ROLE_LABEL[r]}</span>
+              <span className="text-xs text-black/45">
+                {plans[r].filter((x) => x.priority === "high").length} urgent · {plans[r].length} points <span className="ml-1 inline-block transition group-open:rotate-180">▾</span>
+              </span>
+            </summary>
+            <div className="px-4 pb-4">{plans[r].length ? <PlanList items={plans[r]} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
+          </details>
+        ))}
       </div>
     </Panel>
   );

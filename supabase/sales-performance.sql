@@ -145,3 +145,16 @@ create table if not exists public.staff_salaries (
   updated_by      text
 );
 alter table public.staff_salaries enable row level security;
+
+-- Absent days justified by HR or the Store Manager (they count as duties).
+create table if not exists public.duty_justifications (
+  user_id     text not null,              -- staff User ID or PT code
+  day         date not null,
+  kind        text not null,              -- leave | official | missed_punch | week_off | other
+  reason      text,
+  by_name     text not null,
+  by_role     text,
+  created_at  timestamptz not null default now(),
+  primary key (user_id, day)
+);
+alter table public.duty_justifications enable row level security;

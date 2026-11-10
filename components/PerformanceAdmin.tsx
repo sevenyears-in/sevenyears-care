@@ -577,7 +577,7 @@ function TargetsCard(props: {
           <div>
             <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
               <h3 className="text-base font-bold">{groupName("none", settings.groupLabels)}</h3>
-              <span className="text-sm text-black/55">No incentive and no targets. Their bills count for the store as “Others”.</span>
+              <span className="text-sm text-black/55">Management and office staff: no incentive and no targets.</span>
             </div>
             <ul className="divide-y divide-black/5 rounded-2xl ring-1 ring-black/5">
               {notIn.map((p) => (
