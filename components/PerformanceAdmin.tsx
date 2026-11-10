@@ -94,13 +94,23 @@ function SyncCard({ month, today, settings, billsCopied, lastBillDate }: { month
         if (date > today) break;
         for (let round = 0; round < 40; round++) {
           setLog(`Copying ${fmtDate(date)}… (${bills} bills, ${returns} returns so far)`);
-          const r = await post({ action: "sync", date });
+          let r: { billsSaved?: number; returnsSaved?: number; returnsError?: string; pending?: number } = {};
+          for (let attempt = 1; ; attempt++) {
+            try {
+              r = await post({ action: "sync", date });
+              break;
+            } catch (e) {
+              if (attempt >= 4) throw e;
+              setLog(`Zoho is busy — waiting a minute, then going on with ${fmtDate(date)}…`);
+              await new Promise((z) => setTimeout(z, 60_000));
+            }
+          }
           bills += r.billsSaved ?? 0;
           returns += r.returnsSaved ?? 0;
           if (r.returnsError) rErr = r.returnsError;
           if (!r.pending) break;
           // stay well inside Zoho's per-minute limit
-          await new Promise((z) => setTimeout(z, 20_000));
+          await new Promise((z) => setTimeout(z, 30_000));
         }
       }
       setReturnsError(rErr);

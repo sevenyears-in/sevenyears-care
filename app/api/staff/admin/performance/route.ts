@@ -194,7 +194,7 @@ export async function POST(request: Request) {
       const date = isDate(body.date) ? body.date : todayISO();
       if (date > todayISO()) return NextResponse.json({ date, bills: 0, billsSaved: 0, returns: 0, returnsSaved: 0, pending: 0 });
       try {
-        const result = await syncSalesDay(date, 40);
+        const result = await syncSalesDay(date, 30);
         if (date === todayISO() || result.pending === 0) {
           await savePerformanceSettings({ lastSyncAt: new Date().toISOString(), returnsError: result.returnsError ?? null });
         }

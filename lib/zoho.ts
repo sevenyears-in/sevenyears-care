@@ -82,6 +82,7 @@ export async function saveZohoSettings(value: Record<string, unknown>) {
     .upsert({ key: ZOHO_SETTINGS_KEY, value, updated_at: new Date().toISOString() });
   if (error) throw error;
   cachedToken = null;
+  await supabaseAdmin.from("app_settings").upsert({ key: TOKEN_KEY, value: {}, updated_at: new Date().toISOString() });
 }
 
 /** .env.local values win; otherwise the connection saved in the app is used. */
@@ -107,9 +108,33 @@ export async function zohoConfigured() {
 // ------------------------------------------------------------------
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
+let tokenInFlight: Promise<string> | null = null;
+let badToken = "";
+let tokenBlockedUntil = 0;
+const TOKEN_KEY = "zoho_token";
 
+// Zoho allows only a few sign-ins (new access tokens) in a short time, so:
+// one sign-in at a time, and the token is kept in the database for every server process.
 async function accessToken() {
   if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
+  if (!tokenInFlight) tokenInFlight = fetchToken().finally(() => (tokenInFlight = null));
+  return tokenInFlight;
+}
+
+async function fetchToken(): Promise<string> {
+  try {
+    const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", TOKEN_KEY).maybeSingle();
+    const saved = (data?.value ?? {}) as { value?: string; expiresAt?: number };
+    if (saved.value && saved.value !== badToken && (saved.expiresAt ?? 0) > Date.now() + 60_000) {
+      cachedToken = { value: saved.value, expiresAt: saved.expiresAt as number };
+      return saved.value;
+    }
+  } catch {
+    /* fall through to a new sign-in */
+  }
+  if (Date.now() < tokenBlockedUntil) {
+    throw new ZohoError("Zoho POS is busy right now (too many sign-ins). Please try again in a few minutes.");
+  }
 
   const config = await zohoConfig();
   const params = new URLSearchParams({
@@ -133,12 +158,17 @@ async function accessToken() {
     access_token?: string;
     expires_in?: number;
     error?: string;
+    error_description?: string;
   };
 
   if (!response.ok || !data.access_token) {
-    console.error("Zoho token error:", data);
+    console.error("Zoho token error:", response.status, data);
+    if (/access denied|too many/i.test(`${data.error ?? ""} ${data.error_description ?? ""}`)) {
+      tokenBlockedUntil = Date.now() + 3 * 60_000;
+      throw new ZohoError("Zoho POS is busy right now (too many sign-ins). Please try again in a few minutes.");
+    }
     throw new ZohoError(
-      `Could not connect to Zoho POS (${data.error ?? response.status}). Check the Zoho keys in .env.local.`
+      `Could not connect to Zoho POS (${data.error ?? response.status}). Check the Zoho connection.`
     );
   }
 
@@ -146,6 +176,13 @@ async function accessToken() {
     value: data.access_token,
     expiresAt: Date.now() + Math.max(60, (data.expires_in ?? 3600) - 300) * 1000,
   };
+  await supabaseAdmin
+    .from("app_settings")
+    .upsert({ key: TOKEN_KEY, value: cachedToken, updated_at: new Date().toISOString() })
+    .then(
+      () => undefined,
+      () => undefined
+    );
   return cachedToken.value;
 }
 
@@ -172,7 +209,10 @@ async function zohoGet(path: string, query: Record<string, string> = {}): Promis
 
   const data = (await response.json().catch(() => ({}))) as ZohoJson;
 
-  if (response.status === 401) cachedToken = null;
+  if (response.status === 401) {
+    badToken = cachedToken?.value ?? badToken;
+    cachedToken = null;
+  }
 
   if (!response.ok || (typeof data.code === "number" && data.code !== 0)) {
     console.error(`Zoho GET ${path} failed:`, response.status, data);
