@@ -4,7 +4,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
-import { loadPerformanceSettings } from "@/lib/performance-settings";
+import { loadIncentiveRules, loadPerformanceSettings } from "@/lib/performance-settings";
+import { assignPtCodesForSavedBills } from "@/lib/sales-sync";
 import { loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
 import { isMonth, monthRange } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
@@ -21,7 +22,9 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   const thisMonth = todayISO().slice(0, 7);
   const month = isMonth(sp.m) ? sp.m : thisMonth;
 
-  const [settings, people, targets, promos, storeList, report, counts] = await Promise.all([
+  // Daily-wages salespeople (no employee code) get PT1, PT2 … before anything is shown.
+  await assignPtCodesForSavedBills().catch(() => undefined);
+  const [settings, people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadPerformanceSettings(),
     loadStaffForPerformance(),
     loadTargets(month),
@@ -29,7 +32,15 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
     getStores().catch(() => ({ stores: [] as { name: string }[] })),
     monthReport(month, true).catch(() => null),
     supabaseAdmin.from("sales_invoices").select("invoice_id", { count: "exact", head: true }).gte("invoice_date", monthRange(month).from).lte("invoice_date", monthRange(month).to),
+    loadIncentiveRules(),
   ]);
+
+  // PT staff: their store is where they sold most this month.
+  const ptStore = new Map<string, string>();
+  for (const s of report?.stores ?? []) for (const p of s.people) if (p.isPt) ptStore.set(p.userId, s.store);
+  const ptPeople = Object.entries(settings.ptPeople)
+    .sort(([a], [b]) => Number(a.slice(2)) - Number(b.slice(2)))
+    .map(([code, p]) => ({ id: code, userId: code, name: p.name, store: ptStore.get(code) ?? null, group: p.group ?? ("sales" as const), isPt: true }));
 
   const stores = [
     ...new Set([
@@ -44,7 +55,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Settings</p>
           <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Sales targets &amp; incentives</h1>
-          <p className="mt-1 text-sm text-black/55">Targets, discount limit, Slow-moving and Buy 2 Get 1 products, and copying bills from Zoho POS.</p>
+          <p className="mt-1 text-sm text-black/55">Targets, incentives, products, group names, discount limit and copying bills from Zoho POS.</p>
         </div>
         <Link href="/staff/performance?view=team" className="rounded-full bg-[#8883d7] px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
           📈 Open the dashboard
@@ -56,13 +67,14 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         today={todayISO()}
         settings={settings}
         stores={stores}
-        people={people.map((p) => ({ id: p.id, userId: p.userId, name: p.name, roleLabel: p.roleLabel, store: p.store, group: p.group, groupChosen: p.groupChosen }))}
+        people={[...people.map((p) => ({ id: p.id, userId: p.userId, name: p.name, store: p.store, group: p.group, isPt: false })), ...ptPeople]}
         targets={Object.fromEntries([...targets.staff.entries()])}
         storeMonthTargets={Object.fromEntries([...targets.stores.entries()])}
         promos={(promos.data ?? []) as { id: number; kind: "slow_moving" | "b2g1"; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null }[]}
         unlinked={report?.unlinked ?? []}
         billsCopied={counts.count ?? 0}
         lastBillDate={report?.lastBillDate ?? null}
+        rules={rules}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 // Sales performance: targets, achievement, incentives earned and lost. Server only.
 // Numbers come from the bills and returns copied from Zoho POS (lib/sales-sync.ts).
+// The incentive schemes come from Settings (lib/incentive-rules.ts), each with its own dates.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
@@ -7,26 +8,24 @@ import { asRole, ROLE_LABELS } from "@/lib/roles";
 import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
-import { loadPerformanceSettings } from "@/lib/performance-settings";
+import { loadIncentiveRules, loadPerformanceSettings } from "@/lib/performance-settings";
+import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
-  ABV_GROUPS,
-  abvBonus,
-  attendanceShare,
-  defaultGroup,
-  individualBonus,
-  INDIVIDUAL_BONUS_GROUPS,
-  isGroup,
-  MANAGER_SPLIT,
-  monthRange,
-  nextIndividualSlab,
-  nextStoreSlab,
-  POOL_SPLIT,
-  slowMovingReward,
-  SPOT,
-  storePoolRate,
-  type IncentiveGroup,
-  type PerformanceSettings,
-} from "@/lib/performance-rules";
+  abvAmount,
+  inForce,
+  nextSlab,
+  rulesOn,
+  slabFor,
+  type AbvRule,
+  type AchievementRule,
+  type BillValueRule,
+  type IncentiveRule,
+  type ProductUnitsRule,
+  type ProductValueRule,
+  type RuleKind,
+  type StorePoolRule,
+  type WowRule,
+} from "@/lib/incentive-rules";
 
 // ------------------------------------------------------------------
 // Loading
@@ -76,7 +75,7 @@ export type ReturnRow = {
   net: number;
 };
 
-type PromoRow = { id: number; kind: "slow_moving" | "b2g1"; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
+type PromoRow = { id: number; kind: string; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
 
 const INVOICE_COLS =
   "invoice_id, invoice_number, invoice_date, store, salesperson, staff_user_id, gross, discount, net, total, quantity, line_count, category_count, units_under_5k, max_line_share";
@@ -103,7 +102,22 @@ function normInvoice(r: Row): InvoiceRow {
   };
 }
 
-async function loadMonth(month: string) {
+function normReturn(r: Row): ReturnRow {
+  return {
+    creditnote_id: String(r.creditnote_id),
+    creditnote_number: String(r.creditnote_number ?? ""),
+    return_date: String(r.return_date),
+    store: (r.store as string) ?? null,
+    staff_user_id: (r.staff_user_id as string) ?? null,
+    invoice_id: (r.invoice_id as string) ?? null,
+    invoice_number: (r.invoice_number as string) ?? null,
+    net: n(r.net),
+  };
+}
+
+const overlaps = (r: Pick<IncentiveRule, "from" | "to">, from: string, to: string) => (!r.from || r.from <= to) && (!r.to || r.to >= from);
+
+async function loadMonth(month: string, lists: string[]) {
   const { from, to } = monthRange(month);
   const [invoices, returns, promos] = await Promise.all([
     fetchAll<Row>((a, b) =>
@@ -118,30 +132,19 @@ async function loadMonth(month: string) {
         .order("creditnote_id")
         .range(a, b)
     ),
-    supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").limit(5000),
+    lists.length
+      ? supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", lists).limit(10000)
+      : Promise.resolve({ data: [] as PromoRow[] }),
   ]);
   return {
     invoices: invoices.map(normInvoice),
-    returns: returns.map((r) => ({
-      creditnote_id: String(r.creditnote_id),
-      creditnote_number: String(r.creditnote_number ?? ""),
-      return_date: String(r.return_date),
-      store: (r.store as string) ?? null,
-      staff_user_id: (r.staff_user_id as string) ?? null,
-      invoice_id: (r.invoice_id as string) ?? null,
-      invoice_number: (r.invoice_number as string) ?? null,
-      net: n(r.net),
-    })) as ReturnRow[],
-    promos: ((promos.data ?? []) as PromoRow[]).filter((p) => {
-      // active at some point in this month
-      const { from: mf, to: mt } = monthRange(month);
-      return (!p.from_date || p.from_date <= mt) && (!p.to_date || p.to_date >= mf);
-    }),
+    returns: returns.map(normReturn),
+    promos: ((promos.data ?? []) as PromoRow[]).filter((p) => (!p.from_date || p.from_date <= to) && (!p.to_date || p.to_date >= from)),
   };
 }
 
-/** Promo lines (Slow-moving / B2G1) sold and returned in the month. */
-async function loadPromoLines(month: string, promos: PromoRow[]) {
+/** Lines of listed products sold and returned in the month. */
+async function loadPromoLines(month: string, promos: PromoRow[], userId?: string) {
   const { from, to } = monthRange(month);
   const ids = [...new Set(promos.map((p) => p.item_id).filter(Boolean) as string[])];
   const skus = [...new Set(promos.filter((p) => !p.item_id && p.sku).map((p) => p.sku as string))];
@@ -151,51 +154,66 @@ async function loadPromoLines(month: string, promos: PromoRow[]) {
   for (const [col, values] of [["item_id", ids], ["sku", skus]] as const) {
     for (const part of chunks(values)) {
       sold.push(
-        ...(await fetchAll<Row>((a, b) =>
-          supabaseAdmin
+        ...(await fetchAll<Row>((a, b) => {
+          let q = supabaseAdmin
             .from("sales_invoice_lines")
             .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net")
             .in(col, part)
             .gte("invoice_date", from)
-            .lte("invoice_date", to)
-            .order("line_item_id")
-            .range(a, b)
-        ))
+            .lte("invoice_date", to);
+          if (userId) q = q.eq("staff_user_id", userId);
+          return q.order("line_item_id").range(a, b);
+        }))
       );
       back.push(
-        ...(await fetchAll<Row>((a, b) =>
-          supabaseAdmin
+        ...(await fetchAll<Row>((a, b) => {
+          let q = supabaseAdmin
             .from("sales_return_lines")
             .select("return_date, staff_user_id, store, item_id, sku, quantity, net")
             .in(col, part)
             .gte("return_date", from)
-            .lte("return_date", to)
-            .order("line_item_id")
-            .range(a, b)
-        ))
+            .lte("return_date", to);
+          if (userId) q = q.eq("staff_user_id", userId);
+          return q.order("line_item_id").range(a, b);
+        }))
       );
     }
   }
   return { sold, back };
 }
 
-function promoKind(promos: PromoRow[], line: Row, date: string) {
-  const kinds = new Set<string>();
+/** Product lists a line belongs to on that day. */
+function listsOf(promos: PromoRow[], line: Row, date: string) {
+  const lists = new Set<string>();
   for (const p of promos) {
     const match = (p.item_id && p.item_id === line.item_id) || (!p.item_id && p.sku && p.sku === line.sku);
     if (!match) continue;
     if (p.from_date && date < p.from_date) continue;
     if (p.to_date && date > p.to_date) continue;
-    kinds.add(p.kind);
+    lists.add(p.kind);
   }
-  return kinds;
+  return lists;
+}
+
+/** Discount on the free items of offers (e.g. Buy 2 Get 1), per bill: not a staff discount. */
+function offerDiscounts(rules: IncentiveRule[], promos: PromoRow[], sold: Row[]) {
+  const out = new Map<string, number>();
+  const offers = rules.filter((r): r is ProductUnitsRule => r.kind === "product_units" && r.freeNotDiscount);
+  for (const l of sold) {
+    const date = String(l.invoice_date);
+    const lists = listsOf(promos, l, date);
+    if (!offers.some((r) => inForce(r, date) && lists.has(r.list))) continue;
+    const id = String(l.invoice_id);
+    out.set(id, (out.get(id) ?? 0) + n(l.discount));
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------
 // Staff, targets, attendance
 // ------------------------------------------------------------------
 
-type StaffRow = {
+export type StaffRow = {
   id: string;
   userId: string;
   name: string;
@@ -293,16 +311,46 @@ function attendanceFor(month: string, days: Set<string> | undefined, withData: S
 }
 
 // ------------------------------------------------------------------
+// Bill rules
+// ------------------------------------------------------------------
+
+export function isWowBill(b: InvoiceRow, r: WowRule) {
+  return b.total >= r.minBill && b.quantity >= r.minItems && b.category_count >= r.minCategories && b.units_under_5k >= r.minCheap && b.max_line_share <= r.maxShare;
+}
+
+/** Why a bill is not a WOW bill (empty when it is). */
+export function wowGaps(b: InvoiceRow, r: WowRule) {
+  const gaps: string[] = [];
+  if (b.total < r.minBill) gaps.push(`bill below ₹${r.minBill.toLocaleString("en-IN")}`);
+  if (b.quantity < r.minItems) gaps.push(`${r.minItems - b.quantity} more item(s)`);
+  if (b.category_count < r.minCategories) {
+    const k = r.minCategories - b.category_count;
+    gaps.push(`${k} more categor${k === 1 ? "y" : "ies"}`);
+  }
+  if (b.units_under_5k < r.minCheap) gaps.push(`${r.minCheap - b.units_under_5k} more item(s) under ₹5,000`);
+  if (b.max_line_share > r.maxShare) gaps.push(`one item is ${Math.round(b.max_line_share * 100)}% of the bill (max ${Math.round(r.maxShare * 100)}%)`);
+  return gaps;
+}
+
+const billQualifies = (b: InvoiceRow, r: BillValueRule | WowRule) => (r.kind === "bill_value" ? b.total >= r.minBill : isWowBill(b, r));
+
+export const discountShare = (b: { gross: number; discount: number }) => (b.gross > 0 ? b.discount / b.gross : 0);
+
+const shortDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** "WOW bill (from 15 Nov)" when a version starts or ends inside the month. */
+function versionName(r: IncentiveRule, from: string, to: string) {
+  const bits: string[] = [];
+  if (r.from && r.from > from && r.from <= to) bits.push(`from ${shortDate(r.from)}`);
+  if (r.to && r.to >= from && r.to < to) bits.push(`until ${shortDate(r.to)}`);
+  return bits.length ? `${r.name} (${bits.join(", ")})` : r.name;
+}
+
+// ------------------------------------------------------------------
 // Report
 // ------------------------------------------------------------------
 
-export type Spot = {
-  highValue: { count: number; amount: number; returned: number };
-  wow: { count: number; amount: number; returned: number };
-  b2g1: { units: number; amount: number };
-  slowMoving: { value: number; amount: number };
-  total: number;
-};
+export type IncentiveLine = { ruleId: string; name: string; kind: RuleKind; note: string; amount: number };
 
 export type PersonReport = {
   staffId: string | null;
@@ -311,6 +359,7 @@ export type PersonReport = {
   roleLabel: string;
   group: IncentiveGroup;
   store: string | null;
+  isPt: boolean;
   bills: number;
   units: number;
   gross: number;
@@ -326,14 +375,18 @@ export type PersonReport = {
   abvTarget: number | null;
   achievement: number | null;
   storeShare: number;
-  individualBonus: number;
-  abvBonus: number;
-  spot: Spot;
+  /** Target and ABV bonuses. */
+  bonus: number;
+  /** Per-bill and product incentives. */
+  spotTotal: number;
+  /** Every incentive (other than the store pool) this person can earn this month. */
+  lines: IncentiveLine[];
+  lostToReturns: number;
+  lostNotes: string[];
   attendance: Attendance;
   earnedBeforeAttendance: number;
   attendanceCut: number;
   total: number;
-  lostToReturns: number;
 };
 
 export type StoreReport = {
@@ -347,6 +400,7 @@ export type StoreReport = {
   net: number;
   bills: number;
   achievement: number;
+  poolName: string | null;
   poolRate: number;
   pool: number;
   nextSlab: { from: number; rate: number; needed: number } | null;
@@ -361,113 +415,100 @@ export type StoreReport = {
 export type MonthReport = {
   month: string;
   settings: PerformanceSettings;
+  /** Incentives in force at some point in the month. */
+  rules: IncentiveRule[];
   stores: StoreReport[];
-  /** Zoho salesperson names that are not linked to any staff User ID. */
+  /** Zoho salesperson names whose User ID no active staff member has. */
   unlinked: { name: string; net: number; bills: number }[];
   lastBillDate: string | null;
 };
 
-const emptySpot = (): Spot => ({
-  highValue: { count: 0, amount: 0, returned: 0 },
-  wow: { count: 0, amount: 0, returned: 0 },
-  b2g1: { units: 0, amount: 0 },
-  slowMoving: { value: 0, amount: 0 },
-  total: 0,
-});
-
-export function isWowBill(b: InvoiceRow) {
-  return (
-    b.total >= SPOT.wowBill &&
-    b.quantity >= SPOT.wowMinUnits &&
-    b.category_count >= SPOT.wowMinCategories &&
-    b.units_under_5k >= SPOT.wowMinUnder5k &&
-    b.max_line_share <= SPOT.wowMaxShare
-  );
-}
-
-/** Why a ₹10,000+ bill is not a WOW bill (empty when it is). */
-export function wowGaps(b: InvoiceRow) {
-  const gaps: string[] = [];
-  if (b.total < SPOT.wowBill) gaps.push(`bill below ₹10,000`);
-  if (b.quantity < SPOT.wowMinUnits) gaps.push(`${SPOT.wowMinUnits - b.quantity} more item(s)`);
-  if (b.category_count < SPOT.wowMinCategories) gaps.push(`${SPOT.wowMinCategories - b.category_count} more categor${SPOT.wowMinCategories - b.category_count === 1 ? "y" : "ies"}`);
-  if (b.units_under_5k < SPOT.wowMinUnder5k) gaps.push(`${SPOT.wowMinUnder5k - b.units_under_5k} more item(s) under ₹5,000`);
-  if (b.max_line_share > SPOT.wowMaxShare) gaps.push(`one item is ${Math.round(b.max_line_share * 100)}% of the bill (max 60%)`);
-  return gaps;
-}
-
-export const discountShare = (b: { gross: number; discount: number }) => (b.gross > 0 ? b.discount / b.gross : 0);
+type Acc = {
+  bills: number;
+  units: number;
+  gross: number;
+  discount: number;
+  invoiceNet: number;
+  returns: number;
+  returnCount: number;
+  flaggedBills: number;
+  stores: Map<string, number>;
+  /** per rule: count / units / value and amount */
+  per: Map<string, { count: number; amount: number; units: number; value: number; lost: number; lostCount: number }>;
+  lostToReturns: number;
+};
 
 let cache: { key: string; at: number; value: MonthReport } | null = null;
 
 export async function monthReport(month: string, fresh = false): Promise<MonthReport> {
   if (!fresh && cache && cache.key === month && Date.now() - cache.at < 60_000) return cache.value;
 
-  const settings = await loadPerformanceSettings();
+  const { from: mFrom, to: mTo, days: daysInMonth } = monthRange(month);
+  const [settings, allRules] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
+  const rules = allRules.filter((r) => overlaps(r, mFrom, mTo));
+  const monthly = rulesOn(rules, mTo);
+  const billRules = rules.filter((r): r is BillValueRule | WowRule => r.kind === "bill_value" || r.kind === "wow");
+  const unitRules = rules.filter((r): r is ProductUnitsRule => r.kind === "product_units");
+  const valueRules = monthly.filter((r): r is ProductValueRule => r.kind === "product_value");
+  const achRules = monthly.filter((r): r is AchievementRule => r.kind === "achievement");
+  const abvRules = monthly.filter((r): r is AbvRule => r.kind === "abv");
+  const poolRule = monthly.find((r): r is StorePoolRule => r.kind === "store_pool") ?? null;
+  const lists = [...new Set([...unitRules.map((r) => r.list), ...valueRules.map((r) => r.list)])];
+
   const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties] = await Promise.all([
-    loadMonth(month),
+    loadMonth(month, lists),
     loadStaffForPerformance(),
     loadTargets(month),
     loadDuties(month),
   ]);
   const promoLines = promos.length ? await loadPromoLines(month, promos) : { sold: [], back: [] };
 
-  // The free item of a Buy 2 Get 1 offer is a promotion, not a discount given by staff.
-  const promoDiscount = new Map<string, number>();
-  for (const l of promoLines.sold) {
-    if (!promoKind(promos, l, String(l.invoice_date)).has("b2g1")) continue;
-    const id = String(l.invoice_id);
-    promoDiscount.set(id, (promoDiscount.get(id) ?? 0) + n(l.discount));
-  }
-  const invoices = rawInvoices.map((b) => (promoDiscount.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (promoDiscount.get(b.invoice_id) ?? 0)) } : b));
+  // The free item of an offer (e.g. Buy 2 Get 1) is a promotion, not a discount given by staff.
+  const offerDisc = offerDiscounts(rules, promos, promoLines.sold);
+  const invoices = rawInvoices.map((b) => (offerDisc.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (offerDisc.get(b.invoice_id) ?? 0)) } : b));
 
   const excluded = new Set(settings.excludedStores.map((s) => s.toUpperCase()));
-  const { days: daysInMonth } = monthRange(month);
   const today = todayISO();
   const daysGone = today.slice(0, 7) > month ? daysInMonth : today.slice(0, 7) < month ? 0 : Number(today.slice(8, 10));
+  const threshold = settings.highDiscountPct / 100;
 
-  // Bills returned (any time up to now) do not earn spot incentives.
-  const candidates = invoices.filter((b) => b.total >= SPOT.wowBill).map((b) => b.invoice_id);
+  const staffById = new Map(staff.map((s) => [s.userId, s]));
+  const groupOf = (id: string): IncentiveGroup => staffById.get(id)?.group ?? (isPtCode(id) ? settings.ptPeople[id]?.group ?? "sales" : "sales");
+
+  // Bills returned (any time up to now) do not earn per-bill incentives.
+  const lowest = Math.min(Infinity, ...billRules.map((r) => r.minBill));
+  const candidates = invoices.filter((b) => b.total >= lowest).map((b) => b.invoice_id);
   const returnedBills = new Set<string>();
   for (let i = 0; i < candidates.length; i += 200) {
     const { data } = await supabaseAdmin.from("sales_returns").select("invoice_id").in("invoice_id", candidates.slice(i, i + 200));
     for (const r of data ?? []) if (r.invoice_id) returnedBills.add(String(r.invoice_id));
   }
 
-  // ---- Per person (by User ID)
-  type Acc = Omit<PersonReport, "staffId" | "name" | "roleLabel" | "group" | "store" | "target" | "abvTarget" | "achievement" | "storeShare" | "individualBonus" | "abvBonus" | "attendance" | "earnedBeforeAttendance" | "attendanceCut" | "total" | "abv" | "discountPct" | "net"> & { stores: Map<string, number> };
   const acc = new Map<string, Acc>();
   const get = (id: string) => {
-    if (!acc.has(id)) {
-      acc.set(id, { userId: id, bills: 0, units: 0, gross: 0, discount: 0, invoiceNet: 0, returns: 0, returnCount: 0, flaggedBills: 0, spot: emptySpot(), lostToReturns: 0, stores: new Map() });
-    }
+    if (!acc.has(id)) acc.set(id, { bills: 0, units: 0, gross: 0, discount: 0, invoiceNet: 0, returns: 0, returnCount: 0, flaggedBills: 0, stores: new Map(), per: new Map(), lostToReturns: 0 });
     return acc.get(id)!;
   };
-  const threshold = settings.highDiscountPct / 100;
+  const per = (a: Acc, ruleId: string) => {
+    if (!a.per.has(ruleId)) a.per.set(ruleId, { count: 0, amount: 0, units: 0, value: 0, lost: 0, lostCount: 0 });
+    return a.per.get(ruleId)!;
+  };
+
   const unlinked = new Map<string, { name: string; net: number; bills: number }>();
-  const knownIds = new Set(staff.map((s) => s.userId));
   const spName = new Map<string, string>();
 
   for (const b of invoices) {
-    // A User ID on the bill that no active staff member has (e.g. "1035 - FEBIN" for 1043) also needs linking.
-    if (b.staff_user_id && !knownIds.has(b.staff_user_id) && b.salesperson) {
+    const id = b.staff_user_id;
+    if (id && !staffById.has(id) && !isPtCode(id) && b.salesperson) {
+      // A User ID on the bill that no active staff member has (e.g. an old code).
       const u = unlinked.get(b.salesperson) ?? { name: b.salesperson, net: 0, bills: 0 };
       u.net += b.net;
       u.bills++;
       unlinked.set(b.salesperson, u);
     }
-    if (b.staff_user_id && b.salesperson && !spName.has(b.staff_user_id)) spName.set(b.staff_user_id, b.salesperson);
-    if (!b.staff_user_id) {
-      const key = b.salesperson?.trim() || "";
-      if (key) {
-        const u = unlinked.get(key) ?? { name: key, net: 0, bills: 0 };
-        u.net += b.net;
-        u.bills++;
-        unlinked.set(key, u);
-      }
-      continue;
-    }
-    const a = get(b.staff_user_id);
+    if (!id) continue;
+    if (b.salesperson && !spName.has(id)) spName.set(id, b.salesperson);
+    const a = get(id);
     a.bills++;
     a.units += b.quantity;
     a.gross += b.gross;
@@ -475,23 +516,18 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     a.invoiceNet += b.net;
     if (b.store) a.stores.set(b.store, (a.stores.get(b.store) ?? 0) + b.net);
     if (discountShare(b) > threshold) a.flaggedBills++;
+    const g = groupOf(id);
     const returned = returnedBills.has(b.invoice_id);
-    if (b.total >= SPOT.highValueBill) {
+    for (const r of billRules) {
+      if (!inForce(r, b.invoice_date) || !r.groups.includes(g) || !billQualifies(b, r)) continue;
+      const p = per(a, r.id);
       if (returned) {
-        a.spot.highValue.returned++;
-        a.lostToReturns += SPOT.highValueReward;
+        p.lost += r.amount;
+        p.lostCount++;
+        a.lostToReturns += r.amount;
       } else {
-        a.spot.highValue.count++;
-        a.spot.highValue.amount += SPOT.highValueReward;
-      }
-    }
-    if (isWowBill(b)) {
-      if (returned) {
-        a.spot.wow.returned++;
-        a.lostToReturns += SPOT.wowReward;
-      } else {
-        a.spot.wow.count++;
-        a.spot.wow.amount += SPOT.wowReward;
+        p.count++;
+        p.amount += r.amount;
       }
     }
   }
@@ -501,28 +537,34 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     a.returns += r.net;
     a.returnCount++;
   }
-  // Promo products
-  const slowValue = new Map<string, number>();
+  // Listed products
   for (const l of promoLines.sold) {
     const id = l.staff_user_id ? String(l.staff_user_id) : null;
     if (!id) continue;
-    const kinds = promoKind(promos, l, String(l.invoice_date));
-    if (kinds.has("b2g1")) get(id).spot.b2g1.units += n(l.quantity);
-    if (kinds.has("slow_moving")) slowValue.set(id, (slowValue.get(id) ?? 0) + n(l.net));
+    const date = String(l.invoice_date);
+    const inLists = listsOf(promos, l, date);
+    const g = groupOf(id);
+    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units += n(l.quantity);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value += n(l.net);
   }
   for (const l of promoLines.back) {
     const id = l.staff_user_id ? String(l.staff_user_id) : null;
     if (!id) continue;
-    const kinds = promoKind(promos, l, String(l.return_date));
-    if (kinds.has("b2g1")) get(id).spot.b2g1.units -= n(l.quantity);
-    if (kinds.has("slow_moving")) slowValue.set(id, (slowValue.get(id) ?? 0) - n(l.net));
+    const date = String(l.return_date);
+    const inLists = listsOf(promos, l, date);
+    const g = groupOf(id);
+    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units -= n(l.quantity);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value -= n(l.net);
   }
   for (const a of acc.values()) {
-    a.spot.b2g1.units = Math.max(0, a.spot.b2g1.units);
-    a.spot.b2g1.amount = a.spot.b2g1.units * SPOT.b2g1PerUnit;
-    const sv = Math.max(0, slowValue.get(a.userId) ?? 0);
-    a.spot.slowMoving = { value: sv, amount: slowMovingReward(sv) };
-    a.spot.total = a.spot.highValue.amount + a.spot.wow.amount + a.spot.b2g1.amount + a.spot.slowMoving.amount;
+    for (const r of unitRules) {
+      const p = a.per.get(r.id);
+      if (p) p.amount = Math.max(0, p.units) * r.amount;
+    }
+    for (const r of valueRules) {
+      const p = a.per.get(r.id);
+      if (p) p.amount = slabFor(r.slabs, Math.max(0, p.value))?.amount ?? 0;
+    }
   }
 
   // ---- Stores
@@ -531,7 +573,6 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   for (const b of invoices) if (b.store) storeNames.add(b.store);
   for (const s of [...storeNames]) if (excluded.has(s) || s === CORPORATE_OFFICE) storeNames.delete(s);
 
-  const staffById = new Map(staff.map((s) => [s.userId, s]));
   const stores: StoreReport[] = [];
 
   for (const store of [...storeNames].sort()) {
@@ -542,17 +583,18 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     const net = invoiceNet - returnsValue;
     const target = targets.stores.get(store) ?? settings.storeTargets[store] ?? 0;
     const achievement = target > 0 ? net / target : 0;
-    const poolRate = storePoolRate(achievement);
+    const poolRate = poolRule && target > 0 ? slabFor(poolRule.slabs, achievement)?.rate ?? 0 : 0;
     const pool = poolRate * Math.max(0, net);
-    const next = target > 0 ? nextStoreSlab(achievement) : null;
+    const next = poolRule && target > 0 ? nextSlab(poolRule.slabs, achievement) : null;
 
-    // People of this store: staff whose store is this one, plus anyone who mostly sold here.
+    // People of this store: staff whose store is this one, plus anyone (e.g. PT staff) who mostly sold here.
     const members = new Map<string, StaffRow | null>();
     for (const s of staff) if (s.store === store) members.set(s.userId, s);
     for (const [id, a] of acc) {
       if (members.has(id)) continue;
       const s = staffById.get(id);
       if (s && s.store && s.store !== store && storeNames.has(s.store)) continue;
+      if (!s && !isPtCode(id)) continue; // unknown codes are listed for linking instead
       const mainStore = [...a.stores.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
       if (mainStore === store) members.set(id, s ?? null);
     }
@@ -562,14 +604,16 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       const a = acc.get(id) ?? get(id);
       const t = targets.staff.get(id);
       const pnet = a.invoiceNet - a.returns;
-      const group = s?.group ?? "sales";
+      const group = groupOf(id);
+      const pt = isPtCode(id);
       people.push({
         staffId: s?.id ?? null,
         userId: id,
-        name: s?.name ?? spName.get(id) ?? id,
-        roleLabel: s?.roleLabel ?? "User ID not in Staff Users — link it in Settings",
+        name: s?.name ?? (pt ? settings.ptPeople[id]?.name : undefined) ?? spName.get(id) ?? id,
+        roleLabel: s?.roleLabel ?? (pt ? "Daily wages" : "—"),
         group,
         store,
+        isPt: pt,
         bills: a.bills,
         units: a.units,
         gross: a.gross,
@@ -585,38 +629,69 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
         abvTarget: t?.abv ?? null,
         achievement: t?.sales ? pnet / t.sales : null,
         storeShare: 0,
-        individualBonus: 0,
-        abvBonus: 0,
-        spot: a.spot,
+        bonus: 0,
+        spotTotal: 0,
+        lines: [],
+        lostToReturns: a.lostToReturns,
+        lostNotes: [],
         attendance: attendanceFor(month, duties.days.get(id), duties.withData, settings.dutiesRequired),
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,
-        lostToReturns: a.lostToReturns,
       });
     }
 
-    // Store pool split
-    const inGroup = (g: IncentiveGroup) => people.filter((p) => p.group === g);
-    const equal = (g: IncentiveGroup, amount: number) => {
-      const list = inGroup(g);
-      for (const p of list) p.storeShare += amount / list.length;
-    };
-    equal("sm", pool * POOL_SPLIT.managers * MANAGER_SPLIT.sm);
-    equal("asm", pool * POOL_SPLIT.managers * MANAGER_SPLIT.asm);
-    equal("cashier_cre", pool * POOL_SPLIT.cashier_cre);
-    equal("backend", pool * POOL_SPLIT.backend);
-    equal("vm", pool * POOL_SPLIT.vm);
-    equal("housekeeping", pool * POOL_SPLIT.housekeeping);
-    const sales = inGroup("sales");
-    const salesTotal = sales.reduce((s, p) => s + Math.max(0, p.net), 0);
-    for (const p of sales) p.storeShare += salesTotal > 0 ? (pool * POOL_SPLIT.sales * Math.max(0, p.net)) / salesTotal : 0;
+    // Store pool split: the Sales Team by sales, every other group equally.
+    if (poolRule && pool > 0) {
+      for (const [g, share] of Object.entries(poolRule.split) as [IncentiveGroup, number][]) {
+        if (!share) continue;
+        const list = people.filter((p) => p.group === g);
+        if (!list.length) continue;
+        if (g === "sales") {
+          const total = list.reduce((s, p) => s + Math.max(0, p.net), 0);
+          for (const p of list) p.storeShare += total > 0 ? (pool * share * Math.max(0, p.net)) / total : 0;
+        } else {
+          for (const p of list) p.storeShare += (pool * share) / list.length;
+        }
+      }
+    }
 
     for (const p of people) {
-      if (INDIVIDUAL_BONUS_GROUPS.includes(p.group) && p.achievement !== null) p.individualBonus = individualBonus(p.achievement);
-      if (ABV_GROUPS.includes(p.group) && p.bills > 0) p.abvBonus = abvBonus(p.achievement, p.abv);
+      const a = acc.get(p.userId)!;
+      const pct = (x: number) => `${Math.round(x * 100)}%`;
+      for (const r of achRules) {
+        if (!r.groups.includes(p.group)) continue;
+        const amount = p.achievement !== null ? slabFor(r.slabs, p.achievement)?.amount ?? 0 : 0;
+        p.lines.push({ ruleId: r.id, name: r.name, kind: r.kind, note: p.achievement !== null ? `${pct(p.achievement)} of target` : "Needs a target", amount });
+        p.bonus += amount;
+      }
+      for (const r of abvRules) {
+        if (!r.groups.includes(p.group) || !p.bills) continue;
+        const amount = abvAmount(r, p.achievement, p.abv);
+        p.lines.push({
+          ruleId: r.id,
+          name: r.name,
+          kind: r.kind,
+          note: `ABV ₹${Math.round(p.abv).toLocaleString("en-IN")}${p.achievement !== null ? ` with ${pct(p.achievement)} of target` : " · needs a target"}`,
+          amount,
+        });
+        p.bonus += amount;
+      }
+      for (const r of [...billRules, ...unitRules, ...valueRules]) {
+        if (!r.groups.includes(p.group)) continue;
+        const x = a.per.get(r.id) ?? { count: 0, amount: 0, units: 0, value: 0, lost: 0, lostCount: 0 };
+        const note =
+          r.kind === "product_units"
+            ? `${Math.max(0, x.units)} × ₹${r.amount}`
+            : r.kind === "product_value"
+              ? `₹${Math.round(Math.max(0, x.value)).toLocaleString("en-IN")} sold`
+              : `${x.count} × ₹${r.amount.toLocaleString("en-IN")}`;
+        p.lines.push({ ruleId: r.id, name: versionName(r, mFrom, mTo), kind: r.kind, note, amount: x.amount });
+        p.spotTotal += x.amount;
+        if (x.lostCount) p.lostNotes.push(`${x.lostCount} ${r.name} bill(s) were returned (₹${x.lost.toLocaleString("en-IN")})`);
+      }
       if (p.group === "none") p.storeShare = 0;
-      p.earnedBeforeAttendance = p.storeShare + p.individualBonus + p.abvBonus + p.spot.total;
+      p.earnedBeforeAttendance = p.storeShare + p.bonus + p.spotTotal;
       const share = p.attendance.found ? p.attendance.share : 1;
       p.total = p.earnedBeforeAttendance * share;
       p.attendanceCut = p.earnedBeforeAttendance - p.total;
@@ -635,9 +710,10 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       net,
       bills: bills.length,
       achievement,
+      poolName: poolRule?.name ?? null,
       poolRate,
       pool,
-      nextSlab: next ? { ...next, needed: Math.max(0, next.from * target - net) } : null,
+      nextSlab: next ? { from: next.from, rate: next.rate, needed: Math.max(0, next.from * target - net) } : null,
       othersNet: others.reduce((s, b) => s + b.net, 0),
       othersBills: others.length,
       people,
@@ -651,6 +727,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   const value: MonthReport = {
     month,
     settings,
+    rules,
     stores,
     unlinked: [...unlinked.values()].sort((x, y) => y.net - x.net),
     lastBillDate,
@@ -660,22 +737,24 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
 }
 
 // ------------------------------------------------------------------
-// One person in detail (items, categories, bills to look at, insights)
+// One person in detail (items, categories, bills to look at)
 // ------------------------------------------------------------------
+
+export type NearMiss = { name: string; amount: number; bills: { invoice_number: string; total: number; gap: string }[] };
 
 export type PersonDetail = {
   categories: { name: string; units: number; net: number }[];
   items: { name: string; units: number; net: number }[];
   flagged: (InvoiceRow & { pct: number })[];
-  nearHighValue: InvoiceRow[];
-  nearWow: (InvoiceRow & { gaps: string[] })[];
+  nearMisses: NearMiss[];
   returned: ReturnRow[];
   daily: { date: string; net: number; bills: number }[];
 };
 
-export async function personDetail(month: string, userId: string, threshold: number): Promise<PersonDetail> {
+export async function personDetail(month: string, userId: string, threshold: number, monthRules: IncentiveRule[]): Promise<PersonDetail> {
   const { from, to } = monthRange(month);
-  const [bills, lines, back] = await Promise.all([
+  const offerRules = monthRules.filter((r): r is ProductUnitsRule => r.kind === "product_units" && r.freeNotDiscount);
+  const [bills, lines, back, promosRes] = await Promise.all([
     fetchAll<Row>((a, b) =>
       supabaseAdmin.from("sales_invoices").select(INVOICE_COLS).eq("staff_user_id", userId).gte("invoice_date", from).lte("invoice_date", to).order("invoice_id").range(a, b)
     ),
@@ -697,26 +776,16 @@ export async function personDetail(month: string, userId: string, threshold: num
       .lte("return_date", to)
       .order("return_date", { ascending: false })
       .limit(500),
+    offerRules.length
+      ? supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", offerRules.map((r) => r.list)).limit(10000)
+      : Promise.resolve({ data: [] as PromoRow[] }),
   ]);
-  // Buy 2 Get 1 free items are not counted as staff discount (same as the month report).
-  const { data: b2g1 } = await supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").eq("kind", "b2g1").limit(5000);
-  const promoDiscount = new Map<string, number>();
-  const b2g1Ids = ((b2g1 ?? []) as PromoRow[]).map((p) => p.item_id).filter(Boolean) as string[];
-  for (let i = 0; i < b2g1Ids.length; i += 150) {
-    const { data: pl } = await supabaseAdmin
-      .from("sales_invoice_lines")
-      .select("invoice_id, invoice_date, item_id, sku, discount")
-      .eq("staff_user_id", userId)
-      .gte("invoice_date", from)
-      .lte("invoice_date", to)
-      .in("item_id", b2g1Ids.slice(i, i + 150))
-      .limit(5000);
-    for (const l of (pl ?? []) as Row[]) {
-      if (!promoKind((b2g1 ?? []) as PromoRow[], l, String(l.invoice_date)).has("b2g1")) continue;
-      promoDiscount.set(String(l.invoice_id), (promoDiscount.get(String(l.invoice_id)) ?? 0) + n(l.discount));
-    }
-  }
-  const inv = bills.map(normInvoice).map((b) => (promoDiscount.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (promoDiscount.get(b.invoice_id) ?? 0)) } : b));
+
+  // Free items of offers are not staff discount (same as the month report).
+  const promos = (promosRes.data ?? []) as PromoRow[];
+  const offerDisc = promos.length ? offerDiscounts(offerRules, promos, (await loadPromoLines(month, promos, userId)).sold) : new Map<string, number>();
+  const inv = bills.map(normInvoice).map((b) => (offerDisc.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (offerDisc.get(b.invoice_id) ?? 0)) } : b));
+
   const cat = new Map<string, { name: string; units: number; net: number }>();
   const item = new Map<string, { name: string; units: number; net: number }>();
   for (const l of lines) {
@@ -739,6 +808,22 @@ export async function personDetail(month: string, userId: string, threshold: num
     d.bills++;
     daily.set(b.invoice_date, d);
   }
+
+  // Bills that just missed a per-bill incentive.
+  const nearMisses: NearMiss[] = [];
+  for (const r of monthRules.filter((x): x is BillValueRule | WowRule => x.kind === "bill_value" || x.kind === "wow")) {
+    const list = inv.filter((b) => inForce(r, b.invoice_date) && !billQualifies(b, r));
+    const bills =
+      r.kind === "bill_value"
+        ? list.filter((b) => b.total >= r.minBill * 0.9).map((b) => ({ invoice_number: b.invoice_number, total: b.total, gap: `₹${Math.ceil(r.minBill - b.total).toLocaleString("en-IN")} short` }))
+        : list
+            .filter((b) => b.total >= r.minBill)
+            .map((b) => ({ b, gaps: wowGaps(b, r) }))
+            .filter((x) => x.gaps.length === 1)
+            .map((x) => ({ invoice_number: x.b.invoice_number, total: x.b.total, gap: x.gaps[0] }));
+    if (bills.length) nearMisses.push({ name: r.name, amount: r.amount, bills });
+  }
+
   return {
     categories: [...cat.values()].sort((a, b) => b.net - a.net),
     items: [...item.values()].sort((a, b) => b.units - a.units || b.net - a.net),
@@ -746,23 +831,8 @@ export async function personDetail(month: string, userId: string, threshold: num
       .map((b) => ({ ...b, pct: discountShare(b) }))
       .filter((b) => b.pct > threshold)
       .sort((a, b) => b.pct - a.pct),
-    nearHighValue: inv.filter((b) => b.total >= SPOT.highValueBill * 0.9 && b.total < SPOT.highValueBill),
-    nearWow: inv
-      .filter((b) => b.total >= SPOT.wowBill && !isWowBill(b))
-      .map((b) => ({ ...b, gaps: wowGaps(b) }))
-      .filter((b) => b.gaps.length === 1),
-    returned: ((back.data ?? []) as Row[]).map((r) => ({
-      creditnote_id: String(r.creditnote_id),
-      creditnote_number: String(r.creditnote_number ?? ""),
-      return_date: String(r.return_date),
-      store: (r.store as string) ?? null,
-      staff_user_id: (r.staff_user_id as string) ?? null,
-      invoice_id: (r.invoice_id as string) ?? null,
-      invoice_number: (r.invoice_number as string) ?? null,
-      net: n(r.net),
-    })),
+    nearMisses,
+    returned: ((back.data ?? []) as Row[]).map(normReturn),
     daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
   };
 }
-
-export { nextIndividualSlab };

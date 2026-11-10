@@ -2,10 +2,12 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { GROUP_LABEL, INCENTIVE_GROUPS, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { groupName, INCENTIVE_GROUPS, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { ruleStatus, ruleSummary, type IncentiveRule } from "@/lib/incentive-rules";
+import { IncentiveRulesEditor } from "@/components/IncentiveRulesEditor";
 
-type Person = { id: string; userId: string; name: string; roleLabel: string; store: string | null; group: IncentiveGroup; groupChosen: boolean };
-type Promo = { id: number; kind: "slow_moving" | "b2g1"; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
+type Person = { id: string; userId: string; name: string; store: string | null; group: IncentiveGroup; isPt: boolean };
+type Promo = { id: number; kind: string; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
 type ZItem = { item_id: string; name: string; sku: string | null; rate: number; category: string };
 
 const btn = "rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50";
@@ -57,15 +59,85 @@ export function PerformanceAdmin(props: {
   unlinked: { name: string; net: number; bills: number }[];
   billsCopied: number;
   lastBillDate: string | null;
+  rules: IncentiveRule[];
 }) {
+  const labels = props.settings.groupLabels;
   return (
     <div className="space-y-6">
       <SyncCard month={props.month} today={props.today} settings={props.settings} billsCopied={props.billsCopied} lastBillDate={props.lastBillDate} />
-      <TargetsCard {...props} />
-      <PromoCard promos={props.promos} />
-      <SettingsCard settings={props.settings} stores={props.stores} />
       {props.unlinked.length > 0 && <LinksCard unlinked={props.unlinked} people={props.people} />}
+      <TargetsCard {...props} />
+      <IncentiveRulesEditor rules={props.rules} today={props.today} labels={labels} />
+      <PromoCard promos={props.promos} rules={props.rules} today={props.today} />
+      <GroupNamesCard labels={labels} />
+      <SettingsCard settings={props.settings} stores={props.stores} />
     </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Group names
+// ------------------------------------------------------------------
+
+function GroupNamesCard({ labels }: { labels: Partial<Record<IncentiveGroup, string>> }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [names, setNames] = useState<Record<string, string>>({});
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await post({ action: "group_labels", labels: names });
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card
+      title="Group names"
+      intro="The groups decide who shares which part of the store pool and who can earn each incentive."
+      actions={
+        !editing ? (
+          <button
+            className={primary}
+            onClick={() => {
+              setNames(Object.fromEntries(INCENTIVE_GROUPS.map((g) => [g.key, groupName(g.key, labels)])));
+              setEditing(true);
+            }}
+          >
+            ✎ Edit names
+          </button>
+        ) : (
+          <>
+            <button className={primary} disabled={busy} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button className={ghost} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </>
+        )
+      }
+    >
+      {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {INCENTIVE_GROUPS.map((g) => (
+          <div key={g.key} className="rounded-2xl bg-black/[0.02] p-3 ring-1 ring-black/5">
+            {editing ? (
+              <input className={input} value={names[g.key] ?? ""} maxLength={40} onChange={(e) => setNames({ ...names, [g.key]: e.target.value })} />
+            ) : (
+              <p className="text-sm font-semibold">{groupName(g.key, labels)}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -303,11 +375,10 @@ function TargetsCard(props: {
               )}
             </div>
             <div className="-mx-2 overflow-x-auto">
-              <table className="min-w-[720px] text-sm">
+              <table className="w-full min-w-[600px] text-sm">
                 <thead>
                   <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
                     <th className="px-2 py-2">Name</th>
-                    <th className="px-2 py-2">Role</th>
                     <th className="px-2 py-2">Group</th>
                     <th className="px-2 py-2 text-right">Sales target</th>
                     <th className="px-2 py-2 text-right">ABV target</th>
@@ -322,18 +393,17 @@ function TargetsCard(props: {
                         <td className="px-2 py-2">
                           <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
                         </td>
-                        <td className="px-2 py-2 text-black/60">{p.roleLabel}</td>
                         <td className="px-2 py-2">
                           {editing ? (
                             <select className={`${input} py-1`} value={r?.group ?? p.group} onChange={(e) => setRows({ ...rows, [p.userId]: { ...r, group: e.target.value as IncentiveGroup } })}>
                               {INCENTIVE_GROUPS.map((g) => (
                                 <option key={g.key} value={g.key}>
-                                  {g.label}
+                                  {groupName(g.key, settings.groupLabels)}
                                 </option>
                               ))}
                             </select>
                           ) : (
-                            <span className={p.group === "none" ? "text-black/35" : ""}>{GROUP_LABEL[p.group]}</span>
+                            <span className={p.group === "none" ? "text-black/35" : ""}>{groupName(p.group, settings.groupLabels)}</span>
                           )}
                         </td>
                         <td className="px-2 py-2 text-right">
@@ -371,9 +441,19 @@ function TargetsCard(props: {
 // Slow-moving and Buy 2 Get 1 products
 // ------------------------------------------------------------------
 
-function PromoCard({ promos }: { promos: Promo[] }) {
+function PromoCard({ promos, rules, today }: { promos: Promo[]; rules: IncentiveRule[]; today: string }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"slow_moving" | "b2g1">("slow_moving");
+  // One product list per product incentive (versions of the same incentive share their list).
+  const tabs: { list: string; name: string; summary: string }[] = [];
+  for (const r of [...rules].reverse()) {
+    if (r.kind !== "product_units" && r.kind !== "product_value") continue;
+    if (ruleStatus(r, today) === "ended" && rules.some((x) => x !== r && "list" in x && x.list === r.list && ruleStatus(x, today) !== "ended")) continue;
+    if (tabs.some((t) => t.list === r.list)) continue;
+    tabs.push({ list: r.list, name: r.name + (ruleStatus(r, today) === "ended" ? " (stopped)" : ""), summary: ruleSummary(r) });
+  }
+  tabs.reverse();
+  const [tab, setTab] = useState<string>(tabs[0]?.list ?? "");
+  const current = tabs.find((t) => t.list === tab) ?? tabs[0];
   const [q, setQ] = useState("");
   const [results, setResults] = useState<ZItem[] | null>(null);
   const [picked, setPicked] = useState<Record<string, ZItem>>({});
@@ -381,7 +461,7 @@ function PromoCard({ promos }: { promos: Promo[] }) {
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const list = promos.filter((p) => p.kind === tab);
+  const list = promos.filter((p) => p.kind === current?.list);
 
   async function search() {
     if (q.trim().length < 2) return;
@@ -403,7 +483,7 @@ function PromoCard({ promos }: { promos: Promo[] }) {
     setBusy(true);
     setError("");
     try {
-      await post({ action: "promo_add", kind: tab, items: Object.values(picked), from: from || null, to: to || null });
+      await post({ action: "promo_add", kind: current?.list, items: Object.values(picked), from: from || null, to: to || null });
       setPicked({});
       setResults(null);
       setQ("");
@@ -416,7 +496,7 @@ function PromoCard({ promos }: { promos: Promo[] }) {
   }
 
   async function remove(p: Promo) {
-    if (!confirm(`Remove “${p.name}” from the ${tab === "b2g1" ? "Buy 2 Get 1" : "Slow-moving"} list?`)) return;
+    if (!confirm(`Remove “${p.name}” from the ${current?.name ?? ""} list?`)) return;
     setBusy(true);
     try {
       await post({ action: "promo_remove", id: p.id });
@@ -430,20 +510,20 @@ function PromoCard({ promos }: { promos: Promo[] }) {
 
   return (
     <Card
-      title="Slow-moving and Buy 2 Get 1 products"
-      intro={tab === "b2g1" ? "₹10 for every unit of these products sold (returns are taken off)." : "₹100 / ₹200 / ₹300 a month for ₹1,000+ / ₹5,001+ / ₹10,001+ of these products sold."}
+      title="Products for incentives"
+      intro={current ? `${current.name}: ${current.summary}` : "Add an incentive of the kind “Per item of listed products” or “Value of listed products” first."}
     >
-      <div className="mb-4 inline-flex rounded-full bg-black/[0.04] p-1">
-        {(["slow_moving", "b2g1"] as const).map((k) => (
+      <div className="mb-4 flex flex-wrap gap-1 rounded-2xl bg-black/[0.04] p-1">
+        {tabs.map((t) => (
           <button
-            key={k}
-            className={`rounded-full px-4 py-1.5 text-sm font-semibold ${tab === k ? "bg-white shadow ring-1 ring-black/5" : "text-black/55"}`}
+            key={t.list}
+            className={`rounded-full px-4 py-1.5 text-sm font-semibold ${current?.list === t.list ? "bg-white shadow ring-1 ring-black/5" : "text-black/55"}`}
             onClick={() => {
-              setTab(k);
+              setTab(t.list);
               setPicked({});
             }}
           >
-            {k === "b2g1" ? "Buy 2 Get 1" : "Slow-moving"} ({promos.filter((p) => p.kind === k).length})
+            {t.name} ({promos.filter((p) => p.kind === t.list).length})
           </button>
         ))}
       </div>
@@ -461,7 +541,7 @@ function PromoCard({ promos }: { promos: Promo[] }) {
             {results.length === 0 && <p className="p-3 text-sm text-black/50">Nothing found.</p>}
             {results.map((i) => {
               const on = Boolean(picked[i.item_id]);
-              const already = promos.some((p) => p.kind === tab && p.item_id === i.item_id);
+              const already = promos.some((p) => p.kind === current?.list && p.item_id === i.item_id);
               return (
                 <label key={i.item_id} className={`flex cursor-pointer items-center gap-3 border-b border-black/5 px-3 py-2 text-sm last:border-0 ${already ? "opacity-50" : ""}`}>
                   <input

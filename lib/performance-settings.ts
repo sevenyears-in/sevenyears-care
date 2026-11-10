@@ -1,10 +1,11 @@
-// Settings for the sales performance dashboard (Supabase app_settings "sales_performance").
-// Server only.
+// Settings for the sales performance dashboard (Supabase app_settings). Server only.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { DEFAULT_PERFORMANCE_SETTINGS, type PerformanceSettings } from "@/lib/performance-rules";
+import { DEFAULT_RULES, type IncentiveRule } from "@/lib/incentive-rules";
 
 const KEY = "sales_performance";
+const RULES_KEY = "incentive_rules";
 
 export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
   try {
@@ -16,6 +17,8 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       storeTargets: { ...DEFAULT_PERFORMANCE_SETTINGS.storeTargets, ...(v.storeTargets ?? {}) },
       salespersonLinks: v.salespersonLinks ?? {},
       excludedStores: v.excludedStores ?? DEFAULT_PERFORMANCE_SETTINGS.excludedStores,
+      ptPeople: v.ptPeople ?? {},
+      groupLabels: v.groupLabels ?? {},
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };
@@ -28,4 +31,20 @@ export async function savePerformanceSettings(change: Partial<PerformanceSetting
   const { error } = await supabaseAdmin.from("app_settings").upsert({ key: KEY, value, updated_at: new Date().toISOString() });
   if (error) throw error;
   return value;
+}
+
+/** Incentive schemes (the policy defaults until something is changed in Settings). */
+export async function loadIncentiveRules(): Promise<IncentiveRule[]> {
+  try {
+    const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", RULES_KEY).maybeSingle();
+    const rules = (data?.value as { rules?: IncentiveRule[] } | null)?.rules;
+    return Array.isArray(rules) && rules.length ? rules : DEFAULT_RULES;
+  } catch {
+    return DEFAULT_RULES;
+  }
+}
+
+export async function saveIncentiveRules(rules: IncentiveRule[]) {
+  const { error } = await supabaseAdmin.from("app_settings").upsert({ key: RULES_KEY, value: { rules }, updated_at: new Date().toISOString() });
+  if (error) throw error;
 }

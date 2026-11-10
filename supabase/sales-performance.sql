@@ -133,3 +133,6 @@ alter table public.promo_products enable row level security;
 
 -- Which incentive group a person belongs to (Sales Team, Cashier & CRE, Backend ...)
 alter table public.staff_users add column if not exists incentive_group text;
+
+-- Product lists are keyed by incentive (any name), not only slow_moving / b2g1.
+alter table public.promo_products drop constraint if exists promo_products_kind_check;

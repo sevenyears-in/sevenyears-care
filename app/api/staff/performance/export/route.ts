@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { monthReport } from "@/lib/performance";
-import { GROUP_LABEL, isMonth } from "@/lib/performance-rules";
+import { groupName, isMonth } from "@/lib/performance-rules";
 
-// GET /api/staff/performance/export?m=YYYY-MM&store=VADAKARA — payout sheet as CSV (Admins).
+// GET /api/staff/performance/export?m=YYYY-MM&store=VATAKARA — payout sheet as CSV (Admins).
 export async function GET(request: Request) {
   const auth = await requireStaff("admin");
   if (auth.response) return auth.response;
@@ -13,29 +13,33 @@ export async function GET(request: Request) {
   const wanted = (url.searchParams.get("store") ?? "").toUpperCase();
   const report = await monthReport(month, true);
   const stores = report.stores.filter((s) => !wanted || s.store === wanted);
+  const labels = report.settings.groupLabels;
 
-  const r = (n: number) => Math.round(n);
+  // One column per incentive that anyone earned or could earn this month.
+  const ruleCols = new Map<string, string>();
+  for (const s of stores) for (const p of s.people) for (const l of p.lines) if (!ruleCols.has(l.ruleId)) ruleCols.set(l.ruleId, l.name);
+
+  const r = (n: number) => String(Math.round(n));
   const head = [
-    "Store", "User ID", "Name", "Role", "Group", "Bills", "Items", "Sales before discount", "Discount", "Returns", "Net sales",
-    "Target", "Achievement %", "ABV", "Bills over discount limit", "Duties", "Duties needed", "Attendance % paid",
-    "Store share", "Individual bonus", "ABV booster", "High value bills", "High value ₹", "WOW bills", "WOW ₹",
-    "B2G1 items", "B2G1 ₹", "Slow-moving sold", "Slow-moving ₹", "Before attendance", "Attendance cut", "Total incentive",
+    "Store", "Code", "Name", "Group", "Bills", "Items", "Sales before discount", "Discount", "Returns", "Net sales",
+    "Target", "Achievement %", "ABV", "Bills over discount limit", "Duties", "Days without punching data", "Duties needed", "Attendance % paid",
+    "Store share", ...[...ruleCols.values()], "Before attendance", "Attendance cut", "Total incentive",
   ];
-  const lines = [head];
+  const lines: string[][] = [head];
   for (const s of stores) {
     for (const p of s.people) {
+      const byRule = new Map(p.lines.map((l) => [l.ruleId, l.amount]));
       lines.push([
-        s.store, p.userId, p.name, p.roleLabel, GROUP_LABEL[p.group], String(p.bills), String(p.units), String(r(p.gross)), String(r(p.discount)),
-        String(r(p.returns)), String(r(p.net)), p.target ? String(r(p.target)) : "", p.achievement === null ? "" : (p.achievement * 100).toFixed(1),
-        String(r(p.abv)), String(p.flaggedBills), p.attendance.found ? String(p.attendance.duties) : "", String(p.attendance.required),
-        p.attendance.found ? String(Math.round(p.attendance.share * 100)) : "", String(r(p.storeShare)), String(r(p.individualBonus)),
-        String(r(p.abvBonus)), String(p.spot.highValue.count), String(p.spot.highValue.amount), String(p.spot.wow.count), String(p.spot.wow.amount),
-        String(p.spot.b2g1.units), String(p.spot.b2g1.amount), String(r(p.spot.slowMoving.value)), String(p.spot.slowMoving.amount),
-        String(r(p.earnedBeforeAttendance)), String(r(p.attendanceCut)), String(r(p.total)),
+        s.store, p.userId, p.name, groupName(p.group, labels), String(p.bills), String(p.units), r(p.gross), r(p.discount), r(p.returns), r(p.net),
+        p.target ? r(p.target) : "", p.achievement === null ? "" : (p.achievement * 100).toFixed(1), r(p.abv), String(p.flaggedBills),
+        p.attendance.found ? String(p.attendance.duties) : "", String(p.attendance.noData), String(p.attendance.required),
+        p.attendance.found ? String(Math.round(p.attendance.share * 100)) : "", r(p.storeShare),
+        ...[...ruleCols.keys()].map((id) => (byRule.has(id) ? r(byRule.get(id) ?? 0) : "")),
+        r(p.earnedBeforeAttendance), r(p.attendanceCut), r(p.total),
       ]);
     }
     lines.push([]);
-    lines.push([s.store, "", "STORE", "", "", String(s.bills), "", String(r(s.gross)), String(r(s.discount)), String(r(s.returns)), String(r(s.net)), String(r(s.target)), (s.achievement * 100).toFixed(1), "", String(s.flagged.length), "", "", "", `Pool ${r(s.pool)}`]);
+    lines.push([s.store, "", "STORE", "", String(s.bills), "", r(s.gross), r(s.discount), r(s.returns), r(s.net), r(s.target), (s.achievement * 100).toFixed(1), "", String(s.flagged.length), "", "", "", "", `Pool ${r(s.pool)}`]);
     lines.push([]);
   }
   const csv = "﻿" + lines.map((l) => l.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(",")).join("\r\n");

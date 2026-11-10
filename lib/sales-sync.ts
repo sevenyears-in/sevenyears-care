@@ -32,6 +32,52 @@ export function staffIdFromSalesperson(name: string, links: Record<string, strin
   return m ? String(Number(m[1])) : null;
 }
 
+const upperLinks = (links: Record<string, string>) => Object.fromEntries(Object.entries(links ?? {}).map(([k, v]) => [k.replace(/\s+/g, " ").trim().toUpperCase(), v]));
+const cleanName = (v: unknown) => str(v).replace(/\s+/g, " ").toUpperCase();
+const likeExact = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** Give every saved bill (and its returns) of a salesperson name a new owner: a User ID or a PT code. */
+export async function setSalespersonOwner(name: string, owner: string | null) {
+  const pattern = likeExact(name);
+  await supabaseAdmin.from("sales_invoices").update({ staff_user_id: owner }).ilike("salesperson", pattern);
+  const { data: bills } = await supabaseAdmin.from("sales_invoices").select("invoice_id").ilike("salesperson", pattern).limit(20000);
+  const list = (bills ?? []).map((b) => b.invoice_id as string);
+  for (let i = 0; i < list.length; i += 200) {
+    await supabaseAdmin.from("sales_invoice_lines").update({ staff_user_id: owner }).in("invoice_id", list.slice(i, i + 200));
+    const { data: rets } = await supabaseAdmin.from("sales_returns").update({ staff_user_id: owner }).in("invoice_id", list.slice(i, i + 200)).select("creditnote_id");
+    const cn = (rets ?? []).map((r) => r.creditnote_id as string);
+    if (cn.length) await supabaseAdmin.from("sales_return_lines").update({ staff_user_id: owner }).in("creditnote_id", cn);
+  }
+}
+
+/**
+ * Daily-wages staff have no employee code. Each new salesperson name without a code gets the
+ * next PT code (PT1, PT2 …). Returns the links to use (upper-case names).
+ */
+export async function assignPtCodes(names: string[]): Promise<Record<string, string>> {
+  const settings = await loadPerformanceSettings();
+  const links = upperLinks(settings.salespersonLinks);
+  const fresh = [...new Set(names.map(cleanName).filter(Boolean))].filter((n) => staffIdFromSalesperson(n, links) === null);
+  if (!fresh.length) return links;
+  const people = { ...settings.ptPeople };
+  let last = Math.max(0, ...[...Object.keys(people), ...Object.values(links)].map((c) => (/^PT(\d+)$/.exec(c) ? Number(/^PT(\d+)$/.exec(c)![1]) : 0)));
+  for (const name of fresh) {
+    const code = `PT${++last}`;
+    links[name] = code;
+    people[code] = { name };
+  }
+  await savePerformanceSettings({ salespersonLinks: links, ptPeople: people });
+  for (const name of fresh) await setSalespersonOwner(name, links[name]);
+  return links;
+}
+
+/** Bills already copied whose salesperson has no code yet. */
+export async function assignPtCodesForSavedBills() {
+  const { data } = await supabaseAdmin.from("sales_invoices").select("salesperson").is("staff_user_id", null).not("salesperson", "is", null).limit(5000);
+  const names = [...new Set((data ?? []).map((r) => cleanName(r.salesperson)).filter(Boolean))];
+  if (names.length) await assignPtCodes(names);
+}
+
 /** Carry bags are billed as items but are not counted as items sold. */
 export const isCarryBag = (category: unknown) => /carry\s*bag/i.test(String(category ?? ""));
 
@@ -291,12 +337,11 @@ export type DaySync = {
 export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> {
   const result: DaySync = { date, bills: 0, billsSaved: 0, returns: 0, returnsSaved: 0, pending: 0 };
   if (!(await zohoConfigured())) return { ...result, error: "Zoho POS is not connected." };
-  const settings = await loadPerformanceSettings();
-  const links = Object.fromEntries(Object.entries(settings.salespersonLinks ?? {}).map(([k, v]) => [k.toUpperCase(), v]));
-
   // ---- Bills
   const list = await listAll("invoices", "invoices", date);
   const keep = list.filter((r) => !SKIP_STATUS.has(str(r.status).toLowerCase()));
+  // New daily-wages names get their PT code before the bills are saved.
+  const links = await assignPtCodes(keep.map((r) => str(r.salesperson_name)));
   result.bills = keep.length;
   const { data: saved } = await supabaseAdmin.from("sales_invoices").select("invoice_id, modified_at").eq("invoice_date", date).limit(5000);
   const savedMap = new Map((saved ?? []).map((r) => [r.invoice_id as string, r.modified_at as string | null]));
@@ -367,6 +412,7 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
 /** Scheduled run: today and the two days before (catches late edits and returns). */
 export async function syncRecentSales() {
   if (!(await zohoConfigured())) return null;
+  await assignPtCodesForSavedBills().catch(() => undefined);
   const days = [0, 1, 2].map((n) => todayISO(new Date(Date.now() - n * 86_400_000)));
   const out: DaySync[] = [];
   let budget = 60;

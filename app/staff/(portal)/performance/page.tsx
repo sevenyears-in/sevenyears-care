@@ -1,38 +1,19 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
-import { getCurrentStaff, type StaffUser } from "@/lib/auth";
+import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
 import { monthReport, personDetail, type PersonReport, type StoreReport } from "@/lib/performance";
-import {
-  ABV_GROUPS,
-  ABV_SLABS,
-  GROUP_LABEL,
-  INDIVIDUAL_BONUS_GROUPS,
-  isMonth,
-  monthRange,
-  nextIndividualSlab,
-  pct,
-  rupees,
-  SPOT,
-} from "@/lib/performance-rules";
+import { performanceAccess } from "@/lib/performance-access";
+import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from "@/lib/performance-rules";
+import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "My Performance" };
 
 type Search = { m?: string; u?: string; store?: string; view?: string };
-
-/** Who can see other people: admins, directors, operations, store managers (own store). */
-function teamStores(staff: StaffUser, all: string[]): string[] {
-  if (isAdmin(staff.role) || staff.role === "operations_manager") return all;
-  if (staff.role === "director") return staff.directorStores.length ? all.filter((s) => staff.directorStores.map((d) => d.toUpperCase()).includes(s)) : all;
-  if (staff.role === "store_manager" || /assistant\s*(store)?\s*manager/i.test(staff.access.roleLabel)) {
-    return all.filter((s) => s === (staff.storeName ?? "").toUpperCase());
-  }
-  return [];
-}
 
 const monthLabel = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
 function shiftMonth(m: string, by: number) {
@@ -147,14 +128,17 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const thisMonth = todayISO().slice(0, 7);
   const month = isMonth(sp.m) && sp.m <= thisMonth ? sp.m : thisMonth;
-  const report = await monthReport(month);
+  const [report, access] = await Promise.all([monthReport(month), performanceAccess(staff)]);
   const allStores = report.stores.map((s) => s.store);
-  const myStores = teamStores(staff, allStores);
+  const myStores = access.teamAll ? allStores : allStores.filter((s) => access.teamStores.includes(s));
+  // Only people in an incentive group have their own page; managers see their stores.
+  if (!access.eligible && !access.teamAll && !access.teamStores.length) redirect("/staff");
   const base: Search = { m: month !== thisMonth ? month : undefined };
+  const labels = report.settings.groupLabels;
 
   const me = attendanceCode(staff.userId);
   const wanted = sp.u && myStores.length ? attendanceCode(sp.u) : me;
-  const view = sp.view === "team" && myStores.length ? "team" : "person";
+  const view = myStores.length && (sp.view === "team" || (!access.eligible && !sp.u)) ? "team" : "person";
   const teamStore = view === "team" ? (myStores.includes((sp.store ?? "").toUpperCase()) ? (sp.store ?? "").toUpperCase() : myStores[0]) : null;
 
   let found: { person: PersonReport; store: StoreReport } | null = null;
@@ -171,7 +155,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Sales performance</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-          {view === "team" ? `${teamStore} team` : found && wanted !== me ? found.person.name : "My Performance"}
+          {view === "team" ? teamStore : found && wanted !== me ? found.person.name : "My Performance"}
         </h1>
         <p className="mt-1 text-sm text-black/55">
           {monthLabel(month)} · Bills up to {report.lastBillDate ? formatDate(report.lastBillDate) : "—"}
@@ -193,12 +177,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
   const switcher = myStores.length ? (
     <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-white p-3 soft-card ring-1 ring-black/5">
-      <Link href={qs(base, {})} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${view === "person" && wanted === me ? "bg-[#8883d7] text-white" : "hover:bg-black/5"}`}>
-        Me
-      </Link>
+      {access.eligible && (
+        <Link href={qs(base, {})} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${view === "person" && wanted === me ? "bg-[#8883d7] text-white" : "hover:bg-black/5"}`}>
+          Me
+        </Link>
+      )}
       {myStores.map((s) => (
         <Link key={s} href={qs(base, { view: "team", store: s })} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${teamStore === s ? "bg-[#8883d7] text-white" : "hover:bg-black/5"}`}>
-          {s} team
+          {s}
         </Link>
       ))}
       {isAdmin(staff.role) && (
@@ -230,7 +216,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <div className="space-y-6">
         {header}
         {switcher}
-        <TeamView store={store} base={base} threshold={report.settings.highDiscountPct} canExport={isAdmin(staff.role)} />
+        <TeamView store={store} base={base} threshold={report.settings.highDiscountPct} canExport={isAdmin(staff.role)} labels={labels} />
       </div>
     );
   }
@@ -250,12 +236,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     );
   }
 
-  const detail = await personDetail(month, found.person.userId, report.settings.highDiscountPct / 100);
+  const detail = await personDetail(month, found.person.userId, report.settings.highDiscountPct / 100, report.rules);
   return (
     <div className="space-y-6">
       {header}
       {switcher}
-      <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} />
+      <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
     </div>
   );
 }
@@ -269,16 +255,24 @@ function PersonView({
   store,
   detail,
   threshold,
+  rules,
+  labels,
 }: {
   p: PersonReport;
   store: StoreReport;
   detail: Awaited<ReturnType<typeof personDetail>>;
   threshold: number;
+  rules: IncentiveRule[];
+  labels: Partial<Record<IncentiveGroup, string>>;
 }) {
-  const { days } = monthRange(store.month);
+  const { days, to: monthEnd } = monthRange(store.month);
   const daysLeft = Math.max(0, days - store.daysGone);
   const running = daysLeft > 0;
-  const next = p.achievement !== null ? nextIndividualSlab(p.achievement) : null;
+  const inForceAtEnd = rulesOn(rules, monthEnd);
+  const achRule = inForceAtEnd.find((r): r is AchievementRule => r.kind === "achievement" && r.groups.includes(p.group));
+  const abvRule = inForceAtEnd.find((r): r is AbvRule => r.kind === "abv" && r.groups.includes(p.group));
+  const wowRule = inForceAtEnd.find((r): r is WowRule => r.kind === "wow" && r.groups.includes(p.group));
+  const next = p.achievement !== null && achRule ? nextSlab(achRule.slabs, p.achievement) : null;
   const neededForNext = next && p.target ? Math.max(0, next.from * p.target - p.net) : 0;
   const perDay = running && neededForNext ? neededForNext / daysLeft : 0;
   const team = store.people.filter((x) => x.group === p.group && x.bills > 0);
@@ -287,41 +281,41 @@ function PersonView({
   const teamDisc = team.reduce((s, x) => s + x.gross, 0) ? team.reduce((s, x) => s + x.discount, 0) / team.reduce((s, x) => s + x.gross, 0) : 0;
   const itemsPerBill = p.bills ? p.units / p.bills : 0;
   const teamIpb = team.reduce((s, x) => s + x.bills, 0) ? team.reduce((s, x) => s + x.units, 0) / team.reduce((s, x) => s + x.bills, 0) : 0;
-  const abvNext = ABV_GROUPS.includes(p.group) ? ABV_SLABS.slice().reverse().find((s) => p.abv < s.abv) : null;
+  const abvNext = abvRule ? [...abvRule.slabs].sort((a, b) => a.abv - b.abv).find((s) => p.abv < s.abv) : null;
   const att = p.attendance;
   const share = att.found ? att.share : 1;
 
   // Lost incentives
   const lost: { label: string; note: string; amount: number | null }[] = [];
   if (p.returns > 0) lost.push({ label: `Returns took away ${rupees(p.returns)} of sales`, note: `${p.returnCount} return(s) against your bills this month`, amount: null });
-  if (p.lostToReturns > 0) lost.push({ label: "Spot incentive lost on returned bills", note: `${p.spot.highValue.returned} high-value and ${p.spot.wow.returned} WOW bill(s) were returned`, amount: p.lostToReturns });
+  for (const note of p.lostNotes) lost.push({ label: "Incentive lost on returned bills", note, amount: null });
+  if (p.lostToReturns > 0) lost.push({ label: "Total lost on returned bills", note: "Returned bills do not earn per-bill incentives", amount: p.lostToReturns });
   if (p.attendanceCut > 0) lost.push({ label: "Cut for attendance", note: `${att.absences} duty short of ${att.required} → ${pct(att.share)} paid`, amount: p.attendanceCut });
-  if (detail.nearHighValue.length)
+  for (const m of detail.nearMisses)
     lost.push({
-      label: `${detail.nearHighValue.length} bill(s) just below ₹50,000`,
-      note: `Each would have earned ₹${SPOT.highValueReward}: ${detail.nearHighValue.map((b) => `${b.invoice_number} (${rupees(b.total)})`).slice(0, 4).join(", ")}`,
-      amount: detail.nearHighValue.length * SPOT.highValueReward,
+      label: `${m.bills.length} bill(s) just missed “${m.name}”`,
+      note: `Each would have earned ${rupees(m.amount)}: ${m.bills.slice(0, 4).map((b) => `${b.invoice_number} (${b.gap})`).join(", ")}`,
+      amount: m.bills.length * m.amount,
     });
-  if (detail.nearWow.length)
-    lost.push({
-      label: `${detail.nearWow.length} bill(s) missed WOW by one rule`,
-      note: detail.nearWow.slice(0, 3).map((b) => `${b.invoice_number}: ${b.gaps[0]}`).join(" · "),
-      amount: detail.nearWow.length * SPOT.wowReward,
-    });
-  if (p.achievement !== null && p.achievement < 0.9 && !running && INDIVIDUAL_BONUS_GROUPS.includes(p.group))
-    lost.push({ label: "Individual bonus not reached", note: `${pct(p.achievement)} of target; 90% earns ₹500`, amount: 500 });
-  if (store.achievement < 0.9 && !running) lost.push({ label: "Store did not reach 90%", note: "No store incentive this month", amount: null });
+  if (achRule && p.achievement !== null && !running && !p.lines.some((l) => l.ruleId === achRule.id && l.amount > 0)) {
+    const first = nextSlab(achRule.slabs, -1);
+    if (first) lost.push({ label: `${achRule.name} not reached`, note: `${pct(p.achievement)} of target; ${Math.round(first.from * 100)}% earns ${rupees(first.amount)}`, amount: first.amount });
+  }
+  if (!store.poolRate && !running && store.poolName) lost.push({ label: "Store pool not reached", note: `${store.store} reached ${pct(store.achievement)} of target`, amount: null });
 
   // Insights
   const tips: string[] = [];
   if (running && p.target && neededForNext > 0 && next)
     tips.push(`Sell ${rupees(perDay)} a day for the next ${daysLeft} day(s) to reach ${Math.round(next.from * 100)}% and earn ₹${next.amount.toLocaleString("en-IN")}.`);
-  if (!p.target && INDIVIDUAL_BONUS_GROUPS.includes(p.group)) tips.push("No individual target is set for you this month yet — the individual and ABV bonuses start once it is set.");
+  if (!p.target && (achRule || abvRule)) tips.push("No individual target is set for you this month yet — the target and ABV bonuses start once it is set.");
   if (abvNext && p.bills) tips.push(`Your ABV is ${rupees(p.abv)}. ${rupees(abvNext.abv - p.abv)} more per bill reaches the ₹${abvNext.abv.toLocaleString("en-IN")} ABV level (₹${abvNext.amount.toLocaleString("en-IN")} with the matching target %).`);
   if (teamAbv && p.bills) tips.push(`${p.abv >= teamAbv ? "Above" : "Below"} the team ABV of ${rupees(teamAbv)}. You sell ${itemsPerBill.toFixed(1)} items per bill (team ${teamIpb.toFixed(1)}) — one more add-on per bill lifts ABV.`);
   if (p.discountPct > teamDisc * 1.5 && p.discountPct > 0.01) tips.push(`Your discount (${pct(p.discountPct, 1)}) is higher than the team (${pct(teamDisc, 1)}). Every ₹100 discount is ₹100 less in your sales.`);
-  if (detail.categories.length >= 2) tips.push(`Most of your sales come from ${detail.categories[0].name}${detail.categories[1] ? ` and ${detail.categories[1].name}` : ""}. Suggest items from other categories to make WOW bills (₹${SPOT.wowReward} each).`);
-  if (rank && team.length > 1) tips.push(`You are #${rank} of ${team.length} in the ${GROUP_LABEL[p.group]} at ${store.store}.`);
+  if (detail.categories.length >= 2)
+    tips.push(
+      `Most of your sales come from ${detail.categories[0].name}${detail.categories[1] ? ` and ${detail.categories[1].name}` : ""}. Suggest items from other categories${wowRule ? ` to make WOW bills (${rupees(wowRule.amount)} each)` : ""}.`
+    );
+  if (rank && team.length > 1) tips.push(`You are #${rank} of ${team.length} in ${groupName(p.group, labels)} at ${store.store}.`);
   if (store.nextSlab && running) tips.push(`The store needs ${short(store.nextSlab.needed)} more to reach ${Math.round(store.nextSlab.from * 100)}% — that raises everyone’s pool.`);
   if (att.found && att.remaining > 0) tips.push(`Duties: ${att.duties} so far${att.noData ? ` (+${att.noData} day(s) with no punching data, counted as present)` : ""}, ${att.required} needed — ${Math.max(0, att.required - att.duties - att.noData)} more in the ${att.remaining} day(s) left.`);
 
@@ -334,7 +328,7 @@ function PersonView({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-black/55">
-              {p.name} · {p.roleLabel} · {store.store} · {GROUP_LABEL[p.group]}
+              {p.name} · {p.isPt ? p.userId : p.roleLabel} · {store.store} · {groupName(p.group, labels)}
             </p>
             <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-black/45">Net sales (after discounts &amp; returns, without tax)</p>
             <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{rupees(p.net)}</p>
@@ -377,17 +371,21 @@ function PersonView({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title="Incentives earned" intro="Estimate from today's bills. The final payout is checked by management." tone="good">
-          <Row label="Store incentive share" note={store.poolRate ? `${store.store} at ${pct(store.achievement)} → pool ${pct(store.poolRate, 1)} of sales (${rupees(store.pool)})` : `${store.store} at ${pct(store.achievement)} of ${short(store.target)} — pool starts at 90%`} amount={rupees(p.storeShare)} muted={!p.storeShare} />
-          {INDIVIDUAL_BONUS_GROUPS.includes(p.group) && (
-            <Row label="Individual achievement bonus" note={p.achievement !== null ? `${pct(p.achievement)} of target` : "Needs a target"} amount={rupees(p.individualBonus)} muted={!p.individualBonus} />
+          {store.poolName && (
+            <Row
+              label={store.poolName}
+              note={
+                store.poolRate
+                  ? `${store.store} at ${pct(store.achievement)} → pool ${pct(store.poolRate, 1)} of sales (${rupees(store.pool)})`
+                  : `${store.store} at ${pct(store.achievement)} of ${short(store.target)}${store.nextSlab ? ` — pool starts at ${Math.round(store.nextSlab.from * 100)}%` : ""}`
+              }
+              amount={rupees(p.storeShare)}
+              muted={!p.storeShare}
+            />
           )}
-          {ABV_GROUPS.includes(p.group) && (
-            <Row label="ABV booster" note={`ABV ${rupees(p.abv)}${p.achievement !== null ? ` with ${pct(p.achievement)} of target` : " · needs a target"}`} amount={rupees(p.abvBonus)} muted={!p.abvBonus} />
-          )}
-          <Row label="High value bills (₹50,000+)" note={`${p.spot.highValue.count} × ₹${SPOT.highValueReward}`} amount={rupees(p.spot.highValue.amount)} muted={!p.spot.highValue.amount} />
-          <Row label="WOW bills" note={`${p.spot.wow.count} × ₹${SPOT.wowReward}`} amount={rupees(p.spot.wow.amount)} muted={!p.spot.wow.amount} />
-          <Row label="Buy 2 Get 1 items" note={`${p.spot.b2g1.units} × ₹${SPOT.b2g1PerUnit}`} amount={rupees(p.spot.b2g1.amount)} muted={!p.spot.b2g1.amount} />
-          <Row label="Slow-moving products" note={`${rupees(p.spot.slowMoving.value)} sold`} amount={rupees(p.spot.slowMoving.amount)} muted={!p.spot.slowMoving.amount} />
+          {p.lines.map((l) => (
+            <Row key={l.ruleId} label={l.name} note={l.note} amount={rupees(l.amount)} muted={!l.amount} />
+          ))}
           {share < 1 && <Row label="Attendance" note={`${pct(share)} payable`} amount={`− ${rupees(p.attendanceCut)}`} />}
           <div className="mt-2 flex items-center justify-between rounded-xl bg-green-50 px-3 py-2.5">
             <span className="text-sm font-bold text-green-800">Total</span>
@@ -526,9 +524,21 @@ function PersonView({
 // Store team
 // ------------------------------------------------------------------
 
-function TeamView({ store, base, threshold, canExport }: { store: StoreReport; base: Search; threshold: number; canExport: boolean }) {
+function TeamView({
+  store,
+  base,
+  threshold,
+  canExport,
+  labels,
+}: {
+  store: StoreReport;
+  base: Search;
+  threshold: number;
+  canExport: boolean;
+  labels: Partial<Record<IncentiveGroup, string>>;
+}) {
   const totals = store.people.reduce(
-    (t, p) => ({ share: t.share + p.storeShare, bonus: t.bonus + p.individualBonus + p.abvBonus, spot: t.spot + p.spot.total, total: t.total + p.total }),
+    (t, p) => ({ share: t.share + p.storeShare, bonus: t.bonus + p.bonus, spot: t.spot + p.spotTotal, total: t.total + p.total }),
     { share: 0, bonus: 0, spot: 0, total: 0 }
   );
   const running = store.daysGone < store.daysInMonth;
@@ -547,7 +557,7 @@ function TeamView({ store, base, threshold, canExport }: { store: StoreReport; b
           <div className="rounded-2xl bg-white/80 px-5 py-4 text-right ring-1 ring-black/5">
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Store incentive pool</p>
             <p className="mt-1 text-3xl font-bold text-green-700 tabular-nums">{rupees(store.pool)}</p>
-            <p className="text-xs text-black/50">{store.poolRate ? `${pct(store.poolRate, 1)} of sales` : "Starts at 90% of target"}</p>
+            <p className="text-xs text-black/50">{store.poolRate ? `${pct(store.poolRate, 1)} of sales` : store.nextSlab ? `Starts at ${Math.round(store.nextSlab.from * 100)}% of target` : "No store pool in force"}</p>
           </div>
         </div>
         <Progress value={store.achievement} />
@@ -596,7 +606,7 @@ function TeamView({ store, base, threshold, canExport }: { store: StoreReport; b
                     </Link>
                     <span className="ml-1.5 text-xs text-black/40">{p.userId}</span>
                   </td>
-                  <td className={`${tdc} text-black/60`}>{GROUP_LABEL[p.group]}</td>
+                  <td className={`${tdc} text-black/60`}>{groupName(p.group, labels)}</td>
                   <td className={`${tdc} text-right font-semibold`}>{rupees(p.net)}</td>
                   <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : "—"}</td>
                   <td className={`${tdc} text-right font-semibold ${p.achievement === null ? "text-black/30" : p.achievement >= 1 ? "text-green-700" : p.achievement >= 0.9 ? "text-amber-600" : "text-[#d6224a]"}`}>
@@ -611,8 +621,8 @@ function TeamView({ store, base, threshold, canExport }: { store: StoreReport; b
                   <td className={`${tdc} text-right`}>{p.returns ? rupees(p.returns) : "—"}</td>
                   <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}>{p.attendance.found ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.storeShare)}</td>
-                  <td className={`${tdc} text-right`}>{rupees(p.individualBonus + p.abvBonus)}</td>
-                  <td className={`${tdc} text-right`}>{rupees(p.spot.total)}</td>
+                  <td className={`${tdc} text-right`}>{rupees(p.bonus)}</td>
+                  <td className={`${tdc} text-right`}>{rupees(p.spotTotal)}</td>
                   <td className={`${tdc} text-right font-bold text-green-700`}>{rupees(p.total)}</td>
                 </tr>
               ))}

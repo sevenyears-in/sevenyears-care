@@ -22,9 +22,11 @@ type Props = {
   storeName: string | null;
   unreadAlerts: number;
   explanationsWaiting: number;
+  /** "My Performance", "Sales Performance" or nothing. */
+  performanceLabel?: string | null;
 };
 
-export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting }: Props) {
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel }: Props) {
   const can = (s: Section) => sections.includes(s);
   const pathname = usePathname();
   const router = useRouter();
@@ -56,7 +58,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   // Roles & Access decides which sections each person sees.
   const links = [
     { href: "/staff", label: "Dashboard" },
-    { href: "/staff/performance", label: "My Performance" },
+    ...(performanceLabel ? [{ href: "/staff/performance", label: performanceLabel }] : []),
     ...(can("service") ? [{ href: "/staff/service", label: "Service Requests" }] : []),
     ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
     ...(can("explanations") || explanationsWaiting > 0
@@ -192,8 +194,8 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
         </div>
       </div>
 
-      <nav className="mx-auto hidden max-w-6xl items-center gap-1 px-4 pb-2.5 sm:flex sm:px-6">
-        <div className="no-scrollbar flex min-w-0 flex-1 gap-1 overflow-x-auto">
+      <nav className="mx-auto hidden max-w-6xl items-start gap-1 px-4 pb-2.5 sm:flex sm:px-6">
+        <div className="flex min-w-0 flex-1 flex-wrap gap-x-0.5 gap-y-1">
         {links.map((link, i) => {
           const active =
             link.href === "/staff" ? pathname === "/staff" : pathname.startsWith(link.href);
@@ -202,7 +204,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
               key={link.href}
               href={link.href}
               style={navTone(i)}
-              className={`whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition ${
+              className={`whitespace-nowrap rounded-full px-3 py-2 text-sm font-semibold transition ${
                 active
                   ? "bg-[var(--c)] text-white shadow-sm"
                   : "text-black/55 hover:bg-[color-mix(in_srgb,var(--c)_12%,transparent)] hover:text-[var(--c)]"

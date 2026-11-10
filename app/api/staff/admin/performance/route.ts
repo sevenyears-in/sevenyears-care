@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured, zohoRead } from "@/lib/zoho";
-import { syncSalesDay } from "@/lib/sales-sync";
-import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
-import { isGroup, isMonth } from "@/lib/performance-rules";
+import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDay } from "@/lib/sales-sync";
+import { loadIncentiveRules, loadPerformanceSettings, saveIncentiveRules, savePerformanceSettings } from "@/lib/performance-settings";
+import { INCENTIVE_GROUPS, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
+import { ELIGIBLE_GROUPS, ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
 import { todayISO } from "@/lib/helpers";
 
 // Sales targets & incentives settings (Super Admin and Admin).
@@ -74,16 +75,84 @@ export async function POST(request: Request) {
       else delete links[name];
       await savePerformanceSettings({ salespersonLinks: links });
       // Bills already copied get the new owner straight away.
-      const ids = userId || null;
-      await supabaseAdmin.from("sales_invoices").update({ staff_user_id: ids }).ilike("salesperson", name);
-      const { data: bills } = await supabaseAdmin.from("sales_invoices").select("invoice_id").ilike("salesperson", name).limit(20000);
-      const list = (bills ?? []).map((b) => b.invoice_id as string);
-      for (let i = 0; i < list.length; i += 200) {
-        await supabaseAdmin.from("sales_invoice_lines").update({ staff_user_id: ids }).in("invoice_id", list.slice(i, i + 200));
-        const { data: rets } = await supabaseAdmin.from("sales_returns").update({ staff_user_id: ids }).in("invoice_id", list.slice(i, i + 200)).select("creditnote_id");
-        const cn = (rets ?? []).map((r) => r.creditnote_id as string);
-        if (cn.length) await supabaseAdmin.from("sales_return_lines").update({ staff_user_id: ids }).in("creditnote_id", cn);
+      await setSalespersonOwner(name, userId || staffIdFromSalesperson(name, {}));
+      return NextResponse.json({ ok: true });
+    }
+
+    case "group_labels": {
+      const labels: Partial<Record<IncentiveGroup, string>> = {};
+      for (const g of INCENTIVE_GROUPS) {
+        const v = String(((body.labels ?? {}) as Body)[g.key] ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+        if (v && v !== g.label) labels[g.key] = v;
       }
+      await savePerformanceSettings({ groupLabels: labels });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "rule_save": {
+      // Add a new incentive, or change one. A change with a date after the start of the current
+      // version ends that version the day before and starts a new one (history stays as it was).
+      const rule = cleanRule(body.rule);
+      if (!rule) return bad("Check the incentive details.");
+      const problem = ruleProblem(rule);
+      if (problem) return bad(problem);
+      const rules = await loadIncentiveRules();
+      const at = rules.findIndex((r) => r.id === rule.id);
+      if (at < 0) {
+        if (!rule.from) return bad("Choose the date the new incentive starts.");
+        rule.id = `${rule.kind}_${Date.now().toString(36)}`;
+        if ((rule.kind === "product_units" || rule.kind === "product_value") && !rule.list) rule.list = rule.id;
+        await saveIncentiveRules([...rules, rule]);
+        return NextResponse.json({ ok: true, id: rule.id });
+      }
+      const old = rules[at];
+      const from = rule.from;
+      if (!from && old.from) return bad("Choose the date the change starts.");
+      if (from && (!old.from || from > old.from)) {
+        if (old.to && old.to < from) return bad("This incentive had already ended before that date.");
+        const dayBefore = new Date(Date.parse(`${from}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+        const ended = { ...old, to: dayBefore } as IncentiveRule;
+        const next = { ...rule, id: `${rule.kind}_${Date.now().toString(36)}`, to: old.to } as IncentiveRule;
+        if ((next.kind === "product_units" || next.kind === "product_value") && (old.kind === "product_units" || old.kind === "product_value")) next.list = old.list;
+        const list = [...rules];
+        list.splice(at, 1, ended, next);
+        await saveIncentiveRules(list);
+        return NextResponse.json({ ok: true, id: next.id });
+      }
+      // Same start date (or a correction before it started): change in place.
+      const list = [...rules];
+      list[at] = { ...rule, id: old.id, ...(old.kind === "product_units" || old.kind === "product_value" ? { list: (old as { list: string }).list } : {}) } as IncentiveRule;
+      await saveIncentiveRules(list);
+      return NextResponse.json({ ok: true, id: old.id });
+    }
+
+    case "rule_stop": {
+      const id = String(body.id ?? "");
+      const to = isDate(body.to) ? body.to : null;
+      if (!to) return bad("Choose the last day this incentive is in force.");
+      const rules = await loadIncentiveRules();
+      const r = rules.find((x) => x.id === id);
+      if (!r) return bad("Incentive not found.");
+      if (r.from && to < r.from) return bad("That date is before the incentive starts. Delete it instead.");
+      await saveIncentiveRules(rules.map((x) => (x.id === id ? ({ ...x, to } as IncentiveRule) : x)));
+      return NextResponse.json({ ok: true });
+    }
+
+    case "rule_restart": {
+      const id = String(body.id ?? "");
+      const rules = await loadIncentiveRules();
+      if (!rules.some((x) => x.id === id)) return bad("Incentive not found.");
+      await saveIncentiveRules(rules.map((x) => (x.id === id ? ({ ...x, to: null } as IncentiveRule) : x)));
+      return NextResponse.json({ ok: true });
+    }
+
+    case "rule_delete": {
+      const id = String(body.id ?? "");
+      const rules = await loadIncentiveRules();
+      const r = rules.find((x) => x.id === id);
+      if (!r) return bad("Incentive not found.");
+      if (!r.from || r.from <= todayISO()) return bad("This incentive has already been in force. Stop it from a date instead of deleting it.");
+      await saveIncentiveRules(rules.filter((x) => x.id !== id));
       return NextResponse.json({ ok: true });
     }
 
@@ -143,14 +212,21 @@ export async function POST(request: Request) {
       const group = body.group === "" || body.group === null ? null : body.group;
       if (!staffId) return bad("Staff missing.");
       if (group !== null && !isGroup(group)) return bad("Unknown group.");
+      if (isPtCode(staffId)) {
+        const current = await loadPerformanceSettings();
+        const people = { ...current.ptPeople };
+        people[staffId] = { ...(people[staffId] ?? { name: staffId }), group: (group ?? undefined) as IncentiveGroup | undefined };
+        await savePerformanceSettings({ ptPeople: people });
+        return NextResponse.json({ ok: true });
+      }
       const { error } = await supabaseAdmin.from("staff_users").update({ incentive_group: group }).eq("id", staffId);
       if (error) return bad(error.message, 500);
       return NextResponse.json({ ok: true });
     }
 
     case "promo_add": {
-      const kind = body.kind === "b2g1" ? "b2g1" : body.kind === "slow_moving" ? "slow_moving" : null;
-      if (!kind) return bad("Choose Slow-moving or Buy 2 Get 1.");
+      const kind = typeof body.kind === "string" && /^[a-z0-9_]{2,60}$/.test(body.kind) ? body.kind : null;
+      if (!kind) return bad("Choose the product list.");
       const items = (Array.isArray(body.items) ? (body.items as Body[]) : []).slice(0, 200);
       const from = isDate(body.from) ? body.from : null;
       const to = isDate(body.to) ? body.to : null;
@@ -205,4 +281,49 @@ export async function POST(request: Request) {
     }
   }
   return bad("Unknown action.");
+}
+
+// ------------------------------------------------------------------
+
+const KINDS: RuleKind[] = ["store_pool", "achievement", "abv", "bill_value", "wow", "product_units", "product_value"];
+const num = (v: unknown) => {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : NaN;
+};
+
+/** Takes only the known fields of an incentive from the request. */
+function cleanRule(raw: unknown): IncentiveRule | null {
+  const r = (raw ?? {}) as Body;
+  const kind = r.kind as RuleKind;
+  if (!KINDS.includes(kind)) return null;
+  const base = {
+    id: String(r.id ?? ""),
+    name: String(r.name ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+    groups: (Array.isArray(r.groups) ? r.groups : []).filter((g): g is IncentiveGroup => isGroup(g) && ELIGIBLE_GROUPS.includes(g as IncentiveGroup)),
+    from: isDate(r.from) ? r.from : null,
+    to: isDate(r.to) ? r.to : null,
+  };
+  const slabs = (Array.isArray(r.slabs) ? (r.slabs as Body[]) : []).slice(0, 20);
+  switch (kind) {
+    case "store_pool": {
+      const split: Partial<Record<IncentiveGroup, number>> = {};
+      for (const g of ELIGIBLE_GROUPS) {
+        const v = num(((r.split ?? {}) as Body)[g]);
+        if (v > 0) split[g] = v;
+      }
+      return { ...base, kind, groups: ELIGIBLE_GROUPS.filter((g) => (split[g] ?? 0) > 0), slabs: slabs.map((x) => ({ from: num(x.from), rate: num(x.rate) })), split };
+    }
+    case "achievement":
+      return { ...base, kind, slabs: slabs.map((x) => ({ from: num(x.from), amount: num(x.amount) })) };
+    case "product_value":
+      return { ...base, kind, list: String(r.list ?? ""), slabs: slabs.map((x) => ({ from: num(x.from), amount: num(x.amount) })) };
+    case "abv":
+      return { ...base, kind, slabs: slabs.map((x) => ({ from: num(x.from), abv: num(x.abv), amount: num(x.amount) })) };
+    case "bill_value":
+      return { ...base, kind, minBill: num(r.minBill), amount: num(r.amount) };
+    case "wow":
+      return { ...base, kind, minBill: num(r.minBill), minItems: num(r.minItems), minCategories: num(r.minCategories), minCheap: num(r.minCheap), maxShare: num(r.maxShare), amount: num(r.amount) };
+    case "product_units":
+      return { ...base, kind, list: String(r.list ?? ""), amount: num(r.amount), freeNotDiscount: r.freeNotDiscount !== false };
+  }
 }
