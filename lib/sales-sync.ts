@@ -32,6 +32,9 @@ export function staffIdFromSalesperson(name: string, links: Record<string, strin
   return m ? String(Number(m[1])) : null;
 }
 
+/** Carry bags are billed as items but are not counted as items sold. */
+export const isCarryBag = (category: unknown) => /carry\s*bag/i.test(String(category ?? ""));
+
 export const storeKey = (v: unknown) => str(v).replace(/\s+/g, " ").toUpperCase() || null;
 
 async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<void>) {
@@ -122,11 +125,14 @@ async function saveInvoice(listRow: Obj, links: SyncLinks) {
     const lineNet = num(l.item_total);
     const lineGross = inclusive ? (price * qty) / (1 + taxPct / 100) : price * qty;
     gross += lineGross;
-    quantity += qty;
-    if (price > 0 && price < 5000) under5k += qty;
     const itemId = str(l.item_id) || null;
     const category = str(l.category_name) || (itemId ? categories.get(itemId) ?? "" : "");
-    if (category) cats.add(category.toUpperCase());
+    // Carry bags are not "items sold" (WOW bill counts, items per bill).
+    if (!isCarryBag(category)) {
+      quantity += qty;
+      if (price > 0 && price < 5000) under5k += qty;
+      if (category) cats.add(category.toUpperCase());
+    }
     return {
       line_item_id: str(l.line_item_id),
       invoice_id: invoiceId,
@@ -148,8 +154,9 @@ async function saveInvoice(listRow: Obj, links: SyncLinks) {
   const taxable = num(d.total_taxable_amount);
   const billDiscount = str(d.discount_type) === "entity_level" ? num(d.discount_total) : 0;
   const net = taxable > 0 ? taxable : Math.max(0, num(d.sub_total) - billDiscount);
-  const maxLine = rows.reduce((m, r) => Math.max(m, r.net), 0);
-  const lineSum = rows.reduce((s, r) => s + r.net, 0);
+  const counted = rows.filter((r) => !isCarryBag(r.category));
+  const maxLine = counted.reduce((m, r) => Math.max(m, r.net), 0);
+  const lineSum = counted.reduce((s, r) => s + r.net, 0);
 
   const invoice = {
     invoice_id: invoiceId,

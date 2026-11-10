@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
-import { isMonth } from "@/lib/performance-rules";
+import { isMonth, monthRange } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
 
@@ -28,7 +28,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
     supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").order("name").limit(5000),
     getStores().catch(() => ({ stores: [] as { name: string }[] })),
     monthReport(month, true).catch(() => null),
-    supabaseAdmin.from("sales_invoices").select("invoice_id", { count: "exact", head: true }).gte("invoice_date", `${month}-01`).lte("invoice_date", `${month}-31`),
+    supabaseAdmin.from("sales_invoices").select("invoice_id", { count: "exact", head: true }).gte("invoice_date", monthRange(month).from).lte("invoice_date", monthRange(month).to),
   ]);
 
   const stores = [

@@ -670,6 +670,7 @@ export async function personDetail(month: string, userId: string, threshold: num
   const cat = new Map<string, { name: string; units: number; net: number }>();
   const item = new Map<string, { name: string; units: number; net: number }>();
   for (const l of lines) {
+    if (/carry\s*bag/i.test(String(l.category ?? ""))) continue;
     const c = String(l.category || "Other");
     const ce = cat.get(c) ?? { name: c, units: 0, net: 0 };
     ce.units += n(l.quantity);
