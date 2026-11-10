@@ -4,6 +4,8 @@ import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { groupName, type IncentiveGroup } from "@/lib/performance-rules";
 import {
+  PERIOD_LABEL,
+  RULE_PERIOD,
   KIND_HELP,
   KIND_LABEL,
   ruleStatus,
@@ -68,6 +70,8 @@ function blank(kind: RuleKind, today: string, groups: G[]): IncentiveRule {
       return { ...base, kind, list: "", amount: 10, freeNotDiscount: false };
     case "product_value":
       return { ...base, kind, list: "", slabs: [{ from: 1000, amount: 100 }] };
+    case "yearly_achievement":
+      return { ...base, kind, groups: ["sales"], slabs: [{ from: 1, amount: 5000 }] };
   }
 }
 
@@ -92,7 +96,12 @@ export function IncentiveRulesEditor({
   const [error, setError] = useState("");
   const [newKind, setNewKind] = useState<RuleKind>("bill_value");
 
-  const groups = (["active", "scheduled", "ended"] as const).map((st) => ({ st, list: rules.filter((r) => ruleStatus(r, today) === st) }));
+  // Daily, monthly and yearly incentives; inside each, in force first, then later, then stopped.
+  const order = { active: 0, scheduled: 1, ended: 2 } as const;
+  const groups = (["daily", "monthly", "yearly"] as const).map((pd) => ({
+    pd,
+    list: rules.filter((r) => RULE_PERIOD[r.kind] === pd).sort((a, b) => order[ruleStatus(a, today)] - order[ruleStatus(b, today)]),
+  }));
 
   async function run(body: Record<string, unknown>) {
     setBusy(true);
@@ -123,10 +132,16 @@ export function IncentiveRulesEditor({
         {!editing && (
           <div className="flex flex-wrap items-center gap-2">
             <select className={`${input} w-auto py-2`} value={newKind} onChange={(e) => setNewKind(e.target.value as RuleKind)}>
-              {(Object.keys(KIND_LABEL) as RuleKind[]).map((k) => (
-                <option key={k} value={k}>
-                  {KIND_LABEL[k]}
-                </option>
+              {(["daily", "monthly", "yearly"] as const).map((pd) => (
+                <optgroup key={pd} label={PERIOD_LABEL[pd].title}>
+                  {(Object.keys(KIND_LABEL) as RuleKind[])
+                    .filter((k) => RULE_PERIOD[k] === pd)
+                    .map((k) => (
+                      <option key={k} value={k}>
+                        {KIND_LABEL[k]}
+                      </option>
+                    ))}
+                </optgroup>
               ))}
             </select>
             <button className={primary} onClick={() => setEditing({ rule: blank(newKind, today, allGroups), isNew: true })}>
@@ -156,16 +171,29 @@ export function IncentiveRulesEditor({
       )}
 
       <div className="mt-5 space-y-6">
-        {groups.map(({ st, list }) =>
-          list.length ? (
-            <div key={st}>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-black/45">{st === "active" ? "In force" : st === "scheduled" ? "Starts later" : "Stopped"}</p>
-              <ul className="divide-y divide-black/5 rounded-2xl ring-1 ring-black/5">
-                {list.map((r) => (
+        {groups.map(({ pd, list }) => (
+            <div key={pd}>
+              <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
+                <h3 className="text-base font-bold">{PERIOD_LABEL[pd].title} incentives</h3>
+                <span className="text-xs text-black/50">{PERIOD_LABEL[pd].help}</span>
+              </div>
+              {list.length === 0 && <p className="rounded-2xl px-4 py-3 text-sm text-black/45 ring-1 ring-black/5">None yet — add one with “+ New incentive”.</p>}
+              <ul className={`divide-y divide-black/5 rounded-2xl ring-1 ring-black/5 ${list.length ? "" : "hidden"}`}>
+                {list.map((r) => {
+                  const st = ruleStatus(r, today);
+                  return (
                   <li key={r.id} className={`flex flex-wrap items-start justify-between gap-3 px-4 py-3 ${st === "ended" ? "opacity-60" : ""}`}>
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">
-                        {r.name} <span className="ml-1 text-xs font-normal text-black/45">{KIND_LABEL[r.kind]}</span>
+                        {r.name}{" "}
+                        <span
+                          className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            st === "active" ? "bg-green-100 text-green-800" : st === "scheduled" ? "bg-amber-100 text-amber-800" : "bg-black/5 text-black/50"
+                          }`}
+                        >
+                          {st === "active" ? "In force" : st === "scheduled" ? "Starts later" : "Stopped"}
+                        </span>{" "}
+                        <span className="ml-1 text-xs font-normal text-black/45">{KIND_LABEL[r.kind]}</span>
                       </p>
                       <p className="mt-0.5 text-sm text-black/70">{ruleSummary(r)}</p>
                       <p className="mt-1 flex flex-wrap gap-1">
@@ -228,11 +256,11 @@ export function IncentiveRulesEditor({
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
-          ) : null
-        )}
+        ))}
       </div>
     </section>
   );
@@ -342,6 +370,17 @@ function RuleForm({
           </>
         )}
 
+        {r.kind === "yearly_achievement" &&
+          r.slabs.map((s, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
+              From <Num value={s.from} scale={100} suffix="% of the year's target" onChange={(v) => setSlab(i, { from: v })} />→
+              <Num value={s.amount} prefix="₹" onChange={(v) => setSlab(i, { amount: v })} />
+              <button className="text-xs text-red-700" onClick={() => removeSlab(i)}>
+                remove
+              </button>
+            </div>
+          ))}
+
         {r.kind === "achievement" &&
           r.slabs.map((s, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 text-sm">
@@ -380,7 +419,7 @@ function RuleForm({
           </>
         )}
 
-        {(r.kind === "achievement" || r.kind === "abv" || r.kind === "product_value") && (
+        {(r.kind === "achievement" || r.kind === "abv" || r.kind === "product_value" || r.kind === "yearly_achievement") && (
           <button className="text-sm font-semibold text-[#5b55c9]" onClick={addSlab}>
             + Add level
           </button>

@@ -310,3 +310,27 @@ export function PushSetup() {
     </section>
   );
 }
+
+/** Approver: approve (shows and sends the offer) or reject it. */
+export function ApproveOfferButtons({ id }: { id: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  async function act(action: "approve" | "reject") {
+    if (!confirm(action === "approve" ? "Approve this offer? Customers will see it and get the notification now." : "Reject this offer? Customers will not see it.")) return;
+    setBusy(true);
+    const { ok, data } = await post({ action, id });
+    setBusy(false);
+    alert(ok ? data.note || data.warning || "Done." : data.error || "Could not save.");
+    router.refresh();
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" disabled={busy} onClick={() => act("approve")} className="rounded-full bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-700 disabled:opacity-50">
+        {busy ? "Saving…" : "✓ Approve & send"}
+      </button>
+      <button type="button" disabled={busy} onClick={() => act("reject")} className="rounded-full bg-white px-4 py-2 text-sm font-bold text-red-700 ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50">
+        ✕ Reject
+      </button>
+    </div>
+  );
+}

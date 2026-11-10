@@ -68,6 +68,7 @@ export function PerformanceAdmin(props: {
   people: Person[];
   targets: Record<string, { sales: number; abv: number | null }>;
   storeMonthTargets: Record<string, number>;
+  salaries: Record<string, number>;
   promos: Promo[];
   unlinked: { name: string; net: number; bills: number }[];
   billsCopied: number;
@@ -311,6 +312,7 @@ function TargetsCard(props: {
   people: Person[];
   targets: Record<string, { sales: number; abv: number | null }>;
   storeMonthTargets: Record<string, number>;
+  salaries: Record<string, number>;
 }) {
   const router = useRouter();
   const { month, settings } = props;
@@ -319,7 +321,7 @@ function TargetsCard(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
-  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string };
+  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string };
   const startRows = () =>
     Object.fromEntries(
       props.people.map((p) => [
@@ -329,6 +331,7 @@ function TargetsCard(props: {
           abv: props.targets[p.userId]?.abv ? String(props.targets[p.userId].abv) : "",
           group: p.group,
           store: p.chosenStore ?? "",
+          salary: props.salaries[p.userId] ? String(props.salaries[p.userId]) : "",
         },
       ])
     );
@@ -373,6 +376,10 @@ function TargetsCard(props: {
         month,
         rows: Object.entries(rows).map(([userId, r]) => (r.group === "none" ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv })),
       });
+      const salaryRows = props.people
+        .filter((p) => (rows[p.userId]?.salary ?? "") !== (props.salaries[p.userId] ? String(props.salaries[p.userId]) : ""))
+        .map((p) => ({ userId: p.userId, salary: rows[p.userId]?.salary ?? "" }));
+      if (salaryRows.length) await post({ action: "salaries", rows: salaryRows });
       for (const p of props.people) {
         const r = rows[p.userId];
         if (!r) continue;
@@ -490,11 +497,12 @@ function TargetsCard(props: {
               )}
             </div>
             <div className="-mx-2 overflow-x-auto">
-              <table className="w-full min-w-[600px] table-fixed text-sm">
+              <table className="w-full min-w-[740px] table-fixed text-sm">
                 <colgroup>
                   <col />
                   <col className="w-56" />
                   <col className="w-40" />
+                  <col className="w-36" />
                   <col className="w-36" />
                 </colgroup>
                 <thead>
@@ -503,6 +511,7 @@ function TargetsCard(props: {
                     <th className="px-2 py-2">Group</th>
                     <th className="px-2 py-2 text-right">Sales target</th>
                     <th className="px-2 py-2 text-right">ABV target</th>
+                    <th className="px-2 py-2 text-right" title="Only management sees salaries">Salary / month</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -542,6 +551,15 @@ function TargetsCard(props: {
                             <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRow(p.userId, { abv: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.abv ? (
                             rupees(t.abv)
+                          ) : (
+                            <span className="text-black/30">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          {editing ? (
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.salary ?? ""} onChange={(e) => setRow(p.userId, { salary: e.target.value.replace(/[^\d]/g, "") })} />
+                          ) : props.salaries[p.userId] ? (
+                            <span className="text-black/60">{rupees(props.salaries[p.userId])}</span>
                           ) : (
                             <span className="text-black/30">—</span>
                           )}
@@ -765,6 +783,7 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
   const [error, setError] = useState("");
   const [pct, setPct] = useState(String(settings.highDiscountPct));
   const [duties, setDuties] = useState(String(settings.dutiesRequired));
+  const [sps, setSps] = useState(settings.salesPerSalary ? String(settings.salesPerSalary) : "");
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState<string[]>(settings.excludedStores);
   const allStores = [...new Set([...stores, ...Object.keys(settings.storeTargets), ...settings.excludedStores])].sort();
@@ -772,6 +791,7 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
   function start() {
     setPct(String(settings.highDiscountPct));
     setDuties(String(settings.dutiesRequired));
+    setSps(settings.salesPerSalary ? String(settings.salesPerSalary) : "");
     setTargets(Object.fromEntries(allStores.map((s) => [s, settings.storeTargets[s] ? String(settings.storeTargets[s]) : ""])));
     setExcluded(settings.excludedStores);
     setEditing(true);
@@ -783,7 +803,7 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
     setError("");
     try {
       const storeTargets = Object.fromEntries(Object.entries(targets).filter(([, v]) => v !== ""));
-      await post({ action: "settings", highDiscountPct: pct, dutiesRequired: duties, storeTargets, excludedStores: excluded });
+      await post({ action: "settings", highDiscountPct: pct, dutiesRequired: duties, storeTargets, excludedStores: excluded, salesPerSalary: sps });
       setEditing(false);
       router.refresh();
     } catch (e) {
@@ -837,6 +857,24 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
           ) : (
             <p className="mt-1 text-sm">
               <b>{settings.dutiesRequired}</b> duties a month. Each duty short is one unauthorised absence: 1 → 75% paid, 2 → 50%, 3 or more → nothing.
+            </p>
+          )}
+        </div>
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5 sm:col-span-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Staff worth (management only)</p>
+          {editing ? (
+            <label className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              Flag people who sell less than ₹ <input className={`${input} w-20`} inputMode="decimal" value={sps} onChange={(e) => setSps(e.target.value.replace(/[^\d.]/g, ""))} /> for every ₹1 of salary (empty = only compare with the store)
+            </label>
+          ) : (
+            <p className="mt-1 text-sm">
+              {settings.salesPerSalary ? (
+                <>
+                  People selling less than <b>₹{settings.salesPerSalary}</b> for every ₹1 of salary are flagged for review.
+                </>
+              ) : (
+                "People are compared with the store average (no minimum set)."
+              )}
             </p>
           )}
         </div>

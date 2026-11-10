@@ -21,6 +21,7 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       groupLabels: v.groupLabels ?? {},
       customGroups: v.customGroups ?? [],
       incentiveStores: v.incentiveStores ?? {},
+      salesPerSalary: Number(v.salesPerSalary) || 0,
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

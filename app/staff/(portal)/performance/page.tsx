@@ -5,13 +5,13 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
-import { monthReport, personDetail, type PersonReport, type StoreReport } from "@/lib/performance";
+import { loadSalaries, monthReport, personDetail, storePreviousPeriod, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from "@/lib/performance-rules";
 import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Sales Performance" };
+export const metadata = { title: "My Performance" };
 
 type Search = { m?: string; u?: string; store?: string; view?: string };
 
@@ -153,7 +153,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const header = (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Sales performance</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">My Performance</p>
         <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
           {view === "team" ? teamStore : found && wanted !== me ? found.person.name : "My Performance"}
         </h1>
@@ -212,11 +212,26 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
   if (view === "team" && teamStore) {
     const store = report.stores.find((s) => s.store === teamStore)!;
+    // Salary-based view is for management only (not the Store Manager).
+    const management = isAdmin(staff.role) || staff.role === "director";
+    const [prev, salaries] = await Promise.all([
+      storePreviousPeriod(month, store.store, store.daysGone).catch(() => null),
+      management ? loadSalaries().catch(() => null) : Promise.resolve(null),
+    ]);
     return (
       <div className="space-y-6">
         {header}
         {switcher}
-        <TeamView store={store} base={base} threshold={report.settings.highDiscountPct} canExport={isAdmin(staff.role)} labels={labels} />
+        <TeamView
+          store={store}
+          base={base}
+          threshold={report.settings.highDiscountPct}
+          canExport={isAdmin(staff.role)}
+          labels={labels}
+          prev={prev}
+          salaries={salaries ? Object.fromEntries(salaries) : null}
+          salesPerSalary={report.settings.salesPerSalary}
+        />
       </div>
     );
   }
@@ -236,12 +251,35 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     );
   }
 
-  const detail = await personDetail(month, found.person.userId, report.settings.highDiscountPct / 100, report.rules);
+  const [detail, yearly] = await Promise.all([
+    personDetail(month, found.person.userId, report.settings.highDiscountPct / 100, report.rules),
+    yearlyProgress(found.person.userId, found.person.group, todayISO()).catch(() => [] as YearlyLine[]),
+  ]);
   return (
     <div className="space-y-6">
       {header}
       {switcher}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
+      {yearly.length > 0 && (
+        <Panel title={`Yearly incentives — financial year ${yearly[0].fy}`} intro="April to March. Worked out on the whole year's sales and targets, paid after March.">
+          {yearly.map((y) => (
+            <div key={y.name} className="border-b border-black/5 py-3 last:border-0">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold">{y.name}</p>
+                  <p className="text-xs text-black/55">
+                    {rupees(y.net)} sold this year
+                    {y.target ? ` of ${rupees(y.target)} target (${pct(y.achievement ?? 0)})` : " · no targets set for this year yet"}
+                    {y.next && y.target ? ` · ${rupees(Math.max(0, y.next.from * y.target - y.net))} more for ${rupees(y.next.amount)}` : ""}
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-bold tabular-nums">{rupees(y.amount)}</p>
+              </div>
+              {y.target ? <Progress value={y.achievement ?? 0} /> : null}
+            </div>
+          ))}
+        </Panel>
+      )}
     </div>
   );
 }
@@ -357,7 +395,7 @@ function PersonView({
       </section>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Tile label="Bills" value={p.bills} note={`${p.units} items sold`} />
+        <Tile label="Bills" value={p.bills} note={`${p.units} items · ${p.bills ? (p.units / p.bills).toFixed(1) : "0"} per bill (UPB)`} />
         <Tile label="Avg bill (ABV)" value={rupees(p.abv)} note={p.abvTarget ? `Target ${rupees(p.abvTarget)}` : `Team ${rupees(teamAbv)}`} tone={teamAbv && p.abv >= teamAbv ? "good" : "default"} />
         <Tile label="Discount given" value={rupees(p.discount)} note={`${pct(p.discountPct, 1)} of sales · ${p.flaggedBills} bill(s) over ${threshold}%`} tone={p.flaggedBills ? "warn" : "default"} />
         <Tile label="Returns" value={rupees(p.returns)} note={`${p.returnCount} return(s)`} tone={p.returns ? "bad" : "default"} />
@@ -530,12 +568,18 @@ function TeamView({
   threshold,
   canExport,
   labels,
+  prev,
+  salaries,
+  salesPerSalary,
 }: {
   store: StoreReport;
   base: Search;
   threshold: number;
   canExport: boolean;
   labels: Partial<Record<IncentiveGroup, string>>;
+  prev: PeriodTotals | null;
+  salaries: Record<string, number> | null;
+  salesPerSalary: number;
 }) {
   const totals = store.people.reduce(
     (t, p) => ({ share: t.share + p.storeShare, bonus: t.bonus + p.bonus, spot: t.spot + p.spotTotal, total: t.total + p.total }),
@@ -574,6 +618,10 @@ function TeamView({
         )}
       </section>
 
+      <StoreDashboard store={store} prev={prev} threshold={threshold} labels={labels} />
+
+      {salaries && <StaffWorth store={store} salaries={salaries} salesPerSalary={salesPerSalary} labels={labels} />}
+
       <Panel
         title="Team"
         intro="Tap a name to see that person's page. Incentives are estimates until the month is checked."
@@ -589,6 +637,7 @@ function TeamView({
                 <th className={`${thc} text-right`}>Ach.</th>
                 <th className={`${thc} text-right`}>Bills</th>
                 <th className={`${thc} text-right`}>ABV</th>
+                <th className={`${thc} text-right`}>UPB</th>
                 <th className={`${thc} text-right`}>Disc.</th>
                 <th className={`${thc} text-right`}>Returns</th>
                 <th className={`${thc} text-right`}>Duties</th>
@@ -615,6 +664,7 @@ function TeamView({
                   </td>
                   <td className={`${tdc} text-right`}>{p.bills}</td>
                   <td className={`${tdc} text-right`}>{p.bills ? rupees(p.abv) : "—"}</td>
+                  <td className={`${tdc} text-right`}>{p.bills ? (p.units / p.bills).toFixed(1) : "—"}</td>
                   <td className={`${tdc} text-right ${p.flaggedBills ? "font-semibold text-[#d6224a]" : ""}`}>
                     {pct(p.discountPct, 1)}
                     {p.flaggedBills ? <span className="ml-1 text-xs">⚑{p.flaggedBills}</span> : null}
@@ -639,6 +689,7 @@ function TeamView({
                   <td className={`${tdc} text-right`}>—</td>
                   <td className={`${tdc} text-right`}>{store.othersBills}</td>
                   <td className={`${tdc} text-right`}>{rupees(store.othersNet / store.othersBills)}</td>
+                  <td className={`${tdc} text-right`}>—</td>
                   <td className={`${tdc} text-right`}>
                     {pct(store.othersGross ? store.othersDiscount / store.othersGross : 0, 1)}
                     {store.othersFlagged ? <span className="ml-1 text-xs">⚑{store.othersFlagged}</span> : null}
@@ -649,7 +700,7 @@ function TeamView({
                 </tr>
               )}
               <tr className="border-t-2 border-black/10 font-bold">
-                <td className={tdc} colSpan={10}>
+                <td className={tdc} colSpan={11}>
                   Total
                 </td>
                 <td className={`${tdc} text-right`}>{rupees(totals.share)}</td>
@@ -700,5 +751,174 @@ function TeamView({
         )}
       </Panel>
     </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Store dashboard (like a person's page, for the Store Manager)
+// ------------------------------------------------------------------
+
+const change = (now: number, before: number) => (before > 0 ? (now - before) / before : null);
+function Delta({ now, before, money = false, digits = 0 }: { now: number; before: number | null | undefined; money?: boolean; digits?: number }) {
+  if (before === null || before === undefined || before <= 0) return null;
+  const c = change(now, before)!;
+  const up = c >= 0;
+  return (
+    <span className={`font-semibold ${up ? "text-green-700" : "text-[#d6224a]"}`}>
+      {up ? "▲" : "▼"} {Math.abs(c * 100).toFixed(0)}% vs last month ({money ? rupees(before) : before.toFixed(digits)})
+    </span>
+  );
+}
+
+function StoreDashboard({ store, prev, threshold, labels }: { store: StoreReport; prev: PeriodTotals | null; threshold: number; labels: Partial<Record<IncentiveGroup, string>> }) {
+  const running = store.daysGone < store.daysInMonth;
+  const daysLeft = Math.max(0, store.daysInMonth - store.daysGone);
+  const abv = store.bills ? store.net / store.bills : 0;
+  const upb = store.bills ? store.units / store.bills : 0;
+  const discPct = store.gross ? store.discount / store.gross : 0;
+  const retPct = store.invoiceNet ? store.returns / store.invoiceNet : 0;
+  const othersPct = store.invoiceNet ? store.othersNet / store.invoiceNet : 0;
+  const perDayNow = store.daysGone ? store.net / store.daysGone : 0;
+  const neededPerDay = running && store.target > store.net ? (store.target - store.net) / Math.max(1, daysLeft) : 0;
+  const projected = store.daysGone ? (store.net / store.daysGone) * store.daysInMonth : 0;
+  const prevAbv = prev && prev.bills ? prev.net / prev.bills : null;
+  const prevUpb = prev && prev.bills ? prev.units / prev.bills : null;
+
+  const sellers = store.people.filter((p) => p.bills > 0);
+  const best = [...sellers].sort((a, b) => b.net - a.net)[0];
+  const bestAbv = [...sellers].filter((p) => p.bills >= 10).sort((a, b) => b.abv - a.abv)[0];
+  const lowUpb = [...sellers].filter((p) => p.bills >= 10).sort((a, b) => a.units / a.bills - b.units / b.bills)[0];
+  const topDisc = [...sellers].sort((a, b) => b.discount - a.discount)[0];
+  const noSales = store.people.filter((p) => p.bills === 0 && p.attendance.duties > 0 && ["sales", "asm", "sm"].includes(p.group));
+  const noTarget = store.people.filter((p) => p.target === null && p.group !== "none" && p.bills > 0);
+
+  // Things for the Store Manager to act on (most important first).
+  const act: { tone: "bad" | "warn" | "good"; text: string }[] = [];
+  if (running && store.target) {
+    if (projected < store.target)
+      act.push({ tone: "bad", text: `At today's pace (${rupees(perDayNow)} a day) the store ends the month near ${short(projected)} — ${pct(projected / store.target)} of target. It needs ${rupees(neededPerDay)} a day from now.` });
+    else act.push({ tone: "good", text: `On pace for ${short(projected)} (${pct(projected / store.target)} of target). Keep ${rupees(neededPerDay || perDayNow)} a day.` });
+  }
+  if (prev) {
+    const c = change(store.net, prev.net);
+    if (c !== null) act.push({ tone: c >= 0 ? "good" : "bad", text: `Sales are ${c >= 0 ? "up" : "down"} ${Math.abs(c * 100).toFixed(0)}% on the same ${store.daysGone} day(s) of last month (${short(prev.net)}).` });
+  }
+  if (othersPct > 0.02) act.push({ tone: "bad", text: `${pct(othersPct, 1)} of sales (${short(store.othersNet)}, ${store.othersBills} bills) are “Others” — no salesperson on the bill. Make sure every bill carries the salesperson.` });
+  if (discPct > threshold / 100 / 2 || store.flagged.length)
+    act.push({ tone: store.flagged.length ? "warn" : "good", text: `Discounts: ${short(store.discount)} (${pct(discPct, 1)} of sales). ${store.flagged.length} bill(s) over ${threshold}%${topDisc && topDisc.discount > 0 ? ` — most by ${topDisc.name} (${rupees(topDisc.discount)})` : ""}.` });
+  if (retPct > 0.01) act.push({ tone: "warn", text: `Returns took ${short(store.returns)} (${pct(retPct, 1)} of sales, ${store.returnCount} return(s)). Check why with the team.` });
+  if (prevUpb !== null && upb < prevUpb) act.push({ tone: "warn", text: `Items per bill fell to ${upb.toFixed(2)} from ${prevUpb.toFixed(2)}. One more add-on per bill is the quickest way to grow sales.` });
+  if (lowUpb && lowUpb.units / lowUpb.bills < upb * 0.8) act.push({ tone: "warn", text: `${lowUpb.name} sells ${(lowUpb.units / lowUpb.bills).toFixed(1)} items per bill (store ${upb.toFixed(1)}) — coach on add-on selling.` });
+  if (noSales.length) act.push({ tone: "bad", text: `${noSales.map((p) => p.name).join(", ")} came to work but have no sales this month.` });
+  if (noTarget.length) act.push({ tone: "warn", text: `${noTarget.length} person(s) selling without a target this month: ${noTarget.slice(0, 5).map((p) => p.name).join(", ")}.` });
+  if (best) act.push({ tone: "good", text: `Top seller: ${best.name} — ${rupees(best.net)} from ${best.bills} bills.` });
+  if (bestAbv) act.push({ tone: "good", text: `Best average bill: ${bestAbv.name} — ${rupees(bestAbv.abv)}.` });
+  for (const sc of store.spotCounts) if (sc.count) act.push({ tone: "good", text: `${sc.count} ${sc.name} bill(s) so far.` });
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        <Tile label="Bills" value={store.bills} note={prev ? <Delta now={store.bills} before={prev.bills} /> : `${store.units} items`} />
+        <Tile label="Avg bill (ABV)" value={rupees(abv)} note={<Delta now={abv} before={prevAbv} money />} />
+        <Tile label="Items per bill (UPB)" value={upb.toFixed(2)} note={<Delta now={upb} before={prevUpb} digits={2} />} tone={prevUpb !== null && upb < prevUpb ? "warn" : "default"} />
+        <Tile label="Discount given" value={short(store.discount)} note={`${pct(discPct, 1)} · ${store.flagged.length} bill(s) over ${threshold}%`} tone={store.flagged.length ? "warn" : "default"} />
+        <Tile label="Returns" value={short(store.returns)} note={`${store.returnCount} return(s) · ${pct(retPct, 1)}`} tone={store.returns ? "bad" : "default"} />
+        <Tile label="Others" value={short(store.othersNet)} note={`${store.othersBills} bills · ${pct(othersPct, 1)} of sales`} tone={othersPct > 0.02 ? "bad" : "default"} />
+      </div>
+      <Panel title="For the Store Manager" intro={`${store.daysGone} of ${store.daysInMonth} days gone${running ? ` · ${daysLeft} day(s) left` : ""}. What to act on now.`}>
+        <ul className="space-y-2 text-sm">
+          {act.map((a) => (
+            <li key={a.text} className="flex gap-2">
+              <span aria-hidden>{a.tone === "bad" ? "🔴" : a.tone === "warn" ? "🟠" : "🟢"}</span>
+              <span>{a.text}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-black/45">Groups: {[...new Set(store.people.map((p) => groupName(p.group, labels)))].join(" · ")}</p>
+      </Panel>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------
+// Management only: sales against salary
+// ------------------------------------------------------------------
+
+function StaffWorth({ store, salaries, salesPerSalary, labels }: { store: StoreReport; salaries: Record<string, number>; salesPerSalary: number; labels: Partial<Record<IncentiveGroup, string>> }) {
+  // Salary for the days gone so far, so the middle of the month compares fairly.
+  const part = store.daysGone / store.daysInMonth || 1;
+  const rows = store.people
+    .map((p) => {
+      const salary = salaries[p.userId] ?? 0;
+      const cost = salary * part;
+      return { p, salary, cost, ratio: cost > 0 ? p.net / cost : null, incentiveShare: salary > 0 ? p.total / salary : null };
+    })
+    .sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1));
+  const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0);
+  const avg = withRatio.length ? withRatio.reduce((s, r) => s + r.p.net, 0) / withRatio.reduce((s, r) => s + r.cost, 0) : 0;
+  const totalSalary = rows.reduce((s, r) => s + r.cost, 0);
+  const missing = rows.filter((r) => !r.salary).length;
+
+  const verdict = (r: (typeof rows)[number]) => {
+    if (r.ratio === null) return { text: "Salary not entered", cls: "text-black/35" };
+    if (!r.p.bills) return { text: "No sales (non-selling role?)", cls: "text-black/45" };
+    if (salesPerSalary && r.ratio < salesPerSalary) return { text: `Below ${salesPerSalary}× — review`, cls: "font-semibold text-[#d6224a]" };
+    if (avg && r.ratio >= avg * 1.25) return { text: "Star — well above store", cls: "font-semibold text-green-700" };
+    if (avg && r.ratio < avg * 0.75) return { text: "Below store — watch", cls: "font-semibold text-amber-700" };
+    return { text: "In line with store", cls: "text-black/60" };
+  };
+
+  const tips: string[] = [];
+  if (totalSalary) tips.push(`Salaries for these ${store.daysGone} days: ${rupees(totalSalary)} — ${pct(totalSalary / Math.max(1, store.net), 1)} of the store's net sales.`);
+  if (avg) tips.push(`The store sells ${rupees(avg)} for every ₹1 of salary.`);
+  const top = withRatio[0];
+  const low = withRatio[withRatio.length - 1];
+  if (top && low && top !== low) tips.push(`Best value: ${top.p.name} (${rupees(top.ratio!)} per ₹1). Lowest: ${low.p.name} (${rupees(low.ratio!)} per ₹1).`);
+  if (missing) tips.push(`${missing} person(s) have no salary entered (Settings → Sales targets & incentives → Edit targets).`);
+
+  return (
+    <Panel title="Staff worth — sales against salary" intro="Only management sees this. Salary is counted for the days gone so far.">
+      <ul className="mb-4 space-y-1.5 text-sm">
+        {tips.map((t) => (
+          <li key={t} className="flex gap-2">
+            <span aria-hidden>📌</span>
+            <span>{t}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="-mx-2 overflow-x-auto">
+        <table className="min-w-[860px] text-sm">
+          <thead>
+            <tr>
+              <th className={thc}>Name</th>
+              <th className={thc}>Group</th>
+              <th className={`${thc} text-right`}>Salary / month</th>
+              <th className={`${thc} text-right`}>Net sales</th>
+              <th className={`${thc} text-right`}>Sales per ₹1 salary</th>
+              <th className={`${thc} text-right`}>Incentive % of salary</th>
+              <th className={thc}>Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const v = verdict(r);
+              return (
+                <tr key={r.p.userId} className="border-t border-black/5">
+                  <td className={`${tdc} font-semibold`}>
+                    {r.p.name} <span className="text-xs font-normal text-black/40">{r.p.userId}</span>
+                  </td>
+                  <td className={`${tdc} text-black/60`}>{groupName(r.p.group, labels)}</td>
+                  <td className={`${tdc} text-right`}>{r.salary ? rupees(r.salary) : "—"}</td>
+                  <td className={`${tdc} text-right`}>{rupees(r.p.net)}</td>
+                  <td className={`${tdc} text-right font-semibold`}>{r.ratio === null ? "—" : rupees(r.ratio)}</td>
+                  <td className={`${tdc} text-right`}>{r.incentiveShare === null ? "—" : pct(r.incentiveShare, 1)}</td>
+                  <td className={`${tdc} ${v.cls}`}>{v.text}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }

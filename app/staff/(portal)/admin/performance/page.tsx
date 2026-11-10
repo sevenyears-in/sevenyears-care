@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { loadIncentiveRules, loadPerformanceSettings } from "@/lib/performance-settings";
 import { assignPtCodesForSavedBills } from "@/lib/sales-sync";
-import { loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
+import { loadSalaries, loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
 import { isMonth, monthRange } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
@@ -76,6 +76,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
           ...ptPeople,
         ]}
         targets={Object.fromEntries([...targets.staff.entries()])}
+        salaries={Object.fromEntries(await loadSalaries().catch(() => new Map<string, number>()))}
         storeMonthTargets={Object.fromEntries([...targets.stores.entries()])}
         promos={(promos.data ?? []) as { id: number; kind: "slow_moving" | "b2g1"; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null }[]}
         unlinked={report?.unlinked ?? []}

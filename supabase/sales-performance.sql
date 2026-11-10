@@ -136,3 +136,12 @@ alter table public.staff_users add column if not exists incentive_group text;
 
 -- Product lists are keyed by incentive (any name), not only slow_moving / b2g1.
 alter table public.promo_products drop constraint if exists promo_products_kind_check;
+
+-- Monthly salary of each person (for the management view: sales for every ₹1 of salary).
+create table if not exists public.staff_salaries (
+  user_id         text primary key,          -- staff User ID or PT code
+  monthly_salary  numeric not null default 0,
+  updated_at      timestamptz not null default now(),
+  updated_by      text
+);
+alter table public.staff_salaries enable row level security;

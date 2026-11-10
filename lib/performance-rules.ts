@@ -25,6 +25,8 @@ export type PerformanceSettings = {
   customGroups: string[];
   /** Store whose pool a person shares when their own store is the Corporate Office (User ID → store). */
   incentiveStores: Record<string, string>;
+  /** Expected net sales for every ₹1 of salary (0 = not set). Management view only. */
+  salesPerSalary: number;
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -39,6 +41,7 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   groupLabels: {},
   customGroups: [],
   incentiveStores: {},
+  salesPerSalary: 0,
 };
 
 // ------------------------------------------------------------------

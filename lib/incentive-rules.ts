@@ -49,9 +49,36 @@ export type ProductUnitsRule = Base & {
   freeNotDiscount: boolean;
 };
 export type ProductValueRule = Base & { kind: "product_value"; list: string; slabs: { from: number; amount: number }[] };
+/** Financial year (April–March): own sales against the year's targets (the monthly targets added up). */
+export type YearlyAchievementRule = Base & { kind: "yearly_achievement"; slabs: { from: number; amount: number }[] };
 
-export type IncentiveRule = StorePoolRule | AchievementRule | AbvRule | BillValueRule | WowRule | ProductUnitsRule | ProductValueRule;
+export type IncentiveRule = StorePoolRule | AchievementRule | AbvRule | BillValueRule | WowRule | ProductUnitsRule | ProductValueRule | YearlyAchievementRule;
 export type RuleKind = IncentiveRule["kind"];
+
+/** How often an incentive is earned. */
+export type RulePeriod = "daily" | "monthly" | "yearly";
+export const RULE_PERIOD: Record<RuleKind, RulePeriod> = {
+  bill_value: "daily",
+  wow: "daily",
+  product_units: "daily",
+  store_pool: "monthly",
+  achievement: "monthly",
+  abv: "monthly",
+  product_value: "monthly",
+  yearly_achievement: "yearly",
+};
+export const PERIOD_LABEL: Record<RulePeriod, { title: string; help: string }> = {
+  daily: { title: "Daily", help: "Earned bill by bill, every day (paid with the month)." },
+  monthly: { title: "Monthly", help: "Worked out on the month's totals." },
+  yearly: { title: "Yearly", help: "Worked out on the financial year (April–March), paid after March." },
+};
+
+/** Financial year of a date: April–March. */
+export function financialYear(date: string) {
+  const y = Number(date.slice(0, 4));
+  const start = Number(date.slice(5, 7)) >= 4 ? y : y - 1;
+  return { from: `${start}-04-01`, to: `${start + 1}-03-31`, label: `${start}–${String(start + 1).slice(2)}` };
+}
 
 export const KIND_LABEL: Record<RuleKind, string> = {
   store_pool: "Store incentive pool",
@@ -61,6 +88,7 @@ export const KIND_LABEL: Record<RuleKind, string> = {
   wow: "WOW bill",
   product_units: "Per item of listed products",
   product_value: "Value of listed products (monthly slabs)",
+  yearly_achievement: "Yearly target achievement",
 };
 
 export const KIND_HELP: Record<RuleKind, string> = {
@@ -71,6 +99,7 @@ export const KIND_HELP: Record<RuleKind, string> = {
   wow: "A fixed amount for every bill that meets all the WOW rules.",
   product_units: "A fixed amount for every unit sold of the products on its list (returns are taken off).",
   product_value: "A monthly amount by the value sold of the products on its list.",
+  yearly_achievement: "A fixed amount for reaching a % of the person's target for the financial year (April–March), paid after March.",
 };
 
 const ALL = ELIGIBLE_GROUPS;
@@ -198,6 +227,8 @@ export function ruleSummary(r: IncentiveRule): string {
       return `${rs(r.amount)} per unit of the listed products`;
     case "product_value":
       return [...r.slabs].sort((a, b) => a.from - b.from).map((s) => `${rs(s.from)}+ → ${rs(s.amount)}`).join(" · ");
+    case "yearly_achievement":
+      return [...r.slabs].sort((a, b) => a.from - b.from).map((s) => `${pc(s.from)}+ of the year's target → ${rs(s.amount)}`).join(" · ");
   }
 }
 
@@ -215,6 +246,7 @@ export function ruleProblem(r: IncentiveRule): string | null {
     }
     case "achievement":
     case "product_value":
+    case "yearly_achievement":
       return r.slabs.length && r.slabs.every((s) => money(s.from) && money(s.amount)) ? null : "Check the levels and amounts.";
     case "abv":
       return r.slabs.length && r.slabs.every((s) => money(s.from) && money(s.abv) && money(s.amount)) ? null : "Check the levels and amounts.";

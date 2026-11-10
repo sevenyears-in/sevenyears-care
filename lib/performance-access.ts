@@ -26,6 +26,6 @@ export async function performanceAccess(staff: StaffUser): Promise<PerformanceAc
 /** Name of the menu item, or null when the person has nothing to see. */
 export function performanceMenuLabel(a: PerformanceAccess) {
   if (a.eligible) return "My Performance";
-  if (a.teamAll || a.teamStores.length) return "Sales Performance";
+  if (a.teamAll || a.teamStores.length) return "My Performance";
   return null;
 }

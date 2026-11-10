@@ -37,7 +37,7 @@ export default async function OffersAdminPage() {
         <h1 className="text-3xl font-bold">Offers &amp; Notifications 📣</h1>
         <p className="mt-2 text-sm text-black/60">
           Send an offer to every customer who has the Seven Years Care app. It arrives as a phone notification and stays on the
-          Offers page (care.sevenyears.in/offers) until its last date.
+          Offers page (care.sevenyears.in/offers) until its last date. New offers are shown and sent only after Ajmal Hussain K (1001) approves them.
         </p>
         <Link href="/staff/admin/app-usage" className="mt-3 inline-block text-sm font-bold text-[#8883d7] hover:underline">
           📊 App usage — who uses the app and who saw each offer →
@@ -94,7 +94,13 @@ export default async function OffersAdminPage() {
                   </p>
                 </div>
                 <div className="text-right text-xs">
-                  {o.sent_at ? (
+                  {o.approval_status === "pending" ? (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 font-bold text-amber-800">Waiting for approval</span>
+                  ) : o.approval_status === "rejected" ? (
+                    <span className="rounded-full bg-red-100 px-2.5 py-1 font-bold text-red-800" title={o.approved_by ?? ""}>
+                      Rejected
+                    </span>
+                  ) : o.sent_at ? (
                     <span className="rounded-full bg-green-100 px-2.5 py-1 font-bold text-green-800">Notified</span>
                   ) : (
                     <span className="rounded-full bg-amber-100 px-2.5 py-1 font-bold text-amber-800" title={o.send_error ?? ""}>
@@ -108,8 +114,14 @@ export default async function OffersAdminPage() {
                   👀 Seen by {seen.get(o.id)?.seen ?? 0}
                   {seen.get(o.id)?.tapped ? ` · 🔔 ${seen.get(o.id)!.tapped} opened` : ""}
                 </Link>
-                <ResendOfferButton id={o.id} />
-                {o.is_active ? <StopOfferButton id={o.id} /> : <span className="text-black/40">Hidden</span>}
+                {(o.approval_status ?? "approved") === "approved" && <ResendOfferButton id={o.id} />}
+                {(o.approval_status ?? "approved") !== "approved" ? (
+                  <span className="text-black/40">{o.approval_status === "pending" ? "Not shown until approved" : `Rejected by ${o.approved_by ?? "the approver"}`}</span>
+                ) : o.is_active ? (
+                  <StopOfferButton id={o.id} />
+                ) : (
+                  <span className="text-black/40">Hidden</span>
+                )}
                 <DeleteOfferButton id={o.id} />
               </div>
             </div>

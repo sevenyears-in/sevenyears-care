@@ -24,9 +24,11 @@ type Props = {
   explanationsWaiting: number;
   /** "My Performance", "Sales Performance" or nothing. */
   performanceLabel?: string | null;
+  /** Offers waiting for this person's approval (null = not the approver). */
+  offersWaiting?: number | null;
 };
 
-export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel }: Props) {
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting }: Props) {
   const can = (s: Section) => sections.includes(s);
   const pathname = usePathname();
   const router = useRouter();
@@ -59,6 +61,8 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   const links = [
     { href: "/staff", label: "Dashboard" },
     ...(performanceLabel ? [{ href: "/staff/performance", label: performanceLabel }] : []),
+    // Shown to the offer approver only while something is waiting.
+    ...(offersWaiting ? [{ href: "/staff/offer-approvals", label: `Offer approvals (${offersWaiting})` }] : []),
     ...(can("service") ? [{ href: "/staff/service", label: "Service Requests" }] : []),
     ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
     ...(can("explanations") || explanationsWaiting > 0

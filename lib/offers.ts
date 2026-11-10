@@ -14,7 +14,15 @@ export type Offer = {
   is_active: boolean;
   audience?: "all" | "selected";
   target_mobiles?: string[];
+  approval_status?: "approved" | "pending" | "rejected";
+  approved_by?: string | null;
+  approved_at?: string | null;
+  send_whatsapp?: boolean;
 };
+
+/** Offers need the approval of these staff (User IDs) before customers see them. */
+export const OFFER_APPROVER_IDS = ["1001"];
+export const isOfferApprover = (userId: string) => OFFER_APPROVER_IDS.includes(String(userId).trim());
 
 /** Offers a customer can see now: for everyone, plus ones sent to their own mobile. */
 export async function currentOffers(mobile?: string | null): Promise<Offer[]> {
@@ -22,6 +30,7 @@ export async function currentOffers(mobile?: string | null): Promise<Offer[]> {
     .from("offers")
     .select("*")
     .eq("is_active", true)
+    .eq("approval_status", "approved")
     .or(`valid_until.is.null,valid_until.gte.${todayISO()}`)
     .order("created_at", { ascending: false })
     .limit(30);

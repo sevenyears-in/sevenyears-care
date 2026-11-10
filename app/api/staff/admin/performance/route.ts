@@ -61,7 +61,9 @@ export async function POST(request: Request) {
       const excludedStores = (Array.isArray(body.excludedStores) ? body.excludedStores : [])
         .map((s) => String(s).trim().toUpperCase())
         .filter(Boolean);
-      await savePerformanceSettings({ highDiscountPct: Math.round(pct * 100) / 100, dutiesRequired: duties, storeTargets, excludedStores });
+      const sps = body.salesPerSalary === "" || body.salesPerSalary === undefined || body.salesPerSalary === null ? 0 : Number(body.salesPerSalary);
+      if (!Number.isFinite(sps) || sps < 0 || sps > 1000) return bad("Check the sales for every ₹1 of salary.");
+      await savePerformanceSettings({ highDiscountPct: Math.round(pct * 100) / 100, dutiesRequired: duties, storeTargets, excludedStores, salesPerSalary: Math.round(sps * 10) / 10 });
       return NextResponse.json({ ok: true });
     }
 
@@ -225,6 +227,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, saved: save.length });
     }
 
+    case "salaries": {
+      // Monthly salaries (management view only). Empty = remove.
+      const rows = Array.isArray(body.rows) ? (body.rows as Body[]) : [];
+      const save: { user_id: string; monthly_salary: number; updated_at: string; updated_by: string }[] = [];
+      const remove: string[] = [];
+      for (const r of rows) {
+        const userId = String(r.userId ?? "").trim();
+        if (!userId) continue;
+        const v = r.salary === "" || r.salary === null || r.salary === undefined ? null : money(r.salary);
+        if (v === null || v === 0) remove.push(userId);
+        else save.push({ user_id: userId, monthly_salary: v, updated_at: new Date().toISOString(), updated_by: by });
+      }
+      if (save.length) {
+        const { error } = await supabaseAdmin.from("staff_salaries").upsert(save);
+        if (error) return bad(error.message, 500);
+      }
+      if (remove.length) await supabaseAdmin.from("staff_salaries").delete().in("user_id", remove);
+      return NextResponse.json({ ok: true });
+    }
+
     case "copy_targets": {
       if (!isMonth(body.from) || !isMonth(body.to)) return bad("Choose a month.");
       const [{ data: prev }, { data: now }] = await Promise.all([
@@ -330,7 +352,7 @@ export async function POST(request: Request) {
 
 // ------------------------------------------------------------------
 
-const KINDS: RuleKind[] = ["store_pool", "achievement", "abv", "bill_value", "wow", "product_units", "product_value"];
+const KINDS: RuleKind[] = ["store_pool", "achievement", "abv", "bill_value", "wow", "product_units", "product_value", "yearly_achievement"];
 const num = (v: unknown) => {
   const x = Number(v);
   return Number.isFinite(x) ? x : NaN;
@@ -359,6 +381,7 @@ function cleanRule(raw: unknown, allowed: string[]): IncentiveRule | null {
       return { ...base, kind, groups: allowed.filter((g) => (split[g] ?? 0) > 0), slabs: slabs.map((x) => ({ from: num(x.from), rate: num(x.rate) })), split };
     }
     case "achievement":
+    case "yearly_achievement":
       return { ...base, kind, slabs: slabs.map((x) => ({ from: num(x.from), amount: num(x.amount) })) };
     case "product_value":
       return { ...base, kind, list: String(r.list ?? ""), slabs: slabs.map((x) => ({ from: num(x.from), amount: num(x.amount) })) };

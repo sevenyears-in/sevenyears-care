@@ -7,6 +7,7 @@ import { StaffBottomNav, StaffHeader } from "@/components/StaffChrome";
 import { AppSetup } from "@/components/InstallApp";
 import { pendingExplanationCount } from "@/lib/explanations";
 import { performanceAccess, performanceMenuLabel } from "@/lib/performance-access";
+import { isOfferApprover } from "@/lib/offers";
 
 export const metadata: Metadata = {
   title: "Staff",
@@ -19,7 +20,8 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
   if (!staff) redirect("/staff/login");
   if (staff.mustChangePassword) redirect("/staff/password");
 
-  const [{ count }, explanationsWaiting, perf] = await Promise.all([
+  const approver = isOfferApprover(staff.userId);
+  const [{ count }, explanationsWaiting, perf, offersWaiting] = await Promise.all([
     supabaseAdmin
       .from("staff_notifications")
       .select("id", { count: "exact", head: true })
@@ -27,6 +29,13 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
       .is("read_at", null),
     pendingExplanationCount(staff.id).catch(() => 0),
     performanceAccess(staff).catch(() => null),
+    approver
+      ? supabaseAdmin
+          .from("offers")
+          .select("id", { count: "exact", head: true })
+          .eq("approval_status", "pending")
+          .then((r) => r.count ?? 0, () => 0)
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -41,6 +50,7 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
         unreadAlerts={count ?? 0}
         explanationsWaiting={explanationsWaiting}
         performanceLabel={perf ? performanceMenuLabel(perf) : null}
+        offersWaiting={offersWaiting}
       />
       <AppSetup />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-6 sm:py-8">{children}</main>

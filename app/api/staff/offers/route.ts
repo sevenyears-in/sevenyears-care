@@ -4,7 +4,9 @@ import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { pushToAll, pushToCustomer, saveServiceAccount } from "@/lib/push";
 import { saveWishSettings } from "@/lib/wishes";
-import { sendWhatsApp, siteUrl, whatsappConfigured } from "@/lib/notify";
+import { notifyStaff, sendWhatsApp, siteUrl, whatsappConfigured, type Recipient } from "@/lib/notify";
+import { asRole } from "@/lib/roles";
+import { isOfferApprover, OFFER_APPROVER_IDS } from "@/lib/offers";
 import { plainText, whatsAppText } from "@/components/RichText";
 
 // Keeps the line breaks the person typed (at most one empty line in a row).
@@ -27,9 +29,35 @@ const clean = (v: unknown, max: number) => String(v ?? "").replace(/<[^>]*>/g, "
 export async function POST(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
-  if (!isAdmin(auth.staff.role)) return NextResponse.json({ error: "Only the Super Admin or Admin can send offers." }, { status: 403 });
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const by = `${auth.staff.fullName} (${auth.staff.userId})`;
+  const approver = isOfferApprover(auth.staff.userId);
+
+  // Approve / reject an offer waiting for approval (the approver only).
+  if (body.action === "approve" || body.action === "reject") {
+    if (!approver) return NextResponse.json({ error: "Only the offer approver can do this." }, { status: 403 });
+    const id = String(body.id ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid offer." }, { status: 400 });
+    const { data: o } = await supabaseAdmin
+      .from("offers")
+      .select("id, title, message, audience, target_mobiles, approval_status, send_whatsapp")
+      .eq("id", id)
+      .maybeSingle();
+    if (!o) return NextResponse.json({ error: "Offer not found." }, { status: 404 });
+    if (o.approval_status !== "pending") return NextResponse.json({ error: "This offer is not waiting for approval." }, { status: 400 });
+    const now = new Date().toISOString();
+    if (body.action === "reject") {
+      await supabaseAdmin.from("offers").update({ approval_status: "rejected", is_active: false, approved_by: by, approved_at: now }).eq("id", id);
+      return NextResponse.json({ success: true, note: "Rejected. Customers will not see it." });
+    }
+    await supabaseAdmin.from("offers").update({ approval_status: "approved", is_active: true, approved_by: by, approved_at: now }).eq("id", id);
+    const audience = o.audience === "selected" ? "selected" : "all";
+    const waNote = o.send_whatsapp ? await offerWhatsApp(o.title, o.message, audience, o.target_mobiles ?? []) : "";
+    const result = await deliver(o.id, o.title, o.message, audience, o.target_mobiles ?? [], by);
+    return NextResponse.json({ ...result, note: `Approved. ${result.note}${waNote}`, warning: result.warning ? result.warning + waNote : "" });
+  }
+
+  if (!isAdmin(auth.staff.role)) return NextResponse.json({ error: "Only the Super Admin or Admin can send offers." }, { status: 403 });
 
   if (body.action === "setup") {
     if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can set this up." }, { status: 403 });
@@ -65,8 +93,9 @@ export async function POST(request: Request) {
   if (body.action === "resend") {
     const id = String(body.id ?? "");
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid offer." }, { status: 400 });
-    const { data: o } = await supabaseAdmin.from("offers").select("id, title, message, audience, target_mobiles").eq("id", id).maybeSingle();
+    const { data: o } = await supabaseAdmin.from("offers").select("id, title, message, audience, target_mobiles, approval_status").eq("id", id).maybeSingle();
     if (!o) return NextResponse.json({ error: "Offer not found." }, { status: 404 });
+    if ((o.approval_status ?? "approved") !== "approved") return NextResponse.json({ error: "This offer is not approved yet." }, { status: 400 });
     // Resending also shows it on the Offers page again if it was hidden.
     await supabaseAdmin.from("offers").update({ is_active: true }).eq("id", id);
     const result = await deliver(o.id, o.title, o.message, o.audience === "selected" ? "selected" : "all", o.target_mobiles ?? [], by);
@@ -90,9 +119,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "WhatsApp is not connected yet (Settings → Alerts Setup). Untick “Also send on WhatsApp” or set it up first." }, { status: 400 });
   }
 
+  // Offers from anyone but the approver wait for approval before customers see them.
+  const status = approver ? "approved" : "pending";
   const { data: offer, error } = await supabaseAdmin
     .from("offers")
-    .insert({ title, message, link: linkRaw || null, valid_until: validUntil, created_by: by, audience, target_mobiles: mobiles })
+    .insert({
+      title,
+      message,
+      link: linkRaw || null,
+      valid_until: validUntil,
+      created_by: by,
+      audience,
+      target_mobiles: mobiles,
+      approval_status: status,
+      approved_by: approver ? by : null,
+      approved_at: approver ? new Date().toISOString() : null,
+      send_whatsapp: viaWhatsApp,
+    })
     .select("id")
     .single();
   if (error || !offer) {
@@ -100,28 +143,61 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not save the offer. Ask the Super Admin to run the latest database update." }, { status: 500 });
   }
 
-  // WhatsApp (template "sy_offer": {{1}} name · {{2}} offer title · {{3}} details) — sent in the background.
-  let waNote = "";
-  if (viaWhatsApp) {
-    const targets =
-      audience === "selected"
-        ? ((await supabaseAdmin.from("customer_accounts").select("mobile, full_name").in("mobile", mobiles)).data ?? []).concat(
-            mobiles.map((m) => ({ mobile: m, full_name: null }))
-          )
-        : (await supabaseAdmin.from("customer_accounts").select("mobile, full_name").limit(20000)).data ?? [];
-    const unique = [...new Map(targets.reverse().map((t) => [t.mobile, t])).values()];
-    waNote = ` WhatsApp is going out to ${unique.length} customer${unique.length === 1 ? "" : "s"}.`;
-    after(async () => {
-      for (const t of unique) {
-        const name = String(t.full_name ?? "").split(" ")[0] || "there";
-        await sendWhatsApp(t.mobile, "sy_offer", [name, title, whatsAppText(message)], { audience: "customer", ticketNumber: "offer" });
-      }
+  if (!approver) {
+    const names = await askForApproval(title, by);
+    return NextResponse.json({
+      success: true,
+      sent: true,
+      note: `Sent to ${names || "the approver"} for approval. Customers will see it and get the notification once it is approved.`,
     });
   }
 
+  const waNote = viaWhatsApp ? await offerWhatsApp(title, message, audience, mobiles) : "";
   const result = await deliver(offer.id, title, message, audience, mobiles, by);
   if (result.sent) return NextResponse.json({ ...result, note: result.note + waNote });
   return NextResponse.json({ ...result, warning: result.warning + waNote });
+}
+
+/** Tells the approver(s) that an offer is waiting. Returns their names. */
+async function askForApproval(title: string, by: string) {
+  const { data } = await supabaseAdmin
+    .from("staff_users")
+    .select("id, full_name, role, store_name, email, whatsapp_number, notify_email, notify_whatsapp, user_id")
+    .eq("is_active", true)
+    .in("user_id", OFFER_APPROVER_IDS);
+  const list = (data ?? []).map(({ user_id: _u, ...r }) => {
+    void _u;
+    return { ...r, role: asRole(r.role) } as Recipient;
+  });
+  await notifyStaff(list, {
+    ticketType: null,
+    ticketId: null,
+    ticketNumber: "Offer",
+    title: "Offer waiting for your approval",
+    summary: `${title} — from ${by}`,
+    storeName: null,
+    link: `${siteUrl()}/staff/offer-approvals`,
+  }).catch((e) => console.error("Offer approval alert failed:", e));
+  return list.map((r) => r.full_name).join(", ");
+}
+
+/** WhatsApp (template "sy_offer": {{1}} name · {{2}} offer title · {{3}} details) — sent in the background. */
+async function offerWhatsApp(title: string, message: string, audience: "all" | "selected", mobiles: string[]) {
+  if (!(await whatsappConfigured())) return " WhatsApp is not connected, so it was not sent on WhatsApp.";
+  const targets =
+    audience === "selected"
+      ? ((await supabaseAdmin.from("customer_accounts").select("mobile, full_name").in("mobile", mobiles)).data ?? []).concat(
+          mobiles.map((m) => ({ mobile: m, full_name: null }))
+        )
+      : (await supabaseAdmin.from("customer_accounts").select("mobile, full_name").limit(20000)).data ?? [];
+  const unique = [...new Map(targets.reverse().map((t) => [t.mobile, t])).values()];
+  after(async () => {
+    for (const t of unique) {
+      const name = String(t.full_name ?? "").split(" ")[0] || "there";
+      await sendWhatsApp(t.mobile, "sy_offer", [name, title, whatsAppText(message)], { audience: "customer", ticketNumber: "offer" });
+    }
+  });
+  return ` WhatsApp is going out to ${unique.length} customer${unique.length === 1 ? "" : "s"}.`;
 }
 
 /** Phone & browser notifications for one offer (used for new offers and "Resend"). */

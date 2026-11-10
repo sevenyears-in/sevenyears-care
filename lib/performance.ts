@@ -25,6 +25,8 @@ import {
   type RuleKind,
   type StorePoolRule,
   type WowRule,
+  type YearlyAchievementRule,
+  financialYear,
 } from "@/lib/incentive-rules";
 
 // ------------------------------------------------------------------
@@ -409,6 +411,11 @@ export type StoreReport = {
   othersGross: number;
   othersDiscount: number;
   othersFlagged: number;
+  /** Items sold (carry bags left out). */
+  units: number;
+  returnCount: number;
+  /** Per-bill incentive counts at store level (e.g. WOW bills). */
+  spotCounts: { name: string; count: number }[];
   people: PersonReport[];
   flagged: InvoiceRow[];
   daysInMonth: number;
@@ -727,6 +734,11 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       othersGross: others.reduce((s, b) => s + b.gross, 0),
       othersDiscount: others.reduce((s, b) => s + b.discount, 0),
       othersFlagged: others.filter((b) => discountShare(b) > threshold).length,
+      units: bills.reduce((s, b) => s + b.quantity, 0),
+      returnCount: back.length,
+      spotCounts: billRules
+        .filter((r) => inForce(r, mTo) || (r.to && r.to >= mFrom))
+        .map((r) => ({ name: r.name, count: bills.filter((b) => inForce(r, b.invoice_date) && billQualifies(b, r) && !returnedBills.has(b.invoice_id)).length })),
       people,
       flagged: bills.filter((b) => discountShare(b) > threshold).sort((x, y) => discountShare(y) - discountShare(x)),
       daysInMonth,
@@ -846,4 +858,73 @@ export async function personDetail(month: string, userId: string, threshold: num
     returned: ((back.data ?? []) as Row[]).map(normReturn),
     daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
   };
+}
+
+// ------------------------------------------------------------------
+// Store comparisons and salaries
+// ------------------------------------------------------------------
+
+/** Monthly salaries (User ID / PT code → ₹). Management view only. */
+export async function loadSalaries(): Promise<Map<string, number>> {
+  const { data } = await supabaseAdmin.from("staff_salaries").select("user_id, monthly_salary").limit(5000);
+  return new Map(((data ?? []) as Row[]).map((r) => [attendanceCode(r.user_id), n(r.monthly_salary)]));
+}
+
+export type PeriodTotals = { net: number; bills: number; units: number; gross: number; discount: number; returns: number };
+
+/** The same days of the month before (1 … upToDay), for "vs last month". */
+export async function storePreviousPeriod(month: string, store: string, upToDay: number): Promise<PeriodTotals | null> {
+  const [y, m] = month.split("-").map(Number);
+  const prev = new Date(Date.UTC(y, m - 2, 1));
+  const pm = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
+  const { days } = monthRange(pm);
+  const to = `${pm}-${String(Math.min(Math.max(1, upToDay), days)).padStart(2, "0")}`;
+  const [bills, back] = await Promise.all([
+    fetchAll<Row>((a, b) =>
+      supabaseAdmin.from("sales_invoices").select("net, gross, discount, quantity").eq("store", store).gte("invoice_date", `${pm}-01`).lte("invoice_date", to).order("invoice_id").range(a, b)
+    ),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net").eq("store", store).gte("return_date", `${pm}-01`).lte("return_date", to).order("creditnote_id").range(a, b)),
+  ]);
+  if (!bills.length) return null;
+  const returns = back.reduce((s, r) => s + n(r.net), 0);
+  return {
+    net: bills.reduce((s, b) => s + n(b.net), 0) - returns,
+    bills: bills.length,
+    units: bills.reduce((s, b) => s + n(b.quantity), 0),
+    gross: bills.reduce((s, b) => s + n(b.gross), 0),
+    discount: bills.reduce((s, b) => s + n(b.discount), 0),
+    returns,
+  };
+}
+
+// ------------------------------------------------------------------
+// Yearly incentives (financial year April–March)
+// ------------------------------------------------------------------
+
+export type YearlyLine = { name: string; fy: string; target: number; net: number; achievement: number | null; amount: number; next: { from: number; amount: number } | null };
+
+export async function yearlyProgress(userId: string, group: IncentiveGroup, today: string): Promise<YearlyLine[]> {
+  const fy = financialYear(today);
+  const rules = (await loadIncentiveRules()).filter(
+    (r): r is YearlyAchievementRule => r.kind === "yearly_achievement" && (inForce(r, today) || inForce(r, fy.to)) && r.groups.includes(group)
+  );
+  if (!rules.length) return [];
+  const upTo = today < fy.to ? today : fy.to;
+  const [targets, bills, back] = await Promise.all([
+    supabaseAdmin.from("staff_sales_targets").select("sales_target").eq("user_id", userId).gte("month", fy.from.slice(0, 7)).lte("month", fy.to.slice(0, 7)),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_invoices").select("net").eq("staff_user_id", userId).gte("invoice_date", fy.from).lte("invoice_date", upTo).order("invoice_id").range(a, b)),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net").eq("staff_user_id", userId).gte("return_date", fy.from).lte("return_date", upTo).order("creditnote_id").range(a, b)),
+  ]);
+  const target = ((targets.data ?? []) as Row[]).reduce((s, t) => s + n(t.sales_target), 0);
+  const net = bills.reduce((s, b) => s + n(b.net), 0) - back.reduce((s, r) => s + n(r.net), 0);
+  const achievement = target > 0 ? net / target : null;
+  return rules.map((r) => ({
+    name: r.name,
+    fy: fy.label,
+    target,
+    net,
+    achievement,
+    amount: achievement !== null ? slabFor(r.slabs, achievement)?.amount ?? 0 : 0,
+    next: achievement !== null ? nextSlab(r.slabs, achievement) : null,
+  }));
 }
