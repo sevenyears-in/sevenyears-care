@@ -116,6 +116,9 @@ function Bars({ rows }: { rows: { label: string; value: number; note?: string }[
   );
 }
 
+/** One colour per store button (brand colours). */
+const STORE_COLOURS = ["#0fa8bf", "#f39237", "#ff5e79", "#5b55c9", "#2f9e44"];
+
 const thc = "whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-black/45";
 const tdc = "whitespace-nowrap px-3 py-2.5 tabular-nums";
 
@@ -183,11 +186,20 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           Me
         </Link>
       )}
-      {myStores.map((s) => (
-        <Link key={s} href={qs(base, { view: "team", store: s })} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${teamStore === s ? "bg-[#8883d7] text-white" : "hover:bg-black/5"}`}>
-          {s}
-        </Link>
-      ))}
+      {myStores.map((s, i) => {
+        const c = STORE_COLOURS[i % STORE_COLOURS.length];
+        const on = teamStore === s;
+        return (
+          <Link
+            key={s}
+            href={qs(base, { view: "team", store: s })}
+            className="rounded-full px-4 py-1.5 text-sm font-bold ring-1 transition hover:opacity-90"
+            style={on ? { background: c, color: "#fff", boxShadow: `0 0 0 1px ${c}` } : { background: `${c}1a`, color: c, boxShadow: `0 0 0 1px ${c}55` }}
+          >
+            {s}
+          </Link>
+        );
+      })}
       {isAdmin(staff.role) && (
         <Link href="/staff/admin/performance" className="ml-auto rounded-full px-3 py-1.5 text-sm font-semibold text-[#8883d7] hover:bg-black/5">
           🎯 Targets &amp; settings
@@ -877,7 +889,8 @@ function StoreDashboard({
   const bestAbv = [...sellers].filter((p) => p.bills >= 10).sort((a, b) => b.abv - a.abv)[0];
   const lowUpb = [...sellers].filter((p) => p.bills >= 10).sort((a, b) => a.units / a.bills - b.units / b.bills)[0];
   const topDisc = [...sellers].sort((a, b) => b.discount - a.discount)[0];
-  const noSales = store.people.filter((p) => p.bills === 0 && p.attendance.duties > 0 && ["sales", "asm", "sm"].includes(p.group));
+  // Store Managers are measured on the store, not on their own billing — left out here.
+  const noSales = store.people.filter((p) => p.bills === 0 && p.attendance.duties > 0 && p.targetApplies && ["sales", "asm"].includes(p.group));
   const noTarget = store.people.filter((p) => p.target === null && p.group !== "none" && p.bills > 0);
 
   // Things for the Store Manager to act on (most important first).
