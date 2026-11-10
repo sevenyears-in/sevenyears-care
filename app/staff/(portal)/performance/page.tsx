@@ -441,8 +441,12 @@ function PersonView({
         <Tile
           label="Duties ›"
           value={att.found ? `${att.duties + att.noData}/${att.required}` : "—"}
-          note={att.found ? (att.absences ? `${att.absences} short → ${pct(att.share)} paid` : att.noData ? `incl. ${att.noData} day(s) without punching data` : "On track") : "No attendance found"}
-          tone={att.absences ? "bad" : "default"}
+          note={
+            att.found
+              ? `${att.absences ? `${att.absences} short → ${pct(att.share)} paid` : att.noData ? `incl. ${att.noData} day(s) without punching data` : "On track"}${att.late ? ` · ${att.late} late` : ""}`
+              : "No attendance found"
+          }
+          tone={att.absences ? "bad" : att.late ? "warn" : "default"}
         />
         </Link>
       </div>
@@ -737,7 +741,8 @@ function TeamView({
                   <td className={`${tdc} text-right`}>{p.returns ? rupees(p.returns) : "—"}</td>
                   <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}><Link href={dutiesHref(p.userId)} className="underline decoration-dotted underline-offset-2 hover:text-[#5b55c9]">
                       {p.attendance.found || p.attendance.justified ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}
-                    </Link></td>
+                    </Link>
+                    {p.attendance.late ? <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800" title={`${p.attendance.lateMinutes} min late in all`}>{p.attendance.late} late</span> : null}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.storeShare)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.bonus)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.spotTotal)}</td>
@@ -918,6 +923,15 @@ function StoreDashboard({
   if (retPct > 0.01) act.push({ tone: "warn", text: `Returns took ${short(store.returns)} (${pct(retPct, 1)} of sales, ${store.returnCount} return(s)). Check why with the team.` });
   if (prevUpb !== null && upb < prevUpb) act.push({ tone: "warn", text: `Items per bill fell to ${upb.toFixed(2)} from ${prevUpb.toFixed(2)}. One more add-on per bill is the quickest way to grow sales.` });
   if (lowUpb && lowUpb.units / lowUpb.bills < upb * 0.8) act.push({ tone: "warn", text: `${lowUpb.name} sells ${(lowUpb.units / lowUpb.bills).toFixed(1)} items per bill (store ${upb.toFixed(1)}) — coach on add-on selling.` });
+  const lateList = [...store.people].filter((p) => p.attendance.late > 0).sort((a, b) => b.attendance.late - a.attendance.late || b.attendance.lateMinutes - a.attendance.lateMinutes);
+  if (lateList.length)
+    act.push({
+      tone: lateList.some((p) => p.attendance.late >= 3) ? "bad" : "warn",
+      text: `Late comings: ${lateList
+        .slice(0, 5)
+        .map((p) => `${p.name.split(" ").slice(0, 2).join(" ")} ${p.attendance.late}× (${p.attendance.lateMinutes} min)`)
+        .join(", ")}. Open Duties to see the days.`,
+    });
   if (noSales.length) act.push({ tone: "bad", text: `${noSales.map((p) => p.name).join(", ")} came to work but have no sales this month.` });
   if (noTarget.length) act.push({ tone: "warn", text: `${noTarget.length} person(s) selling without a target this month: ${noTarget.slice(0, 5).map((p) => p.name).join(", ")}.` });
   if (best) act.push({ tone: "good", text: `Top seller: ${best.name} — ${rupees(best.net)} from ${best.bills} bills.` });

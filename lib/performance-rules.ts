@@ -31,6 +31,12 @@ export type PerformanceSettings = {
   noTargetGroups: string[];
   /** Assistant Store Manager and Floor Manager are one role for now. */
   asmIsFm: boolean;
+  /** Duty start times (24-hour "09:30"). The first one is everyone's unless another is chosen. */
+  shifts: { name: string; start: string }[];
+  /** Minutes after the start before a first punch counts as late. */
+  lateGraceMinutes: number;
+  /** User ID / PT code → shift name. */
+  personShifts: Record<string, string>;
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -48,7 +54,27 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   salesPerSalary: 0,
   noTargetGroups: ["sm"],
   asmIsFm: true,
+  shifts: [{ name: "Regular", start: "09:30" }],
+  lateGraceMinutes: 10,
+  personShifts: {},
 };
+
+/** "09:30" → 570 minutes after midnight. */
+export const timeToMinutes = (t: string) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+};
+export const minutesToTime = (m: number) => {
+  const h = Math.floor(m / 60);
+  const mm = String(m % 60).padStart(2, "0");
+  return `${((h + 11) % 12) + 1}:${mm} ${h < 12 ? "am" : "pm"}`;
+};
+/** Start (minutes) of a person's shift. */
+export function shiftStartOf(s: Pick<PerformanceSettings, "shifts" | "personShifts">, userId: string) {
+  const list = s.shifts?.length ? s.shifts : DEFAULT_PERFORMANCE_SETTINGS.shifts;
+  const chosen = list.find((x) => x.name === s.personShifts?.[userId]) ?? list[0];
+  return { name: chosen.name, start: timeToMinutes(chosen.start) };
+}
 
 // ------------------------------------------------------------------
 // Groups (who shares which part of the store pool, who can earn what)

@@ -4,7 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDateTime, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
-import { isMonth, pct } from "@/lib/performance-rules";
+import { isMonth, minutesToTime, pct, shiftStartOf } from "@/lib/performance-rules";
 import { dutyAccess, dutyDays, JUSTIFY_KINDS } from "@/lib/duties";
 import { JustifyDay, RemoveJustification } from "@/components/DutyJustify";
 
@@ -35,7 +35,10 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
   const access = await dutyAccess(staff, userId, person?.store ?? null);
   if (!access.view) redirect("/staff/performance");
   const canJustify = access.justify && attendanceCode(staff.userId) !== userId;
-  const days = await dutyDays(userId, month);
+  const shift = shiftStartOf(report.settings, userId);
+  const lateAfter = shift.start + report.settings.lateGraceMinutes;
+  const days = await dutyDays(userId, month, lateAfter);
+  const lateDays = days.filter((d) => d.late);
   const a = person?.attendance;
   const absent = days.filter((d) => d.status === "absent").length;
 
@@ -72,7 +75,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
       </div>
 
       {a && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Duties</p>
             <p className="mt-1 text-2xl font-bold">
@@ -86,6 +89,14 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Absent, not justified</p>
             <p className={`mt-1 text-2xl font-bold ${absent ? "text-[#d6224a]" : ""}`}>{absent}</p>
             <p className="text-xs text-black/55">{canJustify ? "Justify a day below if it was approved" : "HR or the Store Manager can justify"}</p>
+          </div>
+          <div className={`rounded-2xl bg-white p-4 soft-card ring-1 ${lateDays.length ? "ring-amber-200" : "ring-black/5"}`}>
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Late comings</p>
+            <p className={`mt-1 text-2xl font-bold ${lateDays.length ? "text-amber-700" : ""}`}>{lateDays.length}</p>
+            <p className="text-xs text-black/55">
+              {shift.name} shift {minutesToTime(shift.start)} · {report.settings.lateGraceMinutes} min grace
+              {lateDays.length ? ` · ${lateDays.reduce((s, d) => s + (d.late ?? 0), 0)} min in all` : ""}
+            </p>
           </div>
           <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Days left</p>
@@ -115,6 +126,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
                   {d.last ? ` – ${d.last}` : ""}
                 </p>
               )}
+              {d.late ? <p className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Late by {d.late} min</p> : null}
               {d.justification && (
                 <div className="mt-1 text-[11px] text-black/60">
                   <p className="font-semibold text-[#5b55c9]">{kindLabel(d.justification.kind)}</p>
@@ -134,7 +146,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
           ))}
         </div>
         <p className="mt-4 text-xs text-black/50">
-          Present = punched on the machine. Days with no punching data at all are not counted as absent. A justified day counts as a duty. The 26-duty rule: each duty short is
+          Present = punched on the machine. Late = first punch after the shift start plus the grace minutes. Days with no punching data at all are not counted as absent. A justified day counts as a duty. The 26-duty rule: each duty short is
           one unauthorised absence (1 → 75% of incentive paid, 2 → 50%, 3 or more → nothing).
         </p>
       </section>

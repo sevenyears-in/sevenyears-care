@@ -24,6 +24,9 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       salesPerSalary: Number(v.salesPerSalary) || 0,
       noTargetGroups: Array.isArray(v.noTargetGroups) ? v.noTargetGroups : DEFAULT_PERFORMANCE_SETTINGS.noTargetGroups,
       asmIsFm: v.asmIsFm === undefined ? true : Boolean(v.asmIsFm),
+      shifts: Array.isArray(v.shifts) && v.shifts.length ? v.shifts : DEFAULT_PERFORMANCE_SETTINGS.shifts,
+      lateGraceMinutes: Number.isFinite(Number(v.lateGraceMinutes)) && v.lateGraceMinutes !== undefined ? Number(v.lateGraceMinutes) : DEFAULT_PERFORMANCE_SETTINGS.lateGraceMinutes,
+      personShifts: v.personShifts ?? {},
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

@@ -78,7 +78,9 @@ function facts(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | nul
   const retPct = store.invoiceNet ? store.returns / store.invoiceNet : 0;
   const topCats = trends.categories.slice(0, 3).map((c) => c.name);
   const hrs = peakLeanHours(trends.hours);
+  const late = store.people.filter((p) => p.attendance.late > 0).sort((a, b) => b.attendance.late - a.attendance.late);
   return {
+    late,
     hrs,
     store,
     trends,
@@ -176,6 +178,12 @@ function smPlan(f: Facts): PlanItem[] {
       detail: `Ask the back office to set the category in Zoho for: ${names(f.trends.uncategorized.items, 4)}. Uncategorised items spoil WOW bills and reports.`,
     });
   if (f.noTarget.length) out.push({ priority: "medium", title: `${f.noTarget.length} person(s) have no target`, detail: `Ask the admin to set targets for ${names(f.noTarget)} — people sell better with a number.` });
+  if (f.late.length)
+    out.push({
+      priority: f.late.some((p) => p.attendance.late >= 3) ? "high" : "medium",
+      title: `Late comings: ${names(f.late, 4)}`,
+      detail: `${f.late.reduce((s, p) => s + p.attendance.late, 0)} late arrival(s) this month (${f.late.reduce((s, p) => s + p.attendance.lateMinutes, 0)} min in all). Talk to anyone late 3 times or more; the morning huddle starts on time.`,
+    });
   if (f.idle.length) out.push({ priority: "high", title: `On duty but no sales: ${names(f.idle)}`, detail: `Find out why (billing, stock work, training) and put them on the floor in busy hours.` });
   if (f.weak.length) out.push({ priority: "medium", title: `Coach: ${names(f.weak)}`, detail: `Below 60% of the team's middle seller. Pair each with a top seller for two busy days.` });
   return out;
@@ -221,8 +229,13 @@ function fmPlan(f: Facts): PlanItem[] {
   return out;
 }
 
+const lateItem = (p?: PersonReport): PlanItem[] =>
+  p && p.attendance.late
+    ? [{ priority: p.attendance.late >= 3 ? "high" : "medium", title: `You came late ${p.attendance.late} time(s) this month`, detail: `${p.attendance.lateMinutes} minutes in all. Be on the floor before the shift starts — the morning is when the day's plan is set.` }]
+    : [];
+
 function csaPlan(f: Facts, p?: PersonReport): PlanItem[] {
-  const out: PlanItem[] = [];
+  const out: PlanItem[] = [...lateItem(p)];
   if (p && p.target && f.running) {
     const need = Math.max(0, p.target - p.net) / Math.max(1, f.daysLeft);
     out.push({ priority: "high", title: `Your daily number: ${rs(need)}`, detail: `To reach 100% of your target (${rs(p.target)}) in the ${f.daysLeft} day(s) left. Now at ${pc(p.achievement ?? 0)}.` });
@@ -246,7 +259,7 @@ function csaPlan(f: Facts, p?: PersonReport): PlanItem[] {
 }
 
 function crePlan(f: Facts, p?: PersonReport): PlanItem[] {
-  const out: PlanItem[] = [];
+  const out: PlanItem[] = [...lateItem(p)];
   if (f.store.othersBills)
     out.push({
       priority: "high",

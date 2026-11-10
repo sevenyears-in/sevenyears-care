@@ -63,7 +63,22 @@ export async function POST(request: Request) {
         .filter(Boolean);
       const sps = body.salesPerSalary === "" || body.salesPerSalary === undefined || body.salesPerSalary === null ? 0 : Number(body.salesPerSalary);
       if (!Number.isFinite(sps) || sps < 0 || sps > 1000) return bad("Check the sales for every ₹1 of salary.");
-      await savePerformanceSettings({ highDiscountPct: Math.round(pct * 100) / 100, dutiesRequired: duties, storeTargets, excludedStores, salesPerSalary: Math.round(sps * 10) / 10 });
+      const shifts = (Array.isArray(body.shifts) ? (body.shifts as Body[]) : [])
+        .map((x) => ({ name: String(x.name ?? "").replace(/\s+/g, " ").trim().slice(0, 30), start: String(x.start ?? "").trim() }))
+        .filter((x) => x.name && /^([01]?\d|2[0-3]):[0-5]\d$/.test(x.start))
+        .slice(0, 6);
+      if (Array.isArray(body.shifts) && !shifts.length) return bad("Give at least one shift with a name and a start time.");
+      const grace = body.lateGraceMinutes === undefined ? undefined : Math.round(Number(body.lateGraceMinutes));
+      if (grace !== undefined && (!Number.isFinite(grace) || grace < 0 || grace > 180)) return bad("Late minutes must be between 0 and 180.");
+      await savePerformanceSettings({
+        highDiscountPct: Math.round(pct * 100) / 100,
+        dutiesRequired: duties,
+        storeTargets,
+        excludedStores,
+        salesPerSalary: Math.round(sps * 10) / 10,
+        ...(shifts.length ? { shifts } : {}),
+        ...(grace !== undefined ? { lateGraceMinutes: grace } : {}),
+      });
       return NextResponse.json({ ok: true });
     }
 
@@ -114,6 +129,19 @@ export async function POST(request: Request) {
       if (body.on) set.delete(key);
       else set.add(key);
       await savePerformanceSettings({ noTargetGroups: [...set] });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "person_shift": {
+      const userId = String(body.userId ?? "").trim();
+      const name = String(body.shift ?? "").trim();
+      if (!userId) return bad("Staff missing.");
+      const current = await loadPerformanceSettings();
+      if (name && !current.shifts.some((x) => x.name === name)) return bad("Unknown shift.");
+      const map = { ...current.personShifts };
+      if (name && name !== current.shifts[0]?.name) map[userId] = name;
+      else delete map[userId];
+      await savePerformanceSettings({ personShifts: map });
       return NextResponse.json({ ok: true });
     }
 

@@ -9,7 +9,7 @@ import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
-import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { attendanceShare, shiftStartOf, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
   abvAmount,
   inForce,
@@ -295,6 +295,9 @@ export type Attendance = {
   duties: number;
   /** Of those, days justified (not punched). */
   justified: number;
+  /** Days the first punch was after the shift start + grace, and the minutes late in total. */
+  late: number;
+  lateMinutes: number;
   required: number;
   remaining: number;
   absences: number;
@@ -316,12 +319,20 @@ async function loadDuties(month: string) {
   );
   const days = new Map<string, Set<string>>();
   const withData = new Set<string>();
+  // First punch of each day (minutes after midnight, India time) — for late coming.
+  const firstIn = new Map<string, Map<string, number>>();
   for (const r of rows) {
     const code = attendanceCode(r.emp_code);
-    const day = todayISO(new Date(String(r.punch_time)));
+    const t = new Date(String(r.punch_time));
+    const day = todayISO(t);
     if (!days.has(code)) days.set(code, new Set());
     days.get(code)!.add(day);
     withData.add(day);
+    const ist = new Date(t.getTime() + 5.5 * 3_600_000);
+    const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if (!firstIn.has(code)) firstIn.set(code, new Map());
+    const m = firstIn.get(code)!;
+    if (!m.has(day) || mins < (m.get(day) as number)) m.set(day, mins);
   }
   // Absent days justified by HR or the Store Manager count as duties.
   const justifiedDays = new Map<string, Set<string>>();
@@ -331,10 +342,26 @@ async function loadDuties(month: string) {
     if (!justifiedDays.has(code)) justifiedDays.set(code, new Set());
     justifiedDays.get(code)!.add(String(j.day));
   }
-  return { days, withData, justifiedDays };
+  return { days, withData, justifiedDays, firstIn };
 }
 
-function attendanceFor(month: string, punched: Set<string> | undefined, justifiedSet: Set<string> | undefined, withData: Set<string>, required: number): Attendance {
+function attendanceFor(
+  month: string,
+  punched: Set<string> | undefined,
+  justifiedSet: Set<string> | undefined,
+  withData: Set<string>,
+  required: number,
+  firstIn?: Map<string, number>,
+  lateAfter?: number
+): Attendance {
+  let late = 0;
+  let lateMinutes = 0;
+  if (firstIn && lateAfter !== undefined)
+    for (const mins of firstIn.values())
+      if (mins > lateAfter) {
+        late++;
+        lateMinutes += mins - lateAfter;
+      }
   const { days: inMonth } = monthRange(month);
   const today = todayISO();
   const days = new Set<string>([...(punched ?? []), ...(justifiedSet ?? [])]);
@@ -360,7 +387,7 @@ function attendanceFor(month: string, punched: Set<string> | undefined, justifie
   }
   // Absences that can no longer be made up (the 26-duty rule).
   const absences = Math.max(0, required - duties - noData - remaining);
-  return { duties, justified, required, remaining, absences, share: attendanceShare(absences), found: duties > 0, noData };
+  return { duties, justified, late, lateMinutes, required, remaining, absences, share: attendanceShare(absences), found: duties > 0, noData };
 }
 
 // ------------------------------------------------------------------
@@ -710,7 +737,15 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
         lines: [],
         lostToReturns: a.lostToReturns,
         lostNotes: [],
-        attendance: attendanceFor(month, duties.days.get(id), duties.justifiedDays.get(id), duties.withData, settings.dutiesRequired),
+        attendance: attendanceFor(
+          month,
+          duties.days.get(id),
+          duties.justifiedDays.get(id),
+          duties.withData,
+          settings.dutiesRequired,
+          duties.firstIn.get(id),
+          shiftStartOf(settings, id).start + settings.lateGraceMinutes
+        ),
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,

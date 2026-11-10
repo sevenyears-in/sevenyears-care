@@ -39,10 +39,12 @@ export type DutyDay = {
   first?: string;
   last?: string;
   punches?: number;
+  /** Minutes late (first punch after the shift start + grace). */
+  late?: number;
   justification?: { kind: string; reason: string | null; by: string; at: string };
 };
 
-export async function dutyDays(personId: string, month: string): Promise<DutyDay[]> {
+export async function dutyDays(personId: string, month: string, lateAfter?: number): Promise<DutyDay[]> {
   const { from, to, days } = monthRange(month);
   const code = attendanceCode(personId);
   const [punchRes, justRes] = await Promise.all([
@@ -80,6 +82,11 @@ export async function dutyDays(personId: string, month: string): Promise<DutyDay
       day.first = time(p[0]);
       day.last = p.length > 1 ? time(p[p.length - 1]) : undefined;
       day.punches = p.length;
+      if (lateAfter !== undefined) {
+        const ist = new Date(p[0].getTime() + 5.5 * 3_600_000);
+        const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+        if (mins > lateAfter) day.late = mins - lateAfter;
+      }
     } else if (j) day.status = "justified";
     else if (date > today) day.status = "future";
     else if (date === today) day.status = "today";
