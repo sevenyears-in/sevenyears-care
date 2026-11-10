@@ -56,6 +56,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   // Roles & Access decides which sections each person sees.
   const links = [
     { href: "/staff", label: "Dashboard" },
+    { href: "/staff/performance", label: "My Performance" },
     ...(can("service") ? [{ href: "/staff/service", label: "Service Requests" }] : []),
     ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
     ...(can("explanations") || explanationsWaiting > 0
@@ -75,6 +76,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
           { href: "/staff/admin/service-setup", label: "Service Setup", icon: "🛠️" },
           { href: "/staff/admin/offers", label: "Offers & Notifications", icon: "📣" },
           { href: "/staff/admin/app-usage", label: "App usage", icon: "📊" },
+          { href: "/staff/admin/performance", label: "Sales targets & incentives", icon: "🎯" },
         ]
       : []),
     ...(role === "super_admin"
