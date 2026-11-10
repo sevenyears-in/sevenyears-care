@@ -881,11 +881,13 @@ export async function storePreviousPeriod(month: string, store: string, upToDay:
   const to = `${pm}-${String(Math.min(Math.max(1, upToDay), days)).padStart(2, "0")}`;
   const [bills, back] = await Promise.all([
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoices").select("net, gross, discount, quantity").eq("store", store).gte("invoice_date", `${pm}-01`).lte("invoice_date", to).order("invoice_id").range(a, b)
+      supabaseAdmin.from("sales_invoices").select("invoice_date, net, gross, discount, quantity").eq("store", store).gte("invoice_date", `${pm}-01`).lte("invoice_date", to).order("invoice_id").range(a, b)
     ),
     fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net").eq("store", store).gte("return_date", `${pm}-01`).lte("return_date", to).order("creditnote_id").range(a, b)),
   ]);
-  if (!bills.length) return null;
+  // Compare only when last month's bills are copied for (nearly) every one of those days.
+  const daysWithBills = new Set(bills.map((b) => String(b.invoice_date))).size;
+  if (!bills.length || daysWithBills < Math.max(1, Math.min(upToDay, days) - 1)) return null;
   const returns = back.reduce((s, r) => s + n(r.net), 0);
   return {
     net: bills.reduce((s, b) => s + n(b.net), 0) - returns,
