@@ -78,6 +78,14 @@ export async function assignPtCodesForSavedBills() {
   if (names.length) await assignPtCodes(names);
 }
 
+/** Zoho time "2026-11-09T22:07:40+0530" → ISO the database understands (null when missing). */
+export function zohoTime(v: unknown): string | null {
+  const t = str(v).replace(/([+-]\d\d)(\d\d)$/, "$1:$2");
+  if (!t) return null;
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 /** Carry bags are billed as items but are not counted as items sold. */
 export const isCarryBag = (category: unknown) => /carry\s*bag/i.test(String(category ?? ""));
 
@@ -224,6 +232,8 @@ async function saveInvoice(listRow: Obj, links: SyncLinks) {
     units_under_5k: under5k,
     max_line_share: lineSum > 0 ? Math.round((maxLine / lineSum) * 10000) / 10000 : 0,
     modified_at: str(listRow.last_modified_time || d.last_modified_time) || null,
+    // When the bill was made (for peak / lean hours).
+    billed_at: zohoTime(listRow.created_time || d.created_time),
     synced_at: new Date().toISOString(),
   };
 
@@ -345,7 +355,13 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
   // New daily-wages names get their PT code before the bills are saved.
   const links = await assignPtCodes(keep.map((r) => str(r.salesperson_name)));
   result.bills = keep.length;
-  const { data: saved } = await supabaseAdmin.from("sales_invoices").select("invoice_id, modified_at").eq("invoice_date", date).limit(5000);
+  const { data: saved } = await supabaseAdmin.from("sales_invoices").select("invoice_id, modified_at, billed_at").eq("invoice_date", date).limit(5000);
+  // Bills copied before bill times were kept: fill the time from the list (no extra Zoho calls).
+  const noTime = new Set((saved ?? []).filter((r) => !r.billed_at).map((r) => r.invoice_id as string));
+  const timeRows = keep.filter((r) => noTime.has(str(r.invoice_id)) && zohoTime(r.created_time));
+  await pool(timeRows, 6, async (r) => {
+    await supabaseAdmin.from("sales_invoices").update({ billed_at: zohoTime(r.created_time) }).eq("invoice_id", str(r.invoice_id));
+  });
   const savedMap = new Map((saved ?? []).map((r) => [r.invoice_id as string, r.modified_at as string | null]));
   const keepIds = new Set(keep.map((r) => str(r.invoice_id)));
   const gone = [...savedMap.keys()].filter((id) => !keepIds.has(id));

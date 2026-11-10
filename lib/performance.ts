@@ -88,6 +88,29 @@ const n = (v: unknown) => Number(v) || 0;
 // tax in "net" and with tax in "total"; these give the with-GST figures.
 /** Amount with GST of a bill / return / line row. */
 const gst = (r: Row) => n(r.total) || n(r.net);
+/** Hour of the day in India (0–23) of a bill time. */
+const istHour = (iso: unknown) => {
+  if (!iso) return null;
+  const t = Date.parse(String(iso));
+  return Number.isNaN(t) ? null : new Date(t + 5.5 * 3_600_000).getUTCHours();
+};
+export type HourTotals = { hour: number; net: number; bills: number };
+/** Sales by hour from bill rows (rows without a time are left out). */
+function byHour(rows: Row[]): { hours: HourTotals[]; timed: number } {
+  const m = new Map<number, HourTotals>();
+  let timed = 0;
+  for (const r of rows) {
+    const h = istHour(r.billed_at);
+    if (h === null) continue;
+    timed++;
+    const x = m.get(h) ?? { hour: h, net: 0, bills: 0 };
+    x.net += gst(r);
+    x.bills++;
+    m.set(h, x);
+  }
+  return { hours: [...m.values()].sort((a, b) => a.hour - b.hour), timed };
+}
+
 /** with-GST ÷ without-GST of a row, to bring discounts and "before discount" amounts to GST too. */
 const gstFactor = (r: Row) => (n(r.net) > 0 && n(r.total) > 0 ? n(r.total) / n(r.net) : 1);
 
@@ -709,6 +732,14 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       }
     }
 
+    // Groups without individual targets (Store Manager): their target is the store target.
+    for (const p of people) {
+      if (!p.targetApplies && target > 0) {
+        p.target = target;
+        p.achievement = achievement;
+      }
+    }
+
     for (const p of people) {
       const a = acc.get(p.userId)!;
       const pct = (x: number) => `${Math.round(x * 100)}%`;
@@ -811,6 +842,10 @@ export type PersonDetail = {
   nearMisses: NearMiss[];
   returned: ReturnRow[];
   daily: { date: string; net: number; bills: number }[];
+  /** Sales by hour of the day (this month). */
+  hours: HourTotals[];
+  /** Bills with a time / all bills (times are kept from 11 Nov 2026 on, older bills get theirs when copied again). */
+  timedBills: number;
 };
 
 export async function personDetail(month: string, userId: string, threshold: number, monthRules: IncentiveRule[]): Promise<PersonDetail> {
@@ -818,7 +853,7 @@ export async function personDetail(month: string, userId: string, threshold: num
   const offerRules = monthRules.filter((r): r is ProductUnitsRule => r.kind === "product_units" && r.freeNotDiscount);
   const [bills, lines, back, promosRes] = await Promise.all([
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoices").select(INVOICE_COLS).eq("staff_user_id", userId).gte("invoice_date", from).lte("invoice_date", to).order("invoice_id").range(a, b)
+      supabaseAdmin.from("sales_invoices").select(`${INVOICE_COLS}, billed_at`).eq("staff_user_id", userId).gte("invoice_date", from).lte("invoice_date", to).order("invoice_id").range(a, b)
     ),
     fetchAll<Row>((a, b) =>
       supabaseAdmin
@@ -896,6 +931,8 @@ export async function personDetail(month: string, userId: string, threshold: num
     nearMisses,
     returned: ((back.data ?? []) as Row[]).map(normReturn),
     daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    hours: byHour(bills).hours,
+    timedBills: byHour(bills).timed,
   };
 }
 
@@ -986,6 +1023,10 @@ export type StoreTrends = {
   categories: { name: string; last7: number; prev7: number; month: number; units: number }[];
   /** Items sold this month that have no category in Zoho. */
   uncategorized: { units: number; net: number; items: { name: string; units: number; net: number }[] };
+  /** Sales by hour of the day (last 28 days). */
+  hours: HourTotals[];
+  timedBills: number;
+  totalBills: number;
 };
 
 const trendCache = new Map<string, { at: number; value: StoreTrends }>();
@@ -1004,7 +1045,7 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
 
   const [bills, lines] = await Promise.all([
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoices").select("invoice_date, net, total, gross, discount, quantity").eq("store", store).gte("invoice_date", start).lte("invoice_date", end).order("invoice_id").range(a, b)
+      supabaseAdmin.from("sales_invoices").select("invoice_date, net, total, gross, discount, quantity, billed_at").eq("store", store).gte("invoice_date", start).lte("invoice_date", end).order("invoice_id").range(a, b)
     ),
     fetchAll<Row>((a, b) =>
       supabaseAdmin.from("sales_invoice_lines").select("invoice_date, category, name, quantity, net, total").eq("store", store).gte("invoice_date", lineFrom).lte("invoice_date", end).order("line_item_id").range(a, b)
@@ -1090,6 +1131,9 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
     weekdays,
     categories: [...cats.values()].sort((a, b) => b.month - a.month),
     uncategorized: { units: uncUnits, net: uncNet, items: [...unc.values()].sort((a, b) => b.units - a.units).slice(0, 15) },
+    hours: byHour(bills).hours,
+    timedBills: byHour(bills).timed,
+    totalBills: bills.length,
   };
   trendCache.set(key, { at: Date.now(), value });
   return value;

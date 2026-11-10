@@ -5,7 +5,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
-import { actionPlans, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
+import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from "@/lib/performance-rules";
@@ -268,6 +268,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       {header}
       {switcher}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
+      <PeakLean
+        title="Your peak and lean times"
+        intro="This month. Green = when you sell most, red = when you sell least."
+        hours={detail.hours}
+        timed={detail.timedBills}
+        total={found.person.bills}
+        days={detail.daily}
+      />
       {myPlan.length > 0 && (
         <Panel title={`Action plan — ${planRole === "asm" && asmIsFm ? "ASM / Floor Manager" : PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
           <PlanList items={myPlan} />
@@ -324,7 +332,9 @@ function PersonView({
   const abvRule = inForceAtEnd.find((r): r is AbvRule => r.kind === "abv" && r.groups.includes(p.group));
   const wowRule = inForceAtEnd.find((r): r is WowRule => r.kind === "wow" && r.groups.includes(p.group));
   const next = p.achievement !== null && achRule ? nextSlab(achRule.slabs, p.achievement) : null;
-  const neededForNext = next && p.target ? Math.max(0, next.from * p.target - p.net) : 0;
+  // Store Manager: measured on the store (store sales against the store target).
+  const heroNet = p.targetApplies ? p.net : store.net;
+  const neededForNext = next && p.target ? Math.max(0, next.from * p.target - heroNet) : 0;
   const perDay = running && neededForNext ? neededForNext / daysLeft : 0;
   const team = store.people.filter((x) => x.group === p.group && x.bills > 0);
   const rank = [...team].sort((a, b) => b.net - a.net).findIndex((x) => x.userId === p.userId) + 1;
@@ -381,17 +391,18 @@ function PersonView({
             <p className="text-sm font-semibold text-black/55">
               {p.name} · {p.isPt ? p.userId : p.roleLabel} · {store.store} · {groupName(p.group, labels)}
             </p>
-            <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-black/45">Net sales (after discounts &amp; returns, with GST)</p>
-            <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{rupees(p.net)}</p>
+            <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-black/45">
+              {p.targetApplies ? "Net sales" : `${store.store} store net sales`} (after discounts &amp; returns, with GST)
+            </p>
+            <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{rupees(heroNet)}</p>
+            {!p.targetApplies && <p className="text-xs text-black/50">Your target is the store target. Your own billing: {rupees(p.net)}.</p>}
             <p className="mt-1 text-sm text-black/55">
               {p.target ? (
                 <>
                   Target {rupees(p.target)} · <b className="text-black">{pct(p.achievement ?? 0)}</b> achieved
                 </>
-              ) : p.targetApplies ? (
-                "No individual target set for this month"
               ) : (
-                `No individual target — measured on the store target (${store.store} at ${pct(store.achievement)})`
+                "No individual target set for this month"
               )}
             </p>
           </div>
@@ -642,6 +653,17 @@ function TeamView({
       </section>
 
       <StoreDashboard store={store} prev={prev} threshold={threshold} labels={labels} trends={trends} />
+
+      {trends && (
+        <PeakLean
+          title="Peak and lean times — store"
+          intro="Last 28 days. Green = peak, red = lean. Put the strongest team on the floor in the green hours and days."
+          hours={trends.hours}
+          timed={trends.timedBills}
+          total={trends.totalBills}
+          days={trends.daily}
+        />
+      )}
 
       {trends && <ActionPlans plans={actionPlans(store, trends, prev, asmIsFm)} />}
 
@@ -991,6 +1013,116 @@ function ActionPlans({ plans }: { plans: { role: PlanRole; label: string; items:
             <div className="px-4 pb-4">{items.length ? <PlanList items={items} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
           </details>
         ))}
+      </div>
+    </Panel>
+  );
+}
+
+// ------------------------------------------------------------------
+// Peak and lean hours / days
+// ------------------------------------------------------------------
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function PeakLean({
+  title,
+  intro,
+  hours,
+  timed,
+  total,
+  days,
+}: {
+  title: string;
+  intro: string;
+  hours: { hour: number; net: number; bills: number }[];
+  timed: number;
+  total: number;
+  days: { date: string; net: number; bills: number }[];
+}) {
+  const hl = peakLeanHours(hours);
+  const peakH = new Set(hl?.peak.map((h) => h.hour) ?? []);
+  const leanH = new Set(hl?.lean.map((h) => h.hour) ?? []);
+  const shown = hours.filter((h) => h.bills > 0);
+  const maxH = Math.max(1, ...shown.map((h) => h.net));
+
+  const open = days.filter((d) => d.bills > 0);
+  const wd = WEEKDAYS.map((name, i) => {
+    const list = open.filter((d) => new Date(`${d.date}T00:00:00Z`).getUTCDay() === i);
+    return { name, i, avg: list.length ? list.reduce((s, d) => s + d.net, 0) / list.length : 0, n: list.length };
+  });
+  const withData = wd.filter((w) => w.n);
+  const peakW = [...withData].sort((a, b) => b.avg - a.avg)[0];
+  const leanW = withData.length > 2 ? [...withData].sort((a, b) => a.avg - b.avg)[0] : null;
+  const maxW = Math.max(1, ...wd.map((w) => w.avg));
+  const ranked = [...open].sort((a, b) => b.net - a.net);
+  const peakDays = ranked.slice(0, 3);
+  const leanDays = ranked.length > 5 ? ranked.slice(-3).reverse() : [];
+  const total$ = shown.reduce((s, h) => s + h.net, 0) || 1;
+
+  return (
+    <Panel title={title} intro={intro}>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">By hour of the day</p>
+          {shown.length ? (
+            <>
+              <div className="mt-3 flex h-36 items-end gap-1">
+                {shown.map((h) => (
+                  <div key={h.hour} className="flex flex-1 flex-col items-center gap-1" title={`${hourRange(h.hour)}: ${rupees(h.net)} · ${h.bills} bills`}>
+                    <div
+                      className={`w-full rounded-t ${peakH.has(h.hour) ? "bg-green-500" : leanH.has(h.hour) ? "bg-[#ff5e79]" : "bg-[#8883d7]/70"}`}
+                      style={{ height: `${Math.max(3, (h.net / maxH) * 120)}px` }}
+                    />
+                    <span className="text-[9px] text-black/45">{hourRange(h.hour).split("–")[0].replace(" ", "")}</span>
+                  </div>
+                ))}
+              </div>
+              {hl && (
+                <p className="mt-2 text-sm">
+                  <span className="font-semibold text-green-700">Peak:</span> {hl.peak.map((h) => hourRange(h.hour)).join(", ")} ({pct(hl.peak.reduce((s, h) => s + h.net, 0) / total$)} of sales) ·{" "}
+                  <span className="font-semibold text-[#d6224a]">Lean:</span> {hl.lean.map((h) => hourRange(h.hour)).join(", ")} ({pct(hl.lean.reduce((s, h) => s + h.net, 0) / total$)})
+                </p>
+              )}
+              {timed < total && <p className="mt-1 text-xs text-black/45">Bill times known for {timed} of {total} bills; the rest fill in as bills are copied again.</p>}
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-black/50">Bill times are being collected — this fills in after the next copy from Zoho.</p>
+          )}
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">By day of the week (average)</p>
+          <div className="mt-3 flex h-36 items-end gap-2">
+            {wd.map((w) => (
+              <div key={w.i} className="flex flex-1 flex-col items-center gap-1" title={`${w.name}: ${rupees(w.avg)} on average (${w.n} day(s))`}>
+                <div
+                  className={`w-full rounded-t ${peakW && w.i === peakW.i ? "bg-green-500" : leanW && w.i === leanW.i ? "bg-[#ff5e79]" : "bg-[#8883d7]/70"} ${w.n ? "" : "opacity-20"}`}
+                  style={{ height: `${Math.max(3, (w.avg / maxW) * 120)}px` }}
+                />
+                <span className="text-[10px] text-black/50">{w.name}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="font-semibold text-green-700">Peak days</p>
+              {peakDays.map((d) => (
+                <p key={d.date} className="text-black/70">
+                  {formatDate(d.date)} · {rupees(d.net)}
+                </p>
+              ))}
+            </div>
+            {leanDays.length > 0 && (
+              <div>
+                <p className="font-semibold text-[#d6224a]">Lean days</p>
+                {leanDays.map((d) => (
+                  <p key={d.date} className="text-black/70">
+                    {formatDate(d.date)} · {rupees(d.net)}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </Panel>
   );

@@ -18,6 +18,19 @@ const rs = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const lakh = (n: number) => (Math.abs(n) >= 100000 ? `₹${(n / 100000).toFixed(2)} L` : rs(n));
 const pc = (n: number, d = 0) => `${(n * 100).toFixed(d)}%`;
 const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export const hourLabel = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? " am" : " pm"}`;
+export const hourRange = (h: number) => `${hourLabel(h)}–${hourLabel((h + 1) % 24)}`;
+
+/** Busiest and quietest hours (only hours the store usually trades: ≥ 2% of bills). */
+export function peakLeanHours(hours: { hour: number; net: number; bills: number }[]) {
+  const total = hours.reduce((s, h) => s + h.bills, 0);
+  const open = hours.filter((h) => total && h.bills / total >= 0.02);
+  if (open.length < 3) return null;
+  const byNet = [...open].sort((a, b) => b.net - a.net);
+  const sales = open.reduce((s, h) => s + h.net, 0) || 1;
+  return { peak: byNet.slice(0, 2), lean: byNet.slice(-2).reverse(), sales };
+}
+
 const growth = (now: number, before: number) => (before > 0 ? (now - before) / before : null);
 
 /** Which plan a person sees on their own page. */
@@ -64,7 +77,9 @@ function facts(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | nul
   const othersPct = store.invoiceNet ? store.othersNet / store.invoiceNet : 0;
   const retPct = store.invoiceNet ? store.returns / store.invoiceNet : 0;
   const topCats = trends.categories.slice(0, 3).map((c) => c.name);
+  const hrs = peakLeanHours(trends.hours);
   return {
+    hrs,
     store,
     trends,
     prev,
@@ -129,6 +144,12 @@ function smPlan(f: Facts): PlanItem[] {
       title: `Plan staff by day: ${WEEKDAY[f.best.day]} is busiest, ${WEEKDAY[f.worst.day]} slowest`,
       detail: `${WEEKDAY[f.best.day]} averages ${rs(f.best.avg)} against ${rs(f.worst.avg)} on ${WEEKDAY[f.worst.day]}. Put the strongest sellers and no leaves on ${WEEKDAY[f.best.day]}; use ${WEEKDAY[f.worst.day]} for training, display changes and customer call-backs.`,
     });
+  if (f.hrs)
+    out.push({
+      priority: "medium",
+      title: `Peak hours ${f.hrs.peak.map((h) => hourRange(h.hour)).join(", ")} · lean ${f.hrs.lean.map((h) => hourRange(h.hour)).join(", ")}`,
+      detail: `The two peak hours bring ${pc(f.hrs.peak.reduce((s, h) => s + h.net, 0) / f.hrs.sales)} of sales. Everyone on the floor then — no breaks, no stock work. Give breaks, restocking and training in the lean hours.`,
+    });
   for (const c of f.falling.slice(0, 2))
     out.push({
       priority: "medium",
@@ -175,6 +196,12 @@ function asmPlan(f: Facts): PlanItem[] {
   if (f.abvP7 && f.abv7 < f.abvP7 * 0.95)
     out.push({ priority: "medium", title: `Average bill fell to ${rs(f.abv7)}`, detail: `From ${rs(f.abvP7)} the week before. Show the higher-priced option first to every customer.` });
   if (f.highDisc.length) out.push({ priority: "medium", title: `Watch discounts by ${names(f.highDisc, 3)}`, detail: `Discounts above the limit need the Store Manager's OK before billing.` });
+  if (f.hrs)
+    out.push({
+      priority: "medium",
+      title: `Floor plan by hour`,
+      detail: `Full floor at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}; use ${f.hrs.lean.map((h) => hourRange(h.hour)).join(" and ")} for breaks, VM and coaching.`,
+    });
   if (f.best) out.push({ priority: "good", title: `Be on the floor all of ${WEEKDAY[f.best.day]}`, detail: `It is the busiest day (avg ${rs(f.best.avg)}); no long breaks for the team then.` });
   if (f.weak.length) out.push({ priority: "medium", title: `Buddy up ${names(f.weak, 2)}`, detail: `Let them watch a top seller close a big bill, then try the same with the next customer.` });
   return out;
@@ -214,6 +241,7 @@ function csaPlan(f: Facts, p?: PersonReport): PlanItem[] {
   if (f.rising[0]) out.push({ priority: "good", title: `Customers are buying ${f.rising[0].name}`, detail: `Up this week (${rs(f.rising[0].last7)}). Show it to every family with a child of the right age.` });
   out.push({ priority: "medium", title: `Aim for WOW bills`, detail: `₹10,000+ with 4+ items from 3+ categories (3 items under ₹5,000). Combine ${f.topCats.slice(0, 3).join(", ") || "different categories"}.` });
   if (f.best) out.push({ priority: "good", title: `${WEEKDAY[f.best.day]} is the busiest day`, detail: `Be on time and on the floor; it is the easiest day to meet your number.` });
+  if (f.hrs) out.push({ priority: "good", title: `Be ready at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}`, detail: `The busiest hours of the store — take breaks before or after.` });
   return out;
 }
 

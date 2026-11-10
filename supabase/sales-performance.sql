@@ -166,3 +166,6 @@ update public.sales_invoice_lines l set total = round(l.net * i.total / i.net, 2
   from public.sales_invoices i where i.invoice_id = l.invoice_id and l.total is null and i.net > 0;
 update public.sales_return_lines l set total = round(l.net * r.total / r.net, 2)
   from public.sales_returns r where r.creditnote_id = l.creditnote_id and l.total is null and r.net > 0;
+
+-- When each bill was made (for peak / lean hours).
+alter table public.sales_invoices add column if not exists billed_at timestamptz;
