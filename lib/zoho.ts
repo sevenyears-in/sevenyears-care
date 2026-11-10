@@ -209,7 +209,9 @@ async function zohoGet(path: string, query: Record<string, string> = {}): Promis
 
   const data = (await response.json().catch(() => ({}))) as ZohoJson;
 
-  if (response.status === 401) {
+  // Only a dead token needs a new sign-in. "Not authorized" (a permission the connection
+  // does not have, e.g. credit notes) also comes as 401 but must NOT cause a new sign-in.
+  if (response.status === 401 && (data.code === 14 || /oauth|token/i.test(String(data.message ?? "")))) {
     badToken = cachedToken?.value ?? badToken;
     cachedToken = null;
   }

@@ -273,6 +273,9 @@ async function saveCreditNote(listRow: Obj, links: SyncLinks) {
   }
 }
 
+let returnsBlockedUntil = 0;
+let returnsBlockedReason = "";
+
 export type DaySync = {
   date: string;
   bills: number;
@@ -320,6 +323,11 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
   let left = Math.max(0, budget - now.length);
 
   // ---- Returns (needs the credit notes permission in the Zoho connection)
+  if (Date.now() < returnsBlockedUntil) {
+    result.returnsError = returnsBlockedReason;
+    if (failed && !result.error) result.error = `${failed} bill(s) could not be read; they will be tried again.`;
+    return result;
+  }
   try {
     const cnList = await listAll("creditnotes", "creditnotes", date);
     const cnKeep = cnList.filter((r) => !SKIP_STATUS.has(str(r.status).toLowerCase()));
@@ -346,6 +354,11 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
     result.pending += cnTodo.length - result.returnsSaved;
   } catch (error) {
     result.returnsError = error instanceof Error ? error.message : String(error);
+    if (/not authori[sz]ed/i.test(result.returnsError)) {
+      // Do not keep asking Zoho for something the connection may not read (checked again in 15 minutes).
+      returnsBlockedUntil = Date.now() + 15 * 60_000;
+      returnsBlockedReason = result.returnsError;
+    }
   }
   if (failed && !result.error) result.error = `${failed} bill(s) could not be read; they will be tried again.`;
   return result;
