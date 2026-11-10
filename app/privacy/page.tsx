@@ -21,10 +21,13 @@ const sections: { title: string; body: React.ReactNode }[] = [
     title: "Information we keep",
     body: (
       <ul className="list-disc space-y-1.5 pl-5">
-        <li>Your name, mobile number and address, and the name and mobile number of a gift recipient if you add one.</li>
+        <li>Your name, mobile number, email address and address, and the name and mobile number of a gift recipient if you add one.</li>
+        <li>Family special dates you choose to give us: your children&apos;s names and birthdays, parents&apos; birthdays and your wedding anniversary.</li>
         <li>Purchase details: store, invoice number and date, product, model and serial number.</li>
         <li>Warranties, service requests, complaints, quotes and feedback you send us, including photos of a product you upload.</li>
-        <li>A login cookie on your device so you stay signed in.</li>
+        <li>Your location, only if you tap &ldquo;Use my current location&rdquo; on a home-service request, so the technician can find you.</li>
+        <li>A notification token for your phone or browser, if you allow notifications, so we can send you updates and offers.</li>
+        <li>A login cookie on your device so you stay signed in, and the time you last used the app.</li>
         <li>For Seven Years staff only: work account details and attendance punches from the store attendance machines.</li>
       </ul>
     ),
@@ -37,6 +40,11 @@ const sections: { title: string; body: React.ReactNode }[] = [
         <li>To handle your service requests and complaints, contact you about them and send updates by SMS, WhatsApp or email.</li>
         <li>To prepare quotes for paid service and record your approval.</li>
         <li>To improve our service using your feedback.</li>
+        <li>To send you offers and birthday or anniversary wishes as app notifications or WhatsApp messages. You can turn notifications off in your phone or browser settings at any time.</li>
+        <li>
+          If you agree on the feedback form, to show a short summary of your review with your first name on sevenyears.in. You can ask us to
+          remove it at any time.
+        </li>
       </ul>
     ),
   },
@@ -44,7 +52,7 @@ const sections: { title: string; body: React.ReactNode }[] = [
     title: "Sharing",
     body: (
       <p>
-        We do not sell your information or use it for advertising. It is shared only with the Seven Years staff handling
+        We do not sell your information, show ads in the app, or share it with advertisers. It is shared only with the Seven Years staff handling
         your request, with a brand or service centre when your product needs their repair, and with the companies that
         host and run this service for us (database, hosting and messaging providers), who may use it only to provide
         that service.
@@ -98,7 +106,7 @@ const sections: { title: string; body: React.ReactNode }[] = [
 
 export default function PrivacyPage() {
   return (
-    <PageShell eyebrow="Seven Years Care" title="Privacy policy" intro="Last updated 8 November 2026.">
+    <PageShell eyebrow="Seven Years Care" title="Privacy policy" intro="Last updated 10 November 2026.">
       <div className="space-y-4">
         {sections.map((s) => (
           <section key={s.title} className={cardClass}>
