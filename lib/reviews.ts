@@ -3,6 +3,7 @@
 // never for confidential (HR) complaints. Enforced here, on the server.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { isTestMobile } from "@/lib/test-accounts";
 import type { FeedbackFormKind } from "@/lib/feedback-forms";
 import { cleanCustomerText, overallStars, reviewSummary } from "@/lib/review-summary";
 
@@ -57,13 +58,14 @@ export async function afterFeedbackSaved(feedbackId: string) {
   try {
     const { data } = await supabaseAdmin
       .from("customer_feedback")
-      .select("id, kind, confidential, answers, comment, resolved, public_consent, publication_status")
+      .select("id, kind, confidential, answers, comment, resolved, public_consent, publication_status, mobile")
       .eq("id", feedbackId)
       .maybeSingle();
     if (!data) return;
     const r = data as ReviewRow;
     const summary = reviewSummary(r.kind, r.answers ?? {}, r.comment, r.resolved);
-    const ok = eligibility(r).ok;
+    // The Google Play reviewer test account is never published on the website.
+    const ok = eligibility(r).ok && !isTestMobile((data as { mobile?: string | null }).mobile);
     const status: PublicationStatus = ok ? "published" : "not_eligible";
     const now = new Date().toISOString();
     const { error } = await supabaseAdmin

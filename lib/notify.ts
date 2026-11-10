@@ -12,6 +12,7 @@
 // See NOTIFICATIONS-SETUP.md.
 
 import { sendSmtpMail } from "@/lib/smtp";
+import { isTestMobile } from "@/lib/test-accounts";
 import { alertSettings } from "@/lib/alert-settings";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { asRole, type Role, sameStore, STORE_SCOPED_ROLES } from "@/lib/roles";
@@ -138,6 +139,7 @@ export async function sendWhatsApp(
 ): Promise<{ ok: boolean; error?: string }> {
   const digits = String(mobile10 ?? "").replace(/\D/g, "").slice(-10);
   if (!/^[6-9]\d{9}$/.test(digits)) return { ok: false, error: "No valid WhatsApp number" };
+  if (isTestMobile(digits)) return { ok: false, error: "Test account (no message sent)" };
   const to = `91${digits}`;
 
   if (!(await whatsappConfigured())) {
@@ -336,6 +338,13 @@ export async function notifyStaff(recipients: Recipient[], alert: StaffAlert, ex
   const list = [...unique.values()];
   if (list.length === 0) return;
 
+  // Requests from the Google Play reviewer test number never alert anyone.
+  if (alert.ticketType && alert.ticketId) {
+    const table = alert.ticketType === "service" ? "service_requests" : "complaints";
+    const { data: t } = await supabaseAdmin.from(table).select("contact_mobile").eq("id", alert.ticketId).maybeSingle();
+    if (isTestMobile((t as { contact_mobile?: string } | null)?.contact_mobile)) return;
+  }
+
   const link =
     alert.link ||
     (alert.ticketType && alert.ticketId ? staffTicketLink(alert.ticketType, alert.ticketId) : `${siteUrl()}/staff/alerts`);
@@ -401,6 +410,7 @@ export async function notifyCustomer(input: {
   /** Link to send instead of the track page (e.g. feedback / confirm link). */
   link?: string;
 }) {
+  if (isTestMobile(input.mobile)) return; // Google Play reviewer test account
   const link = input.link || customerTrackLink(input.ticketNumber);
   const meta = { audience: "customer" as const, ticketNumber: input.ticketNumber };
   const name = input.name?.trim() || "Customer";
