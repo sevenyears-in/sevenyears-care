@@ -346,6 +346,8 @@ function PersonView({
   const next = p.achievement !== null && achRule ? nextSlab(achRule.slabs, p.achievement) : null;
   // Store Manager: measured on the store (store sales against the store target).
   const heroNet = p.targetApplies ? p.net : store.net;
+  // Store Manager: the store's figures are their figures.
+  const m = measureOf(p, store);
   const neededForNext = next && p.target ? Math.max(0, next.from * p.target - heroNet) : 0;
   const perDay = running && neededForNext ? neededForNext / daysLeft : 0;
   const team = store.people.filter((x) => x.group === p.group && x.bills > 0);
@@ -433,8 +435,13 @@ function PersonView({
       </section>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Tile label="Bills" value={p.bills} note={`${p.units} items · ${p.bills ? (p.units / p.bills).toFixed(1) : "0"} per bill (UPB)`} />
-        <Tile label="Avg bill (ABV)" value={rupees(p.abv)} note={p.abvTarget ? `Target ${rupees(p.abvTarget)}` : `Team ${rupees(teamAbv)}`} tone={teamAbv && p.abv >= teamAbv ? "good" : "default"} />
+        <Tile label={m.isStore ? "Store bills" : "Bills"} value={m.bills} note={`${m.units} items · ${m.bills ? (m.units / m.bills).toFixed(1) : "0"} per bill (UPB)`} />
+        <Tile
+          label={m.isStore ? "Store avg bill (ABV)" : "Avg bill (ABV)"}
+          value={rupees(m.abv)}
+          note={p.abvTarget ? `Target ${rupees(p.abvTarget)}` : m.isStore ? `Own billing ${p.bills} bill(s)` : `Team ${rupees(teamAbv)}`}
+          tone={!m.isStore && teamAbv && p.abv >= teamAbv ? "good" : "default"}
+        />
         <Tile label="Discount given" value={rupees(p.discount)} note={`${pct(p.discountPct, 1)} of sales · ${p.flaggedBills} bill(s) over ${threshold}%`} tone={p.flaggedBills ? "warn" : "default"} />
         <Tile label="Returns" value={rupees(p.returns)} note={`${p.returnCount} return(s)`} tone={p.returns ? "bad" : "default"} />
         <Link href={`/staff/performance/duties?u=${encodeURIComponent(p.userId)}&m=${store.month}`} className="block rounded-2xl transition hover:-translate-y-0.5">
@@ -717,7 +724,9 @@ function TeamView({
               </tr>
             </thead>
             <tbody>
-              {store.people.map((p) => (
+              {store.people.map((p) => {
+                const m = measureOf(p, store);
+                return (
                 <tr key={p.userId} className="border-t border-black/5 hover:bg-black/[0.02]">
                   <td className={tdc}>
                     <Link href={qs(base, { u: p.userId })} className="font-semibold text-[#5b55c9] hover:underline">
@@ -726,14 +735,17 @@ function TeamView({
                     <span className="ml-1.5 text-xs text-black/40">{p.userId}</span>
                   </td>
                   <td className={`${tdc} text-black/60`}>{groupName(p.group, labels)}</td>
-                  <td className={`${tdc} text-right font-semibold`}>{rupees(p.net)}</td>
+                  <td className={`${tdc} text-right font-semibold`} title={m.isStore ? `Measured on the store. Own billing: ${rupees(p.net)} from ${p.bills} bill(s)` : undefined}>
+                    {rupees(m.net)}
+                    {m.isStore && <span className="ml-1 rounded-full bg-[#8883d7]/15 px-1.5 text-[10px] font-bold text-[#5b55c9]">store</span>}
+                  </td>
                   <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : p.targetApplies ? "—" : <span className="text-xs">Store target</span>}</td>
                   <td className={`${tdc} text-right font-semibold ${p.achievement === null ? "text-black/30" : p.achievement >= 1 ? "text-green-700" : p.achievement >= 0.9 ? "text-amber-600" : "text-[#d6224a]"}`}>
                     {p.achievement === null ? "—" : pct(p.achievement)}
                   </td>
-                  <td className={`${tdc} text-right`}>{p.bills}</td>
-                  <td className={`${tdc} text-right`}>{p.bills ? rupees(p.abv) : "—"}</td>
-                  <td className={`${tdc} text-right`}>{p.bills ? (p.units / p.bills).toFixed(1) : "—"}</td>
+                  <td className={`${tdc} text-right`}>{m.bills}</td>
+                  <td className={`${tdc} text-right`}>{m.bills ? rupees(m.abv) : "—"}</td>
+                  <td className={`${tdc} text-right`}>{m.bills ? (m.units / m.bills).toFixed(1) : "—"}</td>
                   <td className={`${tdc} text-right ${p.flaggedBills ? "font-semibold text-[#d6224a]" : ""}`}>
                     {pct(p.discountPct, 1)}
                     {p.flaggedBills ? <span className="ml-1 text-xs">⚑{p.flaggedBills}</span> : null}
@@ -755,7 +767,8 @@ function TeamView({
                     </>
                   )}
                 </tr>
-              ))}
+                );
+              })}
               {store.othersBills > 0 && (
                 <tr className="border-t border-black/5 bg-red-50/60 text-[#b4233f]">
                   <td className={tdc}>
@@ -970,6 +983,12 @@ function StoreDashboard({
 type Worth = { salary: number; ratio: number | null; incentiveShare: number | null; verdict: { text: string; cls: string } };
 
 /** Management only: sales for every ₹1 of salary (salary counted for the days gone so far). */
+/** Net sales, bills and items a person is measured on: their own, or the store's for groups without individual targets (Store Manager). */
+function measureOf(p: StoreReport["people"][number], store: StoreReport) {
+  if (p.targetApplies) return { isStore: false, net: p.net, bills: p.bills, units: p.units, abv: p.abv };
+  return { isStore: true, net: store.net, bills: store.bills, units: store.units, abv: store.bills ? store.net / store.bills : 0 };
+}
+
 function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerSalary: number) {
   const part = store.daysGone / store.daysInMonth || 1;
   const rows = store.people.map((p) => {
@@ -977,12 +996,16 @@ function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerS
     const cost = salary * part;
     return { p, salary, cost, ratio: cost > 0 ? p.net / cost : null, incentiveShare: salary > 0 ? p.total / salary : null };
   });
-  const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
+  // Store Manager: measured on the store — store sales for every ₹1 of the whole team's salary.
+  const teamCost = rows.reduce((s, r) => s + r.cost, 0);
+  for (const r of rows) if (!r.p.targetApplies && r.cost > 0) r.ratio = teamCost > 0 ? store.net / teamCost : null;
+  const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0 && r.p.targetApplies).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
   const avg = withRatio.length ? withRatio.reduce((s, r) => s + r.p.net, 0) / withRatio.reduce((s, r) => s + r.cost, 0) : 0;
   const totalSalary = rows.reduce((s, r) => s + r.cost, 0);
   const missing = rows.filter((r) => !r.salary).length;
   const verdict = (r: (typeof rows)[number]) => {
     if (r.ratio === null) return { text: "Salary not entered", cls: "text-black/35" };
+    if (!r.p.targetApplies) return { text: "Store (whole team)", cls: "text-black/60" };
     if (!r.p.bills) return { text: "No sales", cls: "text-black/45" };
     if (salesPerSalary && r.ratio < salesPerSalary) return { text: `Below ${salesPerSalary}× — review`, cls: "font-semibold text-[#d6224a]" };
     if (avg && r.ratio >= avg * 1.25) return { text: "Star", cls: "font-semibold text-green-700" };
