@@ -20,7 +20,7 @@ export type PerformanceSettings = {
 
 export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   highDiscountPct: 5,
-  storeTargets: { VADAKARA: 5_000_000, PERAMBRA: 4_000_000 },
+  storeTargets: { VATAKARA: 5_000_000, PERAMBRA: 4_000_000 },
   excludedStores: ["PERINTHALMANNA"],
   dutiesRequired: 26,
   salespersonLinks: {},

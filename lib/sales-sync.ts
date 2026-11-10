@@ -73,13 +73,26 @@ async function categoriesFor(itemIds: string[]) {
       const res = await zohoRead("itemdetails", { item_ids: chunk.join(",") });
       for (const item of arr(res.items)) {
         const category = str(item.category_name) || str(item.group_name);
-        result.set(str(item.item_id), category);
+        if (category) result.set(str(item.item_id), category);
       }
     } catch (error) {
-      console.warn("Item categories lookup failed (continuing):", error);
+      console.warn("Item categories bulk lookup failed (trying one by one):", error);
     }
-    for (const id of chunk) found.push({ item_id: id, category: result.get(id) ?? "", updated_at: new Date().toISOString() });
   }
+  // Items the bulk lookup did not answer: one by one (each item only once, then it is kept).
+  await pool(
+    missing.filter((id) => !result.has(id)),
+    2,
+    async (id) => {
+      try {
+        const item = obj((await zohoRead(`items/${id}`)).item);
+        result.set(id, str(item.category_name) || str(item.group_name));
+      } catch (error) {
+        console.warn(`Item ${id} category lookup failed:`, error);
+      }
+    }
+  );
+  for (const id of missing) if (result.has(id)) found.push({ item_id: id, category: result.get(id) ?? "", updated_at: new Date().toISOString() });
   if (found.length) await supabaseAdmin.from("sales_item_categories").upsert(found);
   return result;
 }
