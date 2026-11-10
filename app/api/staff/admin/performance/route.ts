@@ -4,8 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured, zohoRead } from "@/lib/zoho";
 import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDay } from "@/lib/sales-sync";
 import { loadIncentiveRules, loadPerformanceSettings, saveIncentiveRules, savePerformanceSettings } from "@/lib/performance-settings";
-import { INCENTIVE_GROUPS, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
-import { ELIGIBLE_GROUPS, ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
+import { GROUP_LABEL, groupList, isBuiltInGroup, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
+import { ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
 import { todayISO } from "@/lib/helpers";
 
 // Sales targets & incentives settings (Super Admin and Admin).
@@ -79,20 +79,65 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    case "group_labels": {
-      const labels: Partial<Record<IncentiveGroup, string>> = {};
-      for (const g of INCENTIVE_GROUPS) {
-        const v = String(((body.labels ?? {}) as Body)[g.key] ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
-        if (v && v !== g.label) labels[g.key] = v;
-      }
+    case "group_add": {
+      const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (!name) return bad("Type the group name.");
+      const current = await loadPerformanceSettings();
+      if (groupList(current).some((g) => g.label.toLowerCase() === name.toLowerCase())) return bad("There is already a group with that name.");
+      const key = `g_${Date.now().toString(36)}`;
+      await savePerformanceSettings({ customGroups: [...current.customGroups, key], groupLabels: { ...current.groupLabels, [key]: name } });
+      return NextResponse.json({ ok: true, key });
+    }
+
+    case "group_rename": {
+      const key = String(body.key ?? "");
+      const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      const current = await loadPerformanceSettings();
+      if (!groupList(current).some((g) => g.key === key)) return bad("Group not found.");
+      if (!name) return bad("Type the group name.");
+      if (groupList(current).some((g) => g.key !== key && g.label.toLowerCase() === name.toLowerCase())) return bad("There is already a group with that name.");
+      const labels = { ...current.groupLabels };
+      if (isBuiltInGroup(key) && name === GROUP_LABEL[key]) delete labels[key];
+      else labels[key] = name;
       await savePerformanceSettings({ groupLabels: labels });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "group_delete": {
+      const key = String(body.key ?? "");
+      const current = await loadPerformanceSettings();
+      if (!current.customGroups.includes(key)) return bad("Only groups added here can be deleted.");
+      const [{ count }, rules] = await Promise.all([
+        supabaseAdmin.from("staff_users").select("id", { count: "exact", head: true }).eq("incentive_group", key),
+        loadIncentiveRules(),
+      ]);
+      const pt = Object.values(current.ptPeople).some((p) => p.group === key);
+      if ((count ?? 0) > 0 || pt) return bad("Move the people in this group to another group first.");
+      if (rules.some((r) => r.groups.includes(key) || (r.kind === "store_pool" && (r.split[key] ?? 0) > 0))) return bad("An incentive is given to this group. Change that incentive first.");
+      const labels = { ...current.groupLabels };
+      delete labels[key];
+      await savePerformanceSettings({ customGroups: current.customGroups.filter((k) => k !== key), groupLabels: labels });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "incentive_store": {
+      const userId = String(body.userId ?? "").trim();
+      const store = String(body.store ?? "").trim().toUpperCase();
+      if (!userId) return bad("Staff missing.");
+      const current = await loadPerformanceSettings();
+      const map = { ...current.incentiveStores };
+      if (store) map[userId] = store;
+      else delete map[userId];
+      await savePerformanceSettings({ incentiveStores: map });
       return NextResponse.json({ ok: true });
     }
 
     case "rule_save": {
       // Add a new incentive, or change one. A change with a date after the start of the current
       // version ends that version the day before and starts a new one (history stays as it was).
-      const rule = cleanRule(body.rule);
+      const settingsNow = await loadPerformanceSettings();
+      const allowed = groupList(settingsNow).filter((g) => g.key !== "none").map((g) => g.key);
+      const rule = cleanRule(body.rule, allowed);
       if (!rule) return bad("Check the incentive details.");
       const problem = ruleProblem(rule);
       if (problem) return bad(problem);
@@ -211,7 +256,7 @@ export async function POST(request: Request) {
       const staffId = String(body.staffId ?? "");
       const group = body.group === "" || body.group === null ? null : body.group;
       if (!staffId) return bad("Staff missing.");
-      if (group !== null && !isGroup(group)) return bad("Unknown group.");
+      if (group !== null && !(isGroup(group) && groupList(await loadPerformanceSettings()).some((g) => g.key === group))) return bad("Unknown group.");
       if (isPtCode(staffId)) {
         const current = await loadPerformanceSettings();
         const people = { ...current.ptPeople };
@@ -292,14 +337,14 @@ const num = (v: unknown) => {
 };
 
 /** Takes only the known fields of an incentive from the request. */
-function cleanRule(raw: unknown): IncentiveRule | null {
+function cleanRule(raw: unknown, allowed: string[]): IncentiveRule | null {
   const r = (raw ?? {}) as Body;
   const kind = r.kind as RuleKind;
   if (!KINDS.includes(kind)) return null;
   const base = {
     id: String(r.id ?? ""),
     name: String(r.name ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
-    groups: (Array.isArray(r.groups) ? r.groups : []).filter((g): g is IncentiveGroup => isGroup(g) && ELIGIBLE_GROUPS.includes(g as IncentiveGroup)),
+    groups: (Array.isArray(r.groups) ? r.groups : []).filter((g): g is IncentiveGroup => isGroup(g) && allowed.includes(g)),
     from: isDate(r.from) ? r.from : null,
     to: isDate(r.to) ? r.to : null,
   };
@@ -307,11 +352,11 @@ function cleanRule(raw: unknown): IncentiveRule | null {
   switch (kind) {
     case "store_pool": {
       const split: Partial<Record<IncentiveGroup, number>> = {};
-      for (const g of ELIGIBLE_GROUPS) {
+      for (const g of allowed) {
         const v = num(((r.split ?? {}) as Body)[g]);
         if (v > 0) split[g] = v;
       }
-      return { ...base, kind, groups: ELIGIBLE_GROUPS.filter((g) => (split[g] ?? 0) > 0), slabs: slabs.map((x) => ({ from: num(x.from), rate: num(x.rate) })), split };
+      return { ...base, kind, groups: allowed.filter((g) => (split[g] ?? 0) > 0), slabs: slabs.map((x) => ({ from: num(x.from), rate: num(x.rate) })), split };
     }
     case "achievement":
       return { ...base, kind, slabs: slabs.map((x) => ({ from: num(x.from), amount: num(x.amount) })) };

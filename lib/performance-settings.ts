@@ -19,6 +19,8 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       excludedStores: v.excludedStores ?? DEFAULT_PERFORMANCE_SETTINGS.excludedStores,
       ptPeople: v.ptPeople ?? {},
       groupLabels: v.groupLabels ?? {},
+      customGroups: v.customGroups ?? [],
+      incentiveStores: v.incentiveStores ?? {},
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

@@ -19,8 +19,12 @@ export type PerformanceSettings = {
   salespersonLinks: Record<string, string>;
   /** Daily-wages staff (no employee code): PT1, PT2 … */
   ptPeople: Record<string, PtPerson>;
-  /** Own names for the groups (e.g. "Sales Team" instead of "Sales Team (CSA)"). */
+  /** Own names for the groups (e.g. "CSA" instead of "Sales Team (CSA)"), also the names of added groups. */
   groupLabels: Partial<Record<IncentiveGroup, string>>;
+  /** Groups added in Settings (keys; their names are in groupLabels). */
+  customGroups: string[];
+  /** Store whose pool a person shares when their own store is the Corporate Office (User ID → store). */
+  incentiveStores: Record<string, string>;
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -33,6 +37,8 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   salespersonLinks: {},
   ptPeople: {},
   groupLabels: {},
+  customGroups: [],
+  incentiveStores: {},
 };
 
 // ------------------------------------------------------------------
@@ -49,16 +55,27 @@ export const INCENTIVE_GROUPS = [
   { key: "housekeeping", label: "Housekeeping" },
   { key: "none", label: "Not in incentive" },
 ] as const;
-export type IncentiveGroup = (typeof INCENTIVE_GROUPS)[number]["key"];
-export const GROUP_LABEL = Object.fromEntries(INCENTIVE_GROUPS.map((g) => [g.key, g.label])) as Record<IncentiveGroup, string>;
+export type BuiltInGroup = (typeof INCENTIVE_GROUPS)[number]["key"];
+/** A built-in group key or one added in Settings. */
+export type IncentiveGroup = string;
+export const GROUP_LABEL = Object.fromEntries(INCENTIVE_GROUPS.map((g) => [g.key, g.label])) as Record<string, string>;
+export const isBuiltInGroup = (key: string) => INCENTIVE_GROUPS.some((g) => g.key === key);
 
 /** Group name, using the names set in Settings. */
 export function groupName(key: IncentiveGroup, labels?: Partial<Record<IncentiveGroup, string>>) {
-  return labels?.[key]?.trim() || GROUP_LABEL[key];
+  return labels?.[key]?.trim() || GROUP_LABEL[key] || key;
 }
 
 export function isGroup(v: unknown): v is IncentiveGroup {
-  return INCENTIVE_GROUPS.some((g) => g.key === v);
+  return typeof v === "string" && /^[a-z][a-z0-9_]{0,40}$/.test(v);
+}
+
+/** Every group in order: built-in ones, added ones, then "Not in incentive". */
+export function groupList(s: Pick<PerformanceSettings, "groupLabels" | "customGroups">) {
+  const out: { key: string; label: string; custom: boolean }[] = INCENTIVE_GROUPS.filter((g) => g.key !== "none").map((g) => ({ key: g.key, label: groupName(g.key, s.groupLabels), custom: false }));
+  for (const k of s.customGroups ?? []) out.push({ key: k, label: groupName(k, s.groupLabels), custom: true });
+  out.push({ key: "none", label: groupName("none", s.groupLabels), custom: false });
+  return out;
 }
 
 /** Group used when none is chosen in Settings. */

@@ -4,7 +4,6 @@ import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { groupName, type IncentiveGroup } from "@/lib/performance-rules";
 import {
-  ELIGIBLE_GROUPS,
   KIND_HELP,
   KIND_LABEL,
   ruleStatus,
@@ -50,8 +49,10 @@ function Num({ value, onChange, scale = 1, prefix, suffix, width = "w-28" }: { v
   );
 }
 
-function blank(kind: RuleKind, today: string): IncentiveRule {
-  const base = { id: "", name: "", groups: [...ELIGIBLE_GROUPS] as IncentiveGroup[], from: today, to: null };
+type G = { key: string; label: string };
+
+function blank(kind: RuleKind, today: string, groups: G[]): IncentiveRule {
+  const base = { id: "", name: "", groups: groups.map((g) => g.key) as IncentiveGroup[], from: today, to: null };
   switch (kind) {
     case "store_pool":
       return { ...base, kind, slabs: [{ from: 1, rate: 0.01 }], split: { sales: 1 } };
@@ -72,7 +73,18 @@ function blank(kind: RuleKind, today: string): IncentiveRule {
 
 // ------------------------------------------------------------------
 
-export function IncentiveRulesEditor({ rules, today, labels }: { rules: IncentiveRule[]; today: string; labels: Partial<Record<IncentiveGroup, string>> }) {
+export function IncentiveRulesEditor({
+  rules,
+  today,
+  labels,
+  groups: allGroups,
+}: {
+  rules: IncentiveRule[];
+  today: string;
+  labels: Partial<Record<IncentiveGroup, string>>;
+  /** Groups that can be given an incentive (everything except "Not in incentive"). */
+  groups: G[];
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState<{ rule: IncentiveRule; isNew: boolean } | null>(null);
   const [stopping, setStopping] = useState<{ id: string; to: string } | null>(null);
@@ -117,7 +129,7 @@ export function IncentiveRulesEditor({ rules, today, labels }: { rules: Incentiv
                 </option>
               ))}
             </select>
-            <button className={primary} onClick={() => setEditing({ rule: blank(newKind, today), isNew: true })}>
+            <button className={primary} onClick={() => setEditing({ rule: blank(newKind, today, allGroups), isNew: true })}>
               + New incentive
             </button>
           </div>
@@ -133,6 +145,7 @@ export function IncentiveRulesEditor({ rules, today, labels }: { rules: Incentiv
           isNew={editing.isNew}
           today={today}
           labels={labels}
+          groups={allGroups}
           busy={busy}
           onCancel={() => {
             setEditing(null);
@@ -241,6 +254,7 @@ function RuleForm({
   isNew,
   today,
   labels,
+  groups: allGroups,
   busy,
   onCancel,
   onSave,
@@ -249,6 +263,7 @@ function RuleForm({
   isNew: boolean;
   today: string;
   labels: Partial<Record<IncentiveGroup, string>>;
+  groups: G[];
   busy: boolean;
   onCancel: () => void;
   onSave: (r: IncentiveRule) => void;
@@ -288,10 +303,10 @@ function RuleForm({
         <div className="mt-4">
           <p className="text-xs font-semibold text-black/55">Who is eligible</p>
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {ELIGIBLE_GROUPS.map((g) => (
+            {allGroups.map(({ key: g, label }) => (
               <label key={g} className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ring-1 ${r.groups.includes(g) ? "bg-white ring-[#8883d7]" : "bg-white/60 ring-black/10"}`}>
                 <input type="checkbox" checked={r.groups.includes(g)} onChange={() => toggle(g)} />
-                {groupName(g, labels)}
+                {label}
               </label>
             ))}
           </div>
@@ -316,9 +331,9 @@ function RuleForm({
             </button>
             <p className="pt-2 text-xs font-semibold text-black/55">Share of the pool for each group (Sales Team by their sales, the others equally)</p>
             <div className="grid gap-2 sm:grid-cols-2">
-              {ELIGIBLE_GROUPS.map((g) => (
+              {allGroups.map(({ key: g, label }) => (
                 <div key={g} className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-1.5 text-sm ring-1 ring-black/5">
-                  {groupName(g, labels)}
+                  {label}
                   <Num value={r.split[g] ?? 0} scale={100} suffix="%" width="w-20" onChange={(v) => set({ split: { ...r.split, [g]: v } })} />
                 </div>
               ))}

@@ -11,7 +11,7 @@ import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from
 import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "My Performance" };
+export const metadata = { title: "Sales Performance" };
 
 type Search = { m?: string; u?: string; store?: string; view?: string };
 
@@ -568,7 +568,8 @@ function TeamView({
         )}
         {store.othersBills > 0 && (
           <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            ⚠️ {store.othersBills} bill(s) worth {short(store.othersNet)} have no salesperson on the bill. They count for the store, but for nobody&apos;s individual sales.
+            ⚑ <b>Others:</b> {store.othersBills} bill(s) worth {short(store.othersNet)} have no salesperson on the bill (or were billed by staff not in incentive). They count for the store but for nobody&apos;s
+            sales — the Store Manager should bring this down.
           </p>
         )}
       </section>
@@ -626,6 +627,27 @@ function TeamView({
                   <td className={`${tdc} text-right font-bold text-green-700`}>{rupees(p.total)}</td>
                 </tr>
               ))}
+              {store.othersBills > 0 && (
+                <tr className="border-t border-black/5 bg-red-50/60 text-[#b4233f]">
+                  <td className={tdc}>
+                    <span className="font-semibold">Others</span>
+                    <span className="ml-1.5 text-xs">⚑ no salesperson on the bill</span>
+                  </td>
+                  <td className={`${tdc} text-xs`}>Store Manager to reduce</td>
+                  <td className={`${tdc} text-right font-semibold`}>{rupees(store.othersNet)}</td>
+                  <td className={`${tdc} text-right`}>—</td>
+                  <td className={`${tdc} text-right`}>—</td>
+                  <td className={`${tdc} text-right`}>{store.othersBills}</td>
+                  <td className={`${tdc} text-right`}>{rupees(store.othersNet / store.othersBills)}</td>
+                  <td className={`${tdc} text-right`}>
+                    {pct(store.othersGross ? store.othersDiscount / store.othersGross : 0, 1)}
+                    {store.othersFlagged ? <span className="ml-1 text-xs">⚑{store.othersFlagged}</span> : null}
+                  </td>
+                  <td className={`${tdc} text-right`} colSpan={6}>
+                    {pct(store.net > 0 ? store.othersNet / store.invoiceNet : 0, 1)} of store sales
+                  </td>
+                </tr>
+              )}
               <tr className="border-t-2 border-black/10 font-bold">
                 <td className={tdc} colSpan={10}>
                   Total

@@ -406,6 +406,9 @@ export type StoreReport = {
   nextSlab: { from: number; rate: number; needed: number } | null;
   othersNet: number;
   othersBills: number;
+  othersGross: number;
+  othersDiscount: number;
+  othersFlagged: number;
   people: PersonReport[];
   flagged: InvoiceRow[];
   daysInMonth: number;
@@ -473,6 +476,9 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   const threshold = settings.highDiscountPct / 100;
 
   const staffById = new Map(staff.map((s) => [s.userId, s]));
+  // Corporate Office staff can be given a store whose pool they share.
+  const storeOf = (s: StaffRow) => settings.incentiveStores[s.userId]?.toUpperCase() || s.store;
+  const notInIncentive = new Set(staff.filter((s) => s.group === "none").map((s) => s.userId));
   const groupOf = (id: string): IncentiveGroup => staffById.get(id)?.group ?? (isPtCode(id) ? settings.ptPeople[id]?.group ?? "sales" : "sales");
 
   // Bills returned (any time up to now) do not earn per-bill incentives.
@@ -587,13 +593,14 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     const pool = poolRate * Math.max(0, net);
     const next = poolRule && target > 0 ? nextSlab(poolRule.slabs, achievement) : null;
 
-    // People of this store: staff whose store is this one, plus anyone (e.g. PT staff) who mostly sold here.
+    // People of this store: staff whose (incentive) store is this one, plus anyone (e.g. PT staff)
+    // who mostly sold here. People not in incentive are left out; their bills count as "Others".
     const members = new Map<string, StaffRow | null>();
-    for (const s of staff) if (s.store === store) members.set(s.userId, s);
+    for (const s of staff) if (storeOf(s) === store && s.group !== "none") members.set(s.userId, s);
     for (const [id, a] of acc) {
       if (members.has(id)) continue;
       const s = staffById.get(id);
-      if (s && s.store && s.store !== store && storeNames.has(s.store)) continue;
+      if (s && (s.group === "none" || (storeOf(s) && storeOf(s) !== store && storeNames.has(storeOf(s) as string)))) continue;
       if (!s && !isPtCode(id)) continue; // unknown codes are listed for linking instead
       const mainStore = [...a.stores.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
       if (mainStore === store) members.set(id, s ?? null);
@@ -698,7 +705,8 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     }
     people.sort((x, y) => y.net - x.net);
 
-    const others = bills.filter((b) => !b.staff_user_id);
+    // "Others": bills without a salesperson, or billed by someone who is not in incentive.
+    const others = bills.filter((b) => !b.staff_user_id || notInIncentive.has(b.staff_user_id));
     stores.push({
       month,
       store,
@@ -716,6 +724,9 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       nextSlab: next ? { from: next.from, rate: next.rate, needed: Math.max(0, next.from * target - net) } : null,
       othersNet: others.reduce((s, b) => s + b.net, 0),
       othersBills: others.length,
+      othersGross: others.reduce((s, b) => s + b.gross, 0),
+      othersDiscount: others.reduce((s, b) => s + b.discount, 0),
+      othersFlagged: others.filter((b) => discountShare(b) > threshold).length,
       people,
       flagged: bills.filter((b) => discountShare(b) > threshold).sort((x, y) => discountShare(y) - discountShare(x)),
       daysInMonth,

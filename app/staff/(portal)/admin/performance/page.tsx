@@ -40,7 +40,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   for (const s of report?.stores ?? []) for (const p of s.people) if (p.isPt) ptStore.set(p.userId, s.store);
   const ptPeople = Object.entries(settings.ptPeople)
     .sort(([a], [b]) => Number(a.slice(2)) - Number(b.slice(2)))
-    .map(([code, p]) => ({ id: code, userId: code, name: p.name, store: ptStore.get(code) ?? null, group: p.group ?? ("sales" as const), isPt: true }));
+    .map(([code, p]) => ({ id: code, userId: code, name: p.name, store: ptStore.get(code) ?? null, homeStore: ptStore.get(code) ?? null, chosenStore: null, group: p.group ?? "sales", isPt: true }));
 
   const stores = [
     ...new Set([
@@ -67,7 +67,14 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         today={todayISO()}
         settings={settings}
         stores={stores}
-        people={[...people.map((p) => ({ id: p.id, userId: p.userId, name: p.name, store: p.store, group: p.group, isPt: false })), ...ptPeople]}
+        people={[
+          ...people.map((p) => {
+            const chosen = settings.incentiveStores[p.userId] ?? null;
+            const sold = (report?.stores ?? []).find((s) => s.people.some((x) => x.userId === p.userId))?.store ?? null;
+            return { id: p.id, userId: p.userId, name: p.name, store: chosen ?? (p.store && p.store !== "CORPORATE OFFICE" ? p.store : sold), homeStore: p.store, chosenStore: chosen, group: p.group, isPt: false };
+          }),
+          ...ptPeople,
+        ]}
         targets={Object.fromEntries([...targets.staff.entries()])}
         storeMonthTargets={Object.fromEntries([...targets.stores.entries()])}
         promos={(promos.data ?? []) as { id: number; kind: "slow_moving" | "b2g1"; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null }[]}

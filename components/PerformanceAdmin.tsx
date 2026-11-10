@@ -2,15 +2,28 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { groupName, INCENTIVE_GROUPS, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { groupList, groupName, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import { ruleStatus, ruleSummary, type IncentiveRule } from "@/lib/incentive-rules";
 import { IncentiveRulesEditor } from "@/components/IncentiveRulesEditor";
 
-type Person = { id: string; userId: string; name: string; store: string | null; group: IncentiveGroup; isPt: boolean };
+type Person = {
+  id: string;
+  userId: string;
+  name: string;
+  /** Store whose pool they share. */
+  store: string | null;
+  /** Store in Staff Users. */
+  homeStore: string | null;
+  /** Store chosen in Settings for Corporate Office staff. */
+  chosenStore: string | null;
+  group: IncentiveGroup;
+  isPt: boolean;
+};
 type Promo = { id: number; kind: string; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
 type ZItem = { item_id: string; name: string; sku: string | null; rate: number; category: string };
 
 const btn = "rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50";
+const sbtn = "rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50";
 const primary = `${btn} bg-[#8883d7] text-white hover:opacity-90`;
 const ghost = `${btn} bg-white ring-1 ring-black/10 hover:bg-black/5`;
 const input = "w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[#8883d7]";
@@ -67,9 +80,9 @@ export function PerformanceAdmin(props: {
       <SyncCard month={props.month} today={props.today} settings={props.settings} billsCopied={props.billsCopied} lastBillDate={props.lastBillDate} />
       {props.unlinked.length > 0 && <LinksCard unlinked={props.unlinked} people={props.people} />}
       <TargetsCard {...props} />
-      <IncentiveRulesEditor rules={props.rules} today={props.today} labels={labels} />
+      <IncentiveRulesEditor rules={props.rules} today={props.today} labels={labels} groups={groupList(props.settings).filter((g) => g.key !== "none")} />
       <PromoCard promos={props.promos} rules={props.rules} today={props.today} />
-      <GroupNamesCard labels={labels} />
+      <GroupNamesCard settings={props.settings} people={props.people} />
       <SettingsCard settings={props.settings} stores={props.stores} />
     </div>
   );
@@ -79,18 +92,20 @@ export function PerformanceAdmin(props: {
 // Group names
 // ------------------------------------------------------------------
 
-function GroupNamesCard({ labels }: { labels: Partial<Record<IncentiveGroup, string>> }) {
+function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; people: Person[] }) {
   const router = useRouter();
-  const [editing, setEditing] = useState(false);
+  const groups = groupList(settings);
+  const [renaming, setRenaming] = useState<{ key: string; name: string } | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [names, setNames] = useState<Record<string, string>>({});
-  async function save() {
+  async function run(body: Record<string, unknown>) {
     setBusy(true);
     setError("");
     try {
-      await post({ action: "group_labels", labels: names });
-      setEditing(false);
+      await post(body);
+      setRenaming(null);
+      setAdding(null);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -98,45 +113,103 @@ function GroupNamesCard({ labels }: { labels: Partial<Record<IncentiveGroup, str
       setBusy(false);
     }
   }
+  const count = (key: string) => people.filter((p) => p.group === key).length;
   return (
     <Card
-      title="Group names"
+      title="Groups"
       intro="The groups decide who shares which part of the store pool and who can earn each incentive."
       actions={
-        !editing ? (
-          <button
-            className={primary}
-            onClick={() => {
-              setNames(Object.fromEntries(INCENTIVE_GROUPS.map((g) => [g.key, groupName(g.key, labels)])));
-              setEditing(true);
-            }}
-          >
-            ✎ Edit names
+        adding === null && !renaming ? (
+          <button className={primary} onClick={() => setAdding("")}>
+            + Add group
           </button>
-        ) : (
-          <>
-            <button className={primary} disabled={busy} onClick={save}>
-              {busy ? "Saving…" : "Save"}
-            </button>
-            <button className={ghost} disabled={busy} onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-          </>
-        )
+        ) : undefined
       }
     >
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {INCENTIVE_GROUPS.map((g) => (
-          <div key={g.key} className="rounded-2xl bg-black/[0.02] p-3 ring-1 ring-black/5">
-            {editing ? (
-              <input className={input} value={names[g.key] ?? ""} maxLength={40} onChange={(e) => setNames({ ...names, [g.key]: e.target.value })} />
-            ) : (
-              <p className="text-sm font-semibold">{groupName(g.key, labels)}</p>
+      <div className="-mx-2 overflow-x-auto">
+        <table className="w-full min-w-[520px] table-fixed text-sm">
+          <colgroup>
+            <col />
+            <col className="w-28" />
+            <col className="w-24" />
+            <col className="w-48" />
+          </colgroup>
+          <thead>
+            <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
+              <th className="px-2 py-2">Group</th>
+              <th className="px-2 py-2">Type</th>
+              <th className="px-2 py-2 text-right">People</th>
+              <th className="px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              <tr key={g.key} className="border-t border-black/5">
+                <td className="px-2 py-2.5">
+                  {renaming?.key === g.key ? (
+                    <input className={`${input} py-1`} maxLength={40} value={renaming.name} onChange={(e) => setRenaming({ key: g.key, name: e.target.value })} autoFocus />
+                  ) : (
+                    <span className={`font-semibold ${g.key === "none" ? "text-black/50" : ""}`}>{g.label}</span>
+                  )}
+                </td>
+                <td className="px-2 py-2.5 text-xs text-black/50">{g.custom ? "Added" : "Standard"}</td>
+                <td className="px-2 py-2.5 text-right tabular-nums">{count(g.key)}</td>
+                <td className="px-2 py-2.5">
+                  <div className="flex justify-end gap-1.5 whitespace-nowrap">
+                    {renaming?.key === g.key ? (
+                      <>
+                        <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy} onClick={() => run({ action: "group_rename", key: g.key, name: renaming.name })}>
+                          Save
+                        </button>
+                        <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setRenaming(null)}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      !renaming &&
+                      adding === null && (
+                        <>
+                          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={() => setRenaming({ key: g.key, name: g.label })}>
+                            ✎ Edit
+                          </button>
+                          {g.custom && (
+                            <button
+                              className={`${sbtn} text-red-700 ring-1 ring-red-200 hover:bg-red-50`}
+                              disabled={busy}
+                              onClick={() => confirm(`Delete the group “${g.label}”?`) && run({ action: "group_delete", key: g.key })}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </>
+                      )
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {adding !== null && (
+              <tr className="border-t border-black/5 bg-[#8883d7]/[0.05]">
+                <td className="px-2 py-2.5" colSpan={3}>
+                  <input className={`${input} py-1`} maxLength={40} placeholder="New group name, e.g. Social Media" value={adding} onChange={(e) => setAdding(e.target.value)} autoFocus />
+                </td>
+                <td className="px-2 py-2.5">
+                  <div className="flex justify-end gap-1.5 whitespace-nowrap">
+                    <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy || !adding.trim()} onClick={() => run({ action: "group_add", name: adding })}>
+                      Add
+                    </button>
+                    <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setAdding(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </td>
+              </tr>
             )}
-          </div>
-        ))}
+          </tbody>
+        </table>
       </div>
+      <p className="mt-3 text-xs text-black/50">A new group gets incentives once you tick it in an incentive (✎ Change in the Incentives box). In the store pool it shares its part equally.</p>
     </Card>
   );
 }
@@ -241,38 +314,70 @@ function TargetsCard(props: {
 }) {
   const router = useRouter();
   const { month, settings } = props;
+  const groups = groupList(settings);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string };
   const startRows = () =>
     Object.fromEntries(
-      props.people.map((p) => [p.userId, { sales: props.targets[p.userId]?.sales ? String(props.targets[p.userId].sales) : "", abv: props.targets[p.userId]?.abv ? String(props.targets[p.userId].abv) : "", group: p.group }])
+      props.people.map((p) => [
+        p.userId,
+        {
+          sales: props.targets[p.userId]?.sales ? String(props.targets[p.userId].sales) : "",
+          abv: props.targets[p.userId]?.abv ? String(props.targets[p.userId].abv) : "",
+          group: p.group,
+          store: p.chosenStore ?? "",
+        },
+      ])
     );
-  const [rows, setRows] = useState<Record<string, { sales: string; abv: string; group: IncentiveGroup }>>(startRows);
+  const [rows, setRows] = useState<Record<string, RowState>>(startRows);
   const startStores = () => Object.fromEntries(props.stores.map((s) => [s, props.storeMonthTargets[s] ? String(props.storeMonthTargets[s]) : ""]));
   const [storeRows, setStoreRows] = useState<Record<string, string>>(startStores);
+  const setRow = (id: string, change: Partial<RowState>) => setRows({ ...rows, [id]: { ...rows[id], ...change } });
 
-  const byStore = useMemo(() => {
+  const groupOf = (p: Person) => (editing ? rows[p.userId]?.group ?? p.group : p.group);
+  const isCorporate = (p: Person) => !p.homeStore || !props.stores.includes(p.homeStore);
+  const storeFor = (p: Person) => (editing ? (isCorporate(p) ? rows[p.userId]?.store || p.store : p.homeStore) : p.store);
+
+  const { byStore, notIn } = useMemo(() => {
     const out = new Map<string, Person[]>();
+    const none: Person[] = [];
     for (const p of props.people) {
-      const s = p.store ?? "No store";
+      if (groupOf(p) === "none") {
+        none.push(p);
+        continue;
+      }
+      const s = storeFor(p) && props.stores.includes(storeFor(p) as string) ? (storeFor(p) as string) : "Choose a store";
       if (!out.has(s)) out.set(s, []);
       out.get(s)!.push(p);
     }
     const excluded = settings.excludedStores.map((s) => s.toUpperCase());
-    return [...out.entries()]
-      .filter(([s]) => !excluded.includes(s))
-      .sort(([a], [b]) => (a === "CORPORATE OFFICE" ? 1 : b === "CORPORATE OFFICE" ? -1 : a.localeCompare(b)));
-  }, [props.people, settings.excludedStores]);
+    return {
+      byStore: [...out.entries()]
+        .filter(([s]) => !excluded.includes(s))
+        .sort(([a], [b]) => (a === "Choose a store" ? 1 : b === "Choose a store" ? -1 : a.localeCompare(b))),
+      notIn: none,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.people, settings.excludedStores, editing, rows]);
 
   async function save() {
     setBusy(true);
     setError("");
     try {
-      await post({ action: "targets", month, rows: Object.entries(rows).map(([userId, r]) => ({ userId, sales: r.sales, abv: r.abv })) });
+      // People not in incentive have no targets.
+      await post({
+        action: "targets",
+        month,
+        rows: Object.entries(rows).map(([userId, r]) => (r.group === "none" ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv })),
+      });
       for (const p of props.people) {
-        if (rows[p.userId] && rows[p.userId].group !== p.group) await post({ action: "group", staffId: p.id, group: rows[p.userId].group });
+        const r = rows[p.userId];
+        if (!r) continue;
+        if (r.group !== p.group) await post({ action: "group", staffId: p.id, group: r.group });
+        if (isCorporate(p) && (r.store || "") !== (p.chosenStore ?? "")) await post({ action: "incentive_store", userId: p.userId, store: r.store });
       }
       for (const s of props.stores) {
         const was = props.storeMonthTargets[s] ? String(props.storeMonthTargets[s]) : "";
@@ -304,6 +409,15 @@ function TargetsCard(props: {
   }
 
   const storeTarget = (s: string) => props.storeMonthTargets[s] || settings.storeTargets[s] || 0;
+  const groupSelect = (p: Person) => (
+    <select className={`${input} py-1`} value={rows[p.userId]?.group ?? p.group} onChange={(e) => setRow(p.userId, { group: e.target.value })}>
+      {groups.map((g) => (
+        <option key={g.key} value={g.key}>
+          {g.label}
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <Card
@@ -355,7 +469,8 @@ function TargetsCard(props: {
         {byStore.map(([store, list]) => (
           <div key={store}>
             <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <h3 className="text-base font-bold">{store}</h3>
+              <h3 className={`text-base font-bold ${store === "Choose a store" ? "text-amber-700" : ""}`}>{store}</h3>
+              {store === "Choose a store" && <span className="text-sm text-black/55">Corporate Office staff in an incentive group: choose the store whose pool they share.</span>}
               {props.stores.includes(store) && (
                 <span className="text-sm text-black/60">
                   Store target:{" "}
@@ -375,7 +490,13 @@ function TargetsCard(props: {
               )}
             </div>
             <div className="-mx-2 overflow-x-auto">
-              <table className="w-full min-w-[600px] text-sm">
+              <table className="w-full min-w-[600px] table-fixed text-sm">
+                <colgroup>
+                  <col />
+                  <col className="w-56" />
+                  <col className="w-40" />
+                  <col className="w-36" />
+                </colgroup>
                 <thead>
                   <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
                     <th className="px-2 py-2">Name</th>
@@ -389,26 +510,27 @@ function TargetsCard(props: {
                     const r = rows[p.userId];
                     const t = props.targets[p.userId];
                     return (
-                      <tr key={p.id} className="border-t border-black/5">
+                      <tr key={p.id} className="border-t border-black/5 align-top">
                         <td className="px-2 py-2">
                           <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
+                          {isCorporate(p) &&
+                            (editing ? (
+                              <select className={`${input} mt-1 w-48 py-1 text-xs`} value={r?.store ?? ""} onChange={(e) => setRow(p.userId, { store: e.target.value })}>
+                                <option value="">{p.store && props.stores.includes(p.store) ? `Where they sell most (${p.store})` : "Where they sell most"}</option>
+                                {props.stores.map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="ml-1.5 rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold text-black/50">{p.homeStore ?? "No store"}</span>
+                            ))}
                         </td>
-                        <td className="px-2 py-2">
-                          {editing ? (
-                            <select className={`${input} py-1`} value={r?.group ?? p.group} onChange={(e) => setRows({ ...rows, [p.userId]: { ...r, group: e.target.value as IncentiveGroup } })}>
-                              {INCENTIVE_GROUPS.map((g) => (
-                                <option key={g.key} value={g.key}>
-                                  {groupName(g.key, settings.groupLabels)}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <span className={p.group === "none" ? "text-black/35" : ""}>{groupName(p.group, settings.groupLabels)}</span>
-                          )}
-                        </td>
+                        <td className="px-2 py-2">{editing ? groupSelect(p) : <span>{groupName(p.group, settings.groupLabels)}</span>}</td>
                         <td className="px-2 py-2 text-right">
                           {editing ? (
-                            <input className={`${input} w-32 py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.sales ?? ""} onChange={(e) => setRows({ ...rows, [p.userId]: { ...r, sales: e.target.value.replace(/[^\d]/g, "") } })} />
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.sales ?? ""} onChange={(e) => setRow(p.userId, { sales: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.sales ? (
                             <b>{rupees(t.sales)}</b>
                           ) : (
@@ -417,7 +539,7 @@ function TargetsCard(props: {
                         </td>
                         <td className="px-2 py-2 text-right">
                           {editing ? (
-                            <input className={`${input} w-28 py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRows({ ...rows, [p.userId]: { ...r, abv: e.target.value.replace(/[^\d]/g, "") } })} />
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRow(p.userId, { abv: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.abv ? (
                             rupees(t.abv)
                           ) : (
@@ -432,6 +554,26 @@ function TargetsCard(props: {
             </div>
           </div>
         ))}
+
+        {notIn.length > 0 && (
+          <div>
+            <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
+              <h3 className="text-base font-bold">{groupName("none", settings.groupLabels)}</h3>
+              <span className="text-sm text-black/55">No incentive and no targets. Their bills count for the store as “Others”.</span>
+            </div>
+            <ul className="divide-y divide-black/5 rounded-2xl ring-1 ring-black/5">
+              {notIn.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <span>
+                    <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
+                    <span className="ml-1.5 text-xs text-black/45">{p.homeStore ?? ""}</span>
+                  </span>
+                  {editing && <span className="w-56">{groupSelect(p)}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </Card>
   );
