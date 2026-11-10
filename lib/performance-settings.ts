@@ -22,10 +22,18 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       customGroups: v.customGroups ?? [],
       incentiveStores: v.incentiveStores ?? {},
       salesPerSalary: Number(v.salesPerSalary) || 0,
+      noTargetGroups: Array.isArray(v.noTargetGroups) ? v.noTargetGroups : DEFAULT_PERFORMANCE_SETTINGS.noTargetGroups,
+      asmIsFm: v.asmIsFm === undefined ? true : Boolean(v.asmIsFm),
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };
   }
+}
+
+/** Name shown for the ASM group: "ASM / Floor Manager" while they are one role (unless renamed). */
+export function withRoleNames(s: PerformanceSettings): PerformanceSettings {
+  if (s.asmIsFm && !s.groupLabels.asm) return { ...s, groupLabels: { ...s.groupLabels, asm: "ASM / Floor Manager" } };
+  return s;
 }
 
 export async function savePerformanceSettings(change: Partial<PerformanceSettings>) {

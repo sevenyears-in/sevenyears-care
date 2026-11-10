@@ -6,12 +6,16 @@ import type { StaffUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { defaultGroup, isGroup, type IncentiveGroup } from "@/lib/performance-rules";
+import { loadPerformanceSettings } from "@/lib/performance-settings";
 
 export type PerformanceAccess = { eligible: boolean; group: IncentiveGroup; teamAll: boolean; teamStores: string[] };
 
 export async function performanceAccess(staff: StaffUser): Promise<PerformanceAccess> {
-  const { data } = await supabaseAdmin.from("staff_users").select("incentive_group").eq("id", staff.id).maybeSingle();
-  const group = isGroup(data?.incentive_group) ? (data!.incentive_group as IncentiveGroup) : defaultGroup(staff.role, staff.access.roleLabel);
+  const [{ data }, settings] = await Promise.all([
+    supabaseAdmin.from("staff_users").select("incentive_group").eq("id", staff.id).maybeSingle(),
+    loadPerformanceSettings(),
+  ]);
+  const group = isGroup(data?.incentive_group) ? (data!.incentive_group as IncentiveGroup) : defaultGroup(staff.role, staff.access.roleLabel, settings.asmIsFm);
   const own = (staff.storeName ?? "").toUpperCase();
   let teamAll = false;
   let teamStores: string[] = [];

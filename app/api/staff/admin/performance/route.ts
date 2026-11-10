@@ -105,6 +105,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    case "group_targets": {
+      // Does this group get individual targets? (Store Manager does not.)
+      const key = String(body.key ?? "");
+      const current = await loadPerformanceSettings();
+      if (!groupList(current).some((g) => g.key === key) || key === "none") return bad("Group not found.");
+      const set = new Set(current.noTargetGroups);
+      if (body.on) set.delete(key);
+      else set.add(key);
+      await savePerformanceSettings({ noTargetGroups: [...set] });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "asm_is_fm": {
+      await savePerformanceSettings({ asmIsFm: Boolean(body.on) });
+      return NextResponse.json({ ok: true });
+    }
+
     case "group_delete": {
       const key = String(body.key ?? "");
       const current = await loadPerformanceSettings();

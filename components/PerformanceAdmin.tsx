@@ -129,10 +129,11 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
     >
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       <div className="-mx-2 overflow-x-auto">
-        <table className="w-full min-w-[520px] table-fixed text-sm">
+        <table className="w-full min-w-[680px] table-fixed text-sm">
           <colgroup>
             <col />
             <col className="w-28" />
+            <col className="w-40" />
             <col className="w-24" />
             <col className="w-48" />
           </colgroup>
@@ -140,6 +141,7 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
             <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
               <th className="px-2 py-2">Group</th>
               <th className="px-2 py-2">Type</th>
+              <th className="px-2 py-2">Individual targets</th>
               <th className="px-2 py-2 text-right">People</th>
               <th className="px-2 py-2" />
             </tr>
@@ -155,6 +157,26 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
                   )}
                 </td>
                 <td className="px-2 py-2.5 text-xs text-black/50">{g.custom ? "Added" : "Standard"}</td>
+                <td className="px-2 py-2.5">
+                  {g.key === "none" ? (
+                    <span className="text-xs text-black/35">—</span>
+                  ) : (
+                    <button
+                      className={`${sbtn} ${settings.noTargetGroups.includes(g.key) ? "bg-black/5 text-black/55" : "bg-green-100 text-green-800"}`}
+                      disabled={busy || !!renaming || adding !== null}
+                      title="Click to change"
+                      onClick={() =>
+                        confirm(
+                          settings.noTargetGroups.includes(g.key)
+                            ? `Give “${g.label}” individual targets?`
+                            : `“${g.label}” will have no individual targets (measured on the store target). Continue?`
+                        ) && run({ action: "group_targets", key: g.key, on: settings.noTargetGroups.includes(g.key) })
+                      }
+                    >
+                      {settings.noTargetGroups.includes(g.key) ? "No — store target" : "Yes"}
+                    </button>
+                  )}
+                </td>
                 <td className="px-2 py-2.5 text-right tabular-nums">{count(g.key)}</td>
                 <td className="px-2 py-2.5">
                   <div className="flex justify-end gap-1.5 whitespace-nowrap">
@@ -192,7 +214,7 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
             ))}
             {adding !== null && (
               <tr className="border-t border-black/5 bg-[#8883d7]/[0.05]">
-                <td className="px-2 py-2.5" colSpan={3}>
+                <td className="px-2 py-2.5" colSpan={4}>
                   <input className={`${input} py-1`} maxLength={40} placeholder="New group name, e.g. Social Media" value={adding} onChange={(e) => setAdding(e.target.value)} autoFocus />
                 </td>
                 <td className="px-2 py-2.5">
@@ -210,6 +232,25 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
           </tbody>
         </table>
       </div>
+      <label className="mt-4 flex items-start gap-2 rounded-2xl bg-black/[0.02] p-3 text-sm ring-1 ring-black/5">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={settings.asmIsFm}
+          disabled={busy}
+          onChange={(e) =>
+            confirm(
+              e.target.checked
+                ? "Treat Assistant Store Manager and Floor Manager as one role? Floor Managers move into the ASM group (unless a group was chosen for them) and get one action plan."
+                : "Separate Assistant Store Manager and Floor Manager? Floor Managers go back to the Sales Team group (unless a group was chosen for them) and get their own action plan."
+            ) && run({ action: "asm_is_fm", on: e.target.checked })
+          }
+        />
+        <span>
+          <b>Assistant Store Manager and Floor Manager are one role</b>
+          <span className="block text-xs text-black/55">Untick when the roles are separated. You can then add a “Floor Manager” group with + Add group and give it its own share and targets.</span>
+        </span>
+      </label>
       <p className="mt-3 text-xs text-black/50">A new group gets incentives once you tick it in an incentive (✎ Change in the Incentives box). In the store pool it shares its part equally.</p>
     </Card>
   );
@@ -374,7 +415,10 @@ function TargetsCard(props: {
       await post({
         action: "targets",
         month,
-        rows: Object.entries(rows).map(([userId, r]) => (r.group === "none" ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv })),
+        // People not in incentive, and groups without individual targets (Store Manager), have no targets.
+        rows: Object.entries(rows).map(([userId, r]) =>
+          r.group === "none" || settings.noTargetGroups.includes(r.group) ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv }
+        ),
       });
       const salaryRows = props.people
         .filter((p) => (rows[p.userId]?.salary ?? "") !== (props.salaries[p.userId] ? String(props.salaries[p.userId]) : ""))
@@ -429,7 +473,7 @@ function TargetsCard(props: {
   return (
     <Card
       title={`Targets — ${monthLabel(month)}`}
-      intro="Individual targets are without tax, after discounts and returns. The group decides which part of the store pool a person shares."
+      intro="Individual targets are net sales with GST, after discounts and returns. The Store Manager has no individual target (measured on the store target). The group decides which part of the store pool a person shares."
       actions={
         <>
           <a href={`/staff/admin/performance?m=${shiftMonth(month, -1)}`} className={ghost}>
@@ -538,7 +582,9 @@ function TargetsCard(props: {
                         </td>
                         <td className="px-2 py-2">{editing ? groupSelect(p) : <span>{groupName(p.group, settings.groupLabels)}</span>}</td>
                         <td className="px-2 py-2 text-right">
-                          {editing ? (
+                          {settings.noTargetGroups.includes(groupOf(p)) ? (
+                            <span className="text-xs text-black/45">Store target</span>
+                          ) : editing ? (
                             <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.sales ?? ""} onChange={(e) => setRow(p.userId, { sales: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.sales ? (
                             <b>{rupees(t.sales)}</b>
@@ -547,7 +593,9 @@ function TargetsCard(props: {
                           )}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          {editing ? (
+                          {settings.noTargetGroups.includes(groupOf(p)) ? (
+                            <span className="text-xs text-black/30">—</span>
+                          ) : editing ? (
                             <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRow(p.userId, { abv: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.abv ? (
                             rupees(t.abv)

@@ -193,6 +193,7 @@ async function saveInvoice(listRow: Obj, links: SyncLinks) {
       price: round2(price),
       discount: round2(Math.max(0, lineGross - lineNet)),
       net: round2(lineNet),
+      total: round2(lineNet * (1 + taxPct / 100)), // with GST
     };
   });
 
@@ -290,6 +291,7 @@ async function saveCreditNote(listRow: Obj, links: SyncLinks) {
       name: (str(l.name) || "Item").slice(0, 200),
       quantity: qty,
       net: round2(lineNet),
+      total: round2(lineNet * (1 + num(l.tax_percentage) / 100)), // with GST
     };
   });
   const taxable = num(d.total_taxable_amount) || num(d.sub_total);

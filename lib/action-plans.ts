@@ -21,11 +21,11 @@ const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday
 const growth = (now: number, before: number) => (before > 0 ? (now - before) / before : null);
 
 /** Which plan a person sees on their own page. */
-export function planRoleOf(role: string, roleLabel: string, group: string): PlanRole {
+export function planRoleOf(role: string, roleLabel: string, group: string, asmIsFm = true): PlanRole {
   const l = roleLabel.toLowerCase();
   if (group === "sm" || role === "store_manager") return "sm";
+  if (role === "floor_incharge" || /floor/.test(l)) return asmIsFm ? "asm" : "fm";
   if (group === "asm" || /assistant\s*(store)?\s*manager/.test(l)) return "asm";
-  if (role === "floor_incharge" || /floor/.test(l)) return "fm";
   if (role === "cre" || group === "cashier_cre" || /cre\b|cashier/.test(l)) return "cre";
   return "csa";
 }
@@ -59,7 +59,7 @@ function facts(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | nul
   const weak = sellers.filter((p) => p.group === "sales" && p.net < medianNet * 0.6);
   const lowUpb = sellers.filter((p) => p.bills >= 10 && p.units / p.bills < upb * 0.85).sort((a, b) => a.units / a.bills - b.units / b.bills);
   const highDisc = sellers.filter((p) => p.flaggedBills >= 5 || p.discountPct > (store.gross ? store.discount / store.gross : 0) * 1.5).sort((a, b) => b.discount - a.discount);
-  const noTarget = store.people.filter((p) => p.target === null && p.group !== "none" && p.bills > 0);
+  const noTarget = store.people.filter((p) => p.targetApplies && p.target === null && p.group !== "none" && p.bills > 0);
   const idle = store.people.filter((p) => p.bills === 0 && p.attendance.duties > 0 && ["sales", "asm"].includes(p.group));
   const othersPct = store.invoiceNet ? store.othersNet / store.invoiceNet : 0;
   const retPct = store.invoiceNet ? store.returns / store.invoiceNet : 0;
@@ -233,19 +233,30 @@ function crePlan(f: Facts, p?: PersonReport): PlanItem[] {
   return out;
 }
 
-export function actionPlans(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | null) {
+/** Plans for each role. While ASM and Floor Manager are one role, their points come as one list. */
+export function actionPlans(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | null, asmIsFm = true) {
   const f = facts(store, trends, prev);
-  return { sm: smPlan(f), asm: asmPlan(f), fm: fmPlan(f), csa: csaPlan(f), cre: crePlan(f) } satisfies Record<PlanRole, PlanItem[]>;
+  const asm = asmPlan(f);
+  const fm = fmPlan(f);
+  const both = [...asm, ...fm.filter((x) => !asm.some((a) => a.title === x.title))];
+  const out: { role: PlanRole; label: string; items: PlanItem[] }[] = [{ role: "sm", label: PLAN_ROLE_LABEL.sm, items: smPlan(f) }];
+  if (asmIsFm) out.push({ role: "asm", label: "ASM / Floor Manager", items: both });
+  else out.push({ role: "asm", label: PLAN_ROLE_LABEL.asm, items: asm }, { role: "fm", label: PLAN_ROLE_LABEL.fm, items: fm });
+  out.push({ role: "csa", label: PLAN_ROLE_LABEL.csa, items: csaPlan(f) }, { role: "cre", label: PLAN_ROLE_LABEL.cre, items: crePlan(f) });
+  return out;
 }
 
 /** One person's own plan (their role, with their own numbers). */
-export function personalPlan(role: PlanRole, store: StoreReport, trends: StoreTrends, p: PersonReport) {
+export function personalPlan(role: PlanRole, store: StoreReport, trends: StoreTrends, p: PersonReport, asmIsFm = true) {
   const f = facts(store, trends, null);
   switch (role) {
     case "sm":
       return smPlan(f);
-    case "asm":
-      return asmPlan(f);
+    case "asm": {
+      if (!asmIsFm) return asmPlan(f);
+      const asm = asmPlan(f);
+      return [...asm, ...fmPlan(f).filter((x) => !asm.some((a) => a.title === x.title))];
+    }
     case "fm":
       return [...fmPlan(f), ...csaPlan(f, p).slice(0, 2)];
     case "cre":

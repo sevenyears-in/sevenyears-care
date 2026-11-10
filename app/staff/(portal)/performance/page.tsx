@@ -234,6 +234,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           salaries={salaries ? Object.fromEntries(salaries) : null}
           salesPerSalary={report.settings.salesPerSalary}
           trends={trends}
+          asmIsFm={report.settings.asmIsFm}
         />
       </div>
     );
@@ -259,15 +260,16 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     yearlyProgress(found.person.userId, found.person.group, todayISO()).catch(() => [] as YearlyLine[]),
     storeTrends(month, found.store.store).catch(() => null),
   ]);
-  const planRole: PlanRole = planRoleOf("", found.person.roleLabel, found.person.group);
-  const myPlan = myTrends ? personalPlan(planRole, found.store, myTrends, found.person) : [];
+  const asmIsFm = report.settings.asmIsFm;
+  const planRole: PlanRole = planRoleOf("", found.person.roleLabel, found.person.group, asmIsFm);
+  const myPlan = myTrends ? personalPlan(planRole, found.store, myTrends, found.person, asmIsFm) : [];
   return (
     <div className="space-y-6">
       {header}
       {switcher}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
       {myPlan.length > 0 && (
-        <Panel title={`Action plan — ${PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
+        <Panel title={`Action plan — ${planRole === "asm" && asmIsFm ? "ASM / Floor Manager" : PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
           <PlanList items={myPlan} />
         </Panel>
       )}
@@ -379,15 +381,17 @@ function PersonView({
             <p className="text-sm font-semibold text-black/55">
               {p.name} · {p.isPt ? p.userId : p.roleLabel} · {store.store} · {groupName(p.group, labels)}
             </p>
-            <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-black/45">Net sales (after discounts &amp; returns, without tax)</p>
+            <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-black/45">Net sales (after discounts &amp; returns, with GST)</p>
             <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{rupees(p.net)}</p>
             <p className="mt-1 text-sm text-black/55">
               {p.target ? (
                 <>
                   Target {rupees(p.target)} · <b className="text-black">{pct(p.achievement ?? 0)}</b> achieved
                 </>
-              ) : (
+              ) : p.targetApplies ? (
                 "No individual target set for this month"
+              ) : (
+                `No individual target — measured on the store target (${store.store} at ${pct(store.achievement)})`
               )}
             </p>
           </div>
@@ -585,6 +589,7 @@ function TeamView({
   salaries,
   salesPerSalary,
   trends,
+  asmIsFm,
 }: {
   store: StoreReport;
   base: Search;
@@ -595,6 +600,7 @@ function TeamView({
   salaries: Record<string, number> | null;
   salesPerSalary: number;
   trends: StoreTrends | null;
+  asmIsFm: boolean;
 }) {
   const worth = salaries ? worthOf(store, salaries, salesPerSalary) : null;
   const dutiesHref = (id: string) => `/staff/performance/duties?u=${encodeURIComponent(id)}&m=${store.month}`;
@@ -609,7 +615,7 @@ function TeamView({
       <section className="brand-wash soft-card relative overflow-hidden rounded-3xl bg-white p-5 ring-1 ring-black/5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-black/45">Store net sales (after discounts &amp; returns, without tax)</p>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-black/45">Store net sales (after discounts &amp; returns, with GST)</p>
             <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{short(store.net)}</p>
             <p className="mt-1 text-sm text-black/55">
               Target {short(store.target)} · <b className="text-black">{pct(store.achievement)}</b> · {store.bills} bills · returns {short(store.returns)} · discounts {short(store.discount)}
@@ -637,7 +643,7 @@ function TeamView({
 
       <StoreDashboard store={store} prev={prev} threshold={threshold} labels={labels} trends={trends} />
 
-      {trends && <ActionPlans plans={actionPlans(store, trends, prev)} />}
+      {trends && <ActionPlans plans={actionPlans(store, trends, prev, asmIsFm)} />}
 
 
       <Panel
@@ -683,7 +689,7 @@ function TeamView({
                   </td>
                   <td className={`${tdc} text-black/60`}>{groupName(p.group, labels)}</td>
                   <td className={`${tdc} text-right font-semibold`}>{rupees(p.net)}</td>
-                  <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : "—"}</td>
+                  <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : p.targetApplies ? "—" : <span className="text-xs">Store target</span>}</td>
                   <td className={`${tdc} text-right font-semibold ${p.achievement === null ? "text-black/30" : p.achievement >= 1 ? "text-green-700" : p.achievement >= 0.9 ? "text-amber-600" : "text-[#d6224a]"}`}>
                     {p.achievement === null ? "—" : pct(p.achievement)}
                   </td>
@@ -970,20 +976,19 @@ function PlanList({ items }: { items: PlanItem[] }) {
   );
 }
 
-function ActionPlans({ plans }: { plans: Record<PlanRole, PlanItem[]> }) {
-  const roles: PlanRole[] = ["sm", "asm", "fm", "csa", "cre"];
+function ActionPlans({ plans }: { plans: { role: PlanRole; label: string; items: PlanItem[] }[] }) {
   return (
     <Panel title="Action plans" intro="From this store's sales trend (last 7 days against the 7 before, busiest days, categories rising and falling). Open each role.">
       <div className="space-y-2">
-        {roles.map((r, i) => (
-          <details key={r} open={i === 0} className="group rounded-2xl ring-1 ring-black/5 open:bg-black/[0.015]">
+        {plans.map(({ role, label, items }, i) => (
+          <details key={role} open={i === 0} className="group rounded-2xl ring-1 ring-black/5 open:bg-black/[0.015]">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-              <span className="font-bold">{PLAN_ROLE_LABEL[r]}</span>
+              <span className="font-bold">{label}</span>
               <span className="text-xs text-black/45">
-                {plans[r].filter((x) => x.priority === "high").length} urgent · {plans[r].length} points <span className="ml-1 inline-block transition group-open:rotate-180">▾</span>
+                {items.filter((x) => x.priority === "high").length} urgent · {items.length} points <span className="ml-1 inline-block transition group-open:rotate-180">▾</span>
               </span>
             </summary>
-            <div className="px-4 pb-4">{plans[r].length ? <PlanList items={plans[r]} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
+            <div className="px-4 pb-4">{items.length ? <PlanList items={items} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
           </details>
         ))}
       </div>

@@ -158,3 +158,11 @@ create table if not exists public.duty_justifications (
   primary key (user_id, day)
 );
 alter table public.duty_justifications enable row level security;
+
+-- Net sales are counted with GST: line amounts with GST (bills and returns already have "total").
+alter table public.sales_invoice_lines add column if not exists total numeric;
+alter table public.sales_return_lines add column if not exists total numeric;
+update public.sales_invoice_lines l set total = round(l.net * i.total / i.net, 2)
+  from public.sales_invoices i where i.invoice_id = l.invoice_id and l.total is null and i.net > 0;
+update public.sales_return_lines l set total = round(l.net * r.total / r.net, 2)
+  from public.sales_returns r where r.creditnote_id = l.creditnote_id and l.total is null and r.net > 0;

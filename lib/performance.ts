@@ -8,7 +8,7 @@ import { asRole, ROLE_LABELS } from "@/lib/roles";
 import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
-import { loadIncentiveRules, loadPerformanceSettings } from "@/lib/performance-settings";
+import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
 import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
   abvAmount,
@@ -84,6 +84,13 @@ const INVOICE_COLS =
 
 const n = (v: unknown) => Number(v) || 0;
 
+// Net sales are counted WITH GST (after discounts and returns). Rows keep the amount without
+// tax in "net" and with tax in "total"; these give the with-GST figures.
+/** Amount with GST of a bill / return / line row. */
+const gst = (r: Row) => n(r.total) || n(r.net);
+/** with-GST ÷ without-GST of a row, to bring discounts and "before discount" amounts to GST too. */
+const gstFactor = (r: Row) => (n(r.net) > 0 && n(r.total) > 0 ? n(r.total) / n(r.net) : 1);
+
 function normInvoice(r: Row): InvoiceRow {
   return {
     invoice_id: String(r.invoice_id),
@@ -92,9 +99,9 @@ function normInvoice(r: Row): InvoiceRow {
     store: (r.store as string) ?? null,
     salesperson: (r.salesperson as string) ?? null,
     staff_user_id: (r.staff_user_id as string) ?? null,
-    gross: n(r.gross),
-    discount: n(r.discount),
-    net: n(r.net),
+    gross: n(r.gross) * gstFactor(r),
+    discount: n(r.discount) * gstFactor(r),
+    net: gst(r),
     total: n(r.total),
     quantity: n(r.quantity),
     line_count: n(r.line_count),
@@ -113,7 +120,7 @@ function normReturn(r: Row): ReturnRow {
     staff_user_id: (r.staff_user_id as string) ?? null,
     invoice_id: (r.invoice_id as string) ?? null,
     invoice_number: (r.invoice_number as string) ?? null,
-    net: n(r.net),
+    net: gst(r),
   };
 }
 
@@ -128,7 +135,7 @@ async function loadMonth(month: string, lists: string[]) {
     fetchAll<Row>((a, b) =>
       supabaseAdmin
         .from("sales_returns")
-        .select("creditnote_id, creditnote_number, return_date, store, staff_user_id, invoice_id, invoice_number, net")
+        .select("creditnote_id, creditnote_number, return_date, store, staff_user_id, invoice_id, invoice_number, net, total")
         .gte("return_date", from)
         .lte("return_date", to)
         .order("creditnote_id")
@@ -159,7 +166,7 @@ async function loadPromoLines(month: string, promos: PromoRow[], userId?: string
         ...(await fetchAll<Row>((a, b) => {
           let q = supabaseAdmin
             .from("sales_invoice_lines")
-            .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net")
+            .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net, total")
             .in(col, part)
             .gte("invoice_date", from)
             .lte("invoice_date", to);
@@ -171,7 +178,7 @@ async function loadPromoLines(month: string, promos: PromoRow[], userId?: string
         ...(await fetchAll<Row>((a, b) => {
           let q = supabaseAdmin
             .from("sales_return_lines")
-            .select("return_date, staff_user_id, store, item_id, sku, quantity, net")
+            .select("return_date, staff_user_id, store, item_id, sku, quantity, net, total")
             .in(col, part)
             .gte("return_date", from)
             .lte("return_date", to);
@@ -206,7 +213,7 @@ function offerDiscounts(rules: IncentiveRule[], promos: PromoRow[], sold: Row[])
     const lists = listsOf(promos, l, date);
     if (!offers.some((r) => inForce(r, date) && lists.has(r.list))) continue;
     const id = String(l.invoice_id);
-    out.set(id, (out.get(id) ?? 0) + n(l.discount));
+    out.set(id, (out.get(id) ?? 0) + n(l.discount) * gstFactor(l));
   }
   return out;
 }
@@ -226,7 +233,7 @@ export type StaffRow = {
   groupChosen: boolean;
 };
 
-export async function loadStaffForPerformance(): Promise<StaffRow[]> {
+export async function loadStaffForPerformance(asmIsFm = true): Promise<StaffRow[]> {
   const [{ data }, config] = await Promise.all([
     supabaseAdmin.from("staff_users").select("id, user_id, full_name, role, store_name, custom_role_id, incentive_group, is_active").eq("is_active", true),
     loadAccessConfig(),
@@ -243,7 +250,7 @@ export async function loadStaffForPerformance(): Promise<StaffRow[]> {
       roleLabel,
       role,
       store: s.store_name ? String(s.store_name).toUpperCase() : null,
-      group: chosen ?? defaultGroup(role, roleLabel),
+      group: chosen ?? defaultGroup(role, roleLabel, asmIsFm),
       groupChosen: Boolean(chosen),
     };
   });
@@ -383,6 +390,8 @@ export type PersonReport = {
   group: IncentiveGroup;
   store: string | null;
   isPt: boolean;
+  /** False for groups without individual targets (e.g. Store Manager). */
+  targetApplies: boolean;
   bills: number;
   units: number;
   gross: number;
@@ -480,7 +489,9 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   if (!fresh && cache && cache.key === month && Date.now() - cache.at < 60_000) return cache.value;
 
   const { from: mFrom, to: mTo, days: daysInMonth } = monthRange(month);
-  const [settings, allRules] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
+  const [rawSettings, allRules] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
+  const settings = withRoleNames(rawSettings);
+  const noTargetGroups = new Set(settings.noTargetGroups);
   const rules = allRules.filter((r) => overlaps(r, mFrom, mTo));
   const monthly = rulesOn(rules, mTo);
   const billRules = rules.filter((r): r is BillValueRule | WowRule => r.kind === "bill_value" || r.kind === "wow");
@@ -493,7 +504,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
 
   const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties] = await Promise.all([
     loadMonth(month, lists),
-    loadStaffForPerformance(),
+    loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
     loadDuties(month),
   ]);
@@ -583,7 +594,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     const inLists = listsOf(promos, l, date);
     const g = groupOf(id);
     for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units += n(l.quantity);
-    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value += n(l.net);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value += gst(l);
   }
   for (const l of promoLines.back) {
     const id = l.staff_user_id ? String(l.staff_user_id) : null;
@@ -592,7 +603,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     const inLists = listsOf(promos, l, date);
     const g = groupOf(id);
     for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units -= n(l.quantity);
-    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value -= n(l.net);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value -= gst(l);
   }
   for (const a of acc.values()) {
     for (const r of unitRules) {
@@ -641,13 +652,16 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     const people: PersonReport[] = [];
     for (const [id, s] of members) {
       const a = acc.get(id) ?? get(id);
-      const t = targets.staff.get(id);
-      const pnet = a.invoiceNet - a.returns;
       const group = groupOf(id);
+      // Some groups (e.g. Store Manager) have no individual target: they are measured on the store target.
+      const targetApplies = !noTargetGroups.has(group);
+      const t = targetApplies ? targets.staff.get(id) : undefined;
+      const pnet = a.invoiceNet - a.returns;
       const pt = isPtCode(id);
       people.push({
         staffId: s?.id ?? null,
         userId: id,
+        targetApplies,
         name: s?.name ?? (pt ? settings.ptPeople[id]?.name : undefined) ?? spName.get(id) ?? id,
         roleLabel: s?.roleLabel ?? (pt ? "Daily wages" : "—"),
         group,
@@ -809,7 +823,7 @@ export async function personDetail(month: string, userId: string, threshold: num
     fetchAll<Row>((a, b) =>
       supabaseAdmin
         .from("sales_invoice_lines")
-        .select("name, category, quantity, net")
+        .select("name, category, quantity, net, total")
         .eq("staff_user_id", userId)
         .gte("invoice_date", from)
         .lte("invoice_date", to)
@@ -818,7 +832,7 @@ export async function personDetail(month: string, userId: string, threshold: num
     ),
     supabaseAdmin
       .from("sales_returns")
-      .select("creditnote_id, creditnote_number, return_date, store, staff_user_id, invoice_id, invoice_number, net")
+      .select("creditnote_id, creditnote_number, return_date, store, staff_user_id, invoice_id, invoice_number, net, total")
       .eq("staff_user_id", userId)
       .gte("return_date", from)
       .lte("return_date", to)
@@ -841,12 +855,12 @@ export async function personDetail(month: string, userId: string, threshold: num
     const c = String(l.category || "Other");
     const ce = cat.get(c) ?? { name: c, units: 0, net: 0 };
     ce.units += n(l.quantity);
-    ce.net += n(l.net);
+    ce.net += gst(l);
     cat.set(c, ce);
     const name = String(l.name || "Item");
     const ie = item.get(name) ?? { name, units: 0, net: 0 };
     ie.units += n(l.quantity);
-    ie.net += n(l.net);
+    ie.net += gst(l);
     item.set(name, ie);
   }
   const daily = new Map<string, { date: string; net: number; bills: number }>();
@@ -906,20 +920,20 @@ export async function storePreviousPeriod(month: string, store: string, upToDay:
   const to = `${pm}-${String(Math.min(Math.max(1, upToDay), days)).padStart(2, "0")}`;
   const [bills, back] = await Promise.all([
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoices").select("invoice_date, net, gross, discount, quantity").eq("store", store).gte("invoice_date", `${pm}-01`).lte("invoice_date", to).order("invoice_id").range(a, b)
+      supabaseAdmin.from("sales_invoices").select("invoice_date, net, total, gross, discount, quantity").eq("store", store).gte("invoice_date", `${pm}-01`).lte("invoice_date", to).order("invoice_id").range(a, b)
     ),
-    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net").eq("store", store).gte("return_date", `${pm}-01`).lte("return_date", to).order("creditnote_id").range(a, b)),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net, total").eq("store", store).gte("return_date", `${pm}-01`).lte("return_date", to).order("creditnote_id").range(a, b)),
   ]);
   // Compare only when last month's bills are copied for (nearly) every one of those days.
   const daysWithBills = new Set(bills.map((b) => String(b.invoice_date))).size;
   if (!bills.length || daysWithBills < Math.max(1, Math.min(upToDay, days) - 1)) return null;
-  const returns = back.reduce((s, r) => s + n(r.net), 0);
+  const returns = back.reduce((s, r) => s + gst(r), 0);
   return {
-    net: bills.reduce((s, b) => s + n(b.net), 0) - returns,
+    net: bills.reduce((s, b) => s + gst(b), 0) - returns,
     bills: bills.length,
     units: bills.reduce((s, b) => s + n(b.quantity), 0),
-    gross: bills.reduce((s, b) => s + n(b.gross), 0),
-    discount: bills.reduce((s, b) => s + n(b.discount), 0),
+    gross: bills.reduce((s, b) => s + n(b.gross) * gstFactor(b), 0),
+    discount: bills.reduce((s, b) => s + n(b.discount) * gstFactor(b), 0),
     returns,
   };
 }
@@ -939,11 +953,11 @@ export async function yearlyProgress(userId: string, group: IncentiveGroup, toda
   const upTo = today < fy.to ? today : fy.to;
   const [targets, bills, back] = await Promise.all([
     supabaseAdmin.from("staff_sales_targets").select("sales_target").eq("user_id", userId).gte("month", fy.from.slice(0, 7)).lte("month", fy.to.slice(0, 7)),
-    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_invoices").select("net").eq("staff_user_id", userId).gte("invoice_date", fy.from).lte("invoice_date", upTo).order("invoice_id").range(a, b)),
-    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net").eq("staff_user_id", userId).gte("return_date", fy.from).lte("return_date", upTo).order("creditnote_id").range(a, b)),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_invoices").select("net, total").eq("staff_user_id", userId).gte("invoice_date", fy.from).lte("invoice_date", upTo).order("invoice_id").range(a, b)),
+    fetchAll<Row>((a, b) => supabaseAdmin.from("sales_returns").select("net, total").eq("staff_user_id", userId).gte("return_date", fy.from).lte("return_date", upTo).order("creditnote_id").range(a, b)),
   ]);
   const target = ((targets.data ?? []) as Row[]).reduce((s, t) => s + n(t.sales_target), 0);
-  const net = bills.reduce((s, b) => s + n(b.net), 0) - back.reduce((s, r) => s + n(r.net), 0);
+  const net = bills.reduce((s, b) => s + gst(b), 0) - back.reduce((s, r) => s + gst(r), 0);
   const achievement = target > 0 ? net / target : null;
   return rules.map((r) => ({
     name: r.name,
@@ -990,10 +1004,10 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
 
   const [bills, lines] = await Promise.all([
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoices").select("invoice_date, net, gross, discount, quantity").eq("store", store).gte("invoice_date", start).lte("invoice_date", end).order("invoice_id").range(a, b)
+      supabaseAdmin.from("sales_invoices").select("invoice_date, net, total, gross, discount, quantity").eq("store", store).gte("invoice_date", start).lte("invoice_date", end).order("invoice_id").range(a, b)
     ),
     fetchAll<Row>((a, b) =>
-      supabaseAdmin.from("sales_invoice_lines").select("invoice_date, category, name, quantity, net").eq("store", store).gte("invoice_date", lineFrom).lte("invoice_date", end).order("line_item_id").range(a, b)
+      supabaseAdmin.from("sales_invoice_lines").select("invoice_date, category, name, quantity, net, total").eq("store", store).gte("invoice_date", lineFrom).lte("invoice_date", end).order("line_item_id").range(a, b)
     ),
   ]);
 
@@ -1005,11 +1019,11 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
   for (const b of bills) {
     const d = byDay.get(String(b.invoice_date));
     if (!d) continue;
-    d.net += n(b.net);
+    d.net += gst(b);
     d.bills++;
     d.units += n(b.quantity);
-    d.gross += n(b.gross);
-    d.discount += n(b.discount);
+    d.gross += n(b.gross) * gstFactor(b);
+    d.discount += n(b.discount) * gstFactor(b);
   }
   const daily = [...byDay.values()];
   const sum = (list: DayTotals[], label: string): DayTotals =>
@@ -1052,18 +1066,18 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
         const name = String(l.name || "Item");
         const u = unc.get(name) ?? { name, units: 0, net: 0 };
         u.units += n(l.quantity);
-        u.net += n(l.net);
+        u.net += gst(l);
         unc.set(name, u);
         uncUnits += n(l.quantity);
-        uncNet += n(l.net);
+        uncNet += gst(l);
       }
       continue;
     }
     const c = cats.get(raw) ?? { name: raw, last7: 0, prev7: 0, month: 0, units: 0 };
-    if (date >= last7From) c.last7 += n(l.net);
-    else if (date >= prev7From) c.prev7 += n(l.net);
+    if (date >= last7From) c.last7 += gst(l);
+    else if (date >= prev7From) c.prev7 += gst(l);
     if (inMonth) {
-      c.month += n(l.net);
+      c.month += gst(l);
       c.units += n(l.quantity);
     }
     cats.set(raw, c);

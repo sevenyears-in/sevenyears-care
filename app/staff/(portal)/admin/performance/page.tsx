@@ -4,7 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
-import { loadIncentiveRules, loadPerformanceSettings } from "@/lib/performance-settings";
+import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
 import { assignPtCodesForSavedBills } from "@/lib/sales-sync";
 import { loadSalaries, loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
 import { isMonth, monthRange } from "@/lib/performance-rules";
@@ -24,9 +24,10 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
 
   // Daily-wages salespeople (no employee code) get PT1, PT2 … before anything is shown.
   await assignPtCodesForSavedBills().catch(() => undefined);
-  const [settings, people, targets, promos, storeList, report, counts, rules] = await Promise.all([
-    loadPerformanceSettings(),
-    loadStaffForPerformance(),
+  const rawSettings = await loadPerformanceSettings();
+  const settings = withRoleNames(rawSettings);
+  const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
+    loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
     supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").order("name").limit(5000),
     getStores().catch(() => ({ stores: [] as { name: string }[] })),

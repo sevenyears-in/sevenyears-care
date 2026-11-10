@@ -9,7 +9,7 @@ export type PtPerson = { name: string; group?: IncentiveGroup };
 export type PerformanceSettings = {
   /** A bill is flagged when its discount is more than this % of the bill (before discount). */
   highDiscountPct: number;
-  /** Monthly target of each store (₹, without tax). A month can be changed separately. */
+  /** Monthly target of each store (₹, net sales with GST). A month can be changed separately. */
   storeTargets: Record<string, number>;
   /** Stores left out (e.g. not opened yet). */
   excludedStores: string[];
@@ -27,6 +27,10 @@ export type PerformanceSettings = {
   incentiveStores: Record<string, string>;
   /** Expected net sales for every ₹1 of salary (0 = not set). Management view only. */
   salesPerSalary: number;
+  /** Groups that do not get individual targets (e.g. Store Manager — measured on the store target). */
+  noTargetGroups: string[];
+  /** Assistant Store Manager and Floor Manager are one role for now. */
+  asmIsFm: boolean;
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -42,6 +46,8 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   customGroups: [],
   incentiveStores: {},
   salesPerSalary: 0,
+  noTargetGroups: ["sm"],
+  asmIsFm: true,
 };
 
 // ------------------------------------------------------------------
@@ -82,9 +88,11 @@ export function groupList(s: Pick<PerformanceSettings, "groupLabels" | "customGr
 }
 
 /** Group used when none is chosen in Settings. */
-export function defaultGroup(role: Role, roleLabel: string): IncentiveGroup {
+export function defaultGroup(role: Role, roleLabel: string, asmIsFm = true): IncentiveGroup {
   const label = roleLabel.toLowerCase();
   if (/assistant\s*(store)?\s*manager|\basm\b/.test(label)) return "asm";
+  // While ASM and Floor Manager are one role, floor managers share the ASM part.
+  if (asmIsFm && (role === "floor_incharge" || /floor\s*(manager|in\s*charge|incharge)/.test(label))) return "asm";
   if (/visual/.test(label)) return "vm";
   if (/house\s*keep/.test(label)) return "housekeeping";
   if (/cashier/.test(label)) return "cashier_cre";
