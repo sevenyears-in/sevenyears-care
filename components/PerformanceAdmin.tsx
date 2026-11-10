@@ -669,7 +669,7 @@ function LinksCard({ unlinked, people }: { unlinked: { name: string; net: number
     }
   }
   return (
-    <Card title="Salesperson names without a User ID" intro="These names on Zoho bills don't start with a User ID. Link each to the right person so their sales count for them.">
+    <Card title="Salesperson names to link" intro="These salesperson names on Zoho bills have no User ID, or a User ID that no staff member has. Link each to the right person so their sales count for them.">
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       <ul className="divide-y divide-black/5">
         {unlinked.map((u) => (

@@ -154,7 +154,7 @@ async function loadPromoLines(month: string, promos: PromoRow[]) {
         ...(await fetchAll<Row>((a, b) =>
           supabaseAdmin
             .from("sales_invoice_lines")
-            .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, net")
+            .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net")
             .in(col, part)
             .gte("invoice_date", from)
             .lte("invoice_date", to)
@@ -240,7 +240,7 @@ export async function loadTargets(month: string) {
   };
 }
 
-export type Attendance = { duties: number; required: number; remaining: number; absences: number; share: number; found: boolean };
+export type Attendance = { duties: number; required: number; remaining: number; absences: number; share: number; found: boolean; noData: number };
 
 async function loadDuties(month: string) {
   const { from, to } = monthRange(month);
@@ -254,29 +254,42 @@ async function loadDuties(month: string) {
       .range(a, b)
   );
   const days = new Map<string, Set<string>>();
+  const withData = new Set<string>();
   for (const r of rows) {
     const code = attendanceCode(r.emp_code);
     const day = todayISO(new Date(String(r.punch_time)));
     if (!days.has(code)) days.set(code, new Set());
     days.get(code)!.add(day);
+    withData.add(day);
   }
-  return days;
+  return { days, withData };
 }
 
-function attendanceFor(month: string, days: Set<string> | undefined, required: number): Attendance {
+function attendanceFor(month: string, days: Set<string> | undefined, withData: Set<string>, required: number): Attendance {
   const { days: inMonth } = monthRange(month);
   const today = todayISO();
   const duties = days?.size ?? 0;
   let remaining = 0;
+  let past = 0;
   if (today.slice(0, 7) === month) {
     const day = Number(today.slice(8, 10));
     remaining = inMonth - day + (days?.has(today) ? 0 : 1);
+    past = day - 1;
   } else if (today.slice(0, 7) < month) {
     remaining = inMonth;
+  } else {
+    past = inMonth;
+  }
+  // Past days when the punching machine sent nothing at all (no data yet, machine off):
+  // nobody is marked absent for those.
+  let noData = 0;
+  for (let d = 1; d <= past; d++) {
+    const iso = `${month}-${String(d).padStart(2, "0")}`;
+    if (!withData.has(iso) && !days?.has(iso)) noData++;
   }
   // Absences that can no longer be made up (the 26-duty rule).
-  const absences = Math.max(0, required - duties - remaining);
-  return { duties, required, remaining, absences, share: attendanceShare(absences), found: duties > 0 };
+  const absences = Math.max(0, required - duties - noData - remaining);
+  return { duties, required, remaining, absences, share: attendanceShare(absences), found: duties > 0, noData };
 }
 
 // ------------------------------------------------------------------
@@ -391,13 +404,22 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   if (!fresh && cache && cache.key === month && Date.now() - cache.at < 60_000) return cache.value;
 
   const settings = await loadPerformanceSettings();
-  const [{ invoices, returns, promos }, staff, targets, duties] = await Promise.all([
+  const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties] = await Promise.all([
     loadMonth(month),
     loadStaffForPerformance(),
     loadTargets(month),
     loadDuties(month),
   ]);
   const promoLines = promos.length ? await loadPromoLines(month, promos) : { sold: [], back: [] };
+
+  // The free item of a Buy 2 Get 1 offer is a promotion, not a discount given by staff.
+  const promoDiscount = new Map<string, number>();
+  for (const l of promoLines.sold) {
+    if (!promoKind(promos, l, String(l.invoice_date)).has("b2g1")) continue;
+    const id = String(l.invoice_id);
+    promoDiscount.set(id, (promoDiscount.get(id) ?? 0) + n(l.discount));
+  }
+  const invoices = rawInvoices.map((b) => (promoDiscount.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (promoDiscount.get(b.invoice_id) ?? 0)) } : b));
 
   const excluded = new Set(settings.excludedStores.map((s) => s.toUpperCase()));
   const { days: daysInMonth } = monthRange(month);
@@ -423,8 +445,18 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   };
   const threshold = settings.highDiscountPct / 100;
   const unlinked = new Map<string, { name: string; net: number; bills: number }>();
+  const knownIds = new Set(staff.map((s) => s.userId));
+  const spName = new Map<string, string>();
 
   for (const b of invoices) {
+    // A User ID on the bill that no active staff member has (e.g. "1035 - FEBIN" for 1043) also needs linking.
+    if (b.staff_user_id && !knownIds.has(b.staff_user_id) && b.salesperson) {
+      const u = unlinked.get(b.salesperson) ?? { name: b.salesperson, net: 0, bills: 0 };
+      u.net += b.net;
+      u.bills++;
+      unlinked.set(b.salesperson, u);
+    }
+    if (b.staff_user_id && b.salesperson && !spName.has(b.staff_user_id)) spName.set(b.staff_user_id, b.salesperson);
     if (!b.staff_user_id) {
       const key = b.salesperson?.trim() || "";
       if (key) {
@@ -534,8 +566,8 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       people.push({
         staffId: s?.id ?? null,
         userId: id,
-        name: s?.name ?? id,
-        roleLabel: s?.roleLabel ?? "Not in Staff Users",
+        name: s?.name ?? spName.get(id) ?? id,
+        roleLabel: s?.roleLabel ?? "User ID not in Staff Users — link it in Settings",
         group,
         store,
         bills: a.bills,
@@ -556,7 +588,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
         individualBonus: 0,
         abvBonus: 0,
         spot: a.spot,
-        attendance: attendanceFor(month, duties.get(id), settings.dutiesRequired),
+        attendance: attendanceFor(month, duties.days.get(id), duties.withData, settings.dutiesRequired),
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,
@@ -666,7 +698,25 @@ export async function personDetail(month: string, userId: string, threshold: num
       .order("return_date", { ascending: false })
       .limit(500),
   ]);
-  const inv = bills.map(normInvoice);
+  // Buy 2 Get 1 free items are not counted as staff discount (same as the month report).
+  const { data: b2g1 } = await supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").eq("kind", "b2g1").limit(5000);
+  const promoDiscount = new Map<string, number>();
+  const b2g1Ids = ((b2g1 ?? []) as PromoRow[]).map((p) => p.item_id).filter(Boolean) as string[];
+  for (let i = 0; i < b2g1Ids.length; i += 150) {
+    const { data: pl } = await supabaseAdmin
+      .from("sales_invoice_lines")
+      .select("invoice_id, invoice_date, item_id, sku, discount")
+      .eq("staff_user_id", userId)
+      .gte("invoice_date", from)
+      .lte("invoice_date", to)
+      .in("item_id", b2g1Ids.slice(i, i + 150))
+      .limit(5000);
+    for (const l of (pl ?? []) as Row[]) {
+      if (!promoKind((b2g1 ?? []) as PromoRow[], l, String(l.invoice_date)).has("b2g1")) continue;
+      promoDiscount.set(String(l.invoice_id), (promoDiscount.get(String(l.invoice_id)) ?? 0) + n(l.discount));
+    }
+  }
+  const inv = bills.map(normInvoice).map((b) => (promoDiscount.has(b.invoice_id) ? { ...b, discount: Math.max(0, b.discount - (promoDiscount.get(b.invoice_id) ?? 0)) } : b));
   const cat = new Map<string, { name: string; units: number; net: number }>();
   const item = new Map<string, { name: string; units: number; net: number }>();
   for (const l of lines) {

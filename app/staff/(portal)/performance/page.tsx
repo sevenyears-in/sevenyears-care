@@ -323,7 +323,7 @@ function PersonView({
   if (detail.categories.length >= 2) tips.push(`Most of your sales come from ${detail.categories[0].name}${detail.categories[1] ? ` and ${detail.categories[1].name}` : ""}. Suggest items from other categories to make WOW bills (₹${SPOT.wowReward} each).`);
   if (rank && team.length > 1) tips.push(`You are #${rank} of ${team.length} in the ${GROUP_LABEL[p.group]} at ${store.store}.`);
   if (store.nextSlab && running) tips.push(`The store needs ${short(store.nextSlab.needed)} more to reach ${Math.round(store.nextSlab.from * 100)}% — that raises everyone’s pool.`);
-  if (att.found && att.remaining > 0) tips.push(`Duties: ${att.duties} so far, ${att.required} needed — ${Math.max(0, att.required - att.duties)} more in the ${att.remaining} day(s) left.`);
+  if (att.found && att.remaining > 0) tips.push(`Duties: ${att.duties} so far${att.noData ? ` (+${att.noData} day(s) with no punching data, counted as present)` : ""}, ${att.required} needed — ${Math.max(0, att.required - att.duties - att.noData)} more in the ${att.remaining} day(s) left.`);
 
   const best = [...detail.daily].sort((a, b) => b.net - a.net)[0];
 
@@ -369,8 +369,8 @@ function PersonView({
         <Tile label="Returns" value={rupees(p.returns)} note={`${p.returnCount} return(s)`} tone={p.returns ? "bad" : "default"} />
         <Tile
           label="Duties"
-          value={att.found ? `${att.duties}/${att.required}` : "—"}
-          note={att.found ? (att.absences ? `${att.absences} short → ${pct(att.share)} paid` : "On track") : "No attendance found"}
+          value={att.found ? `${att.duties + att.noData}/${att.required}` : "—"}
+          note={att.found ? (att.absences ? `${att.absences} short → ${pct(att.share)} paid` : att.noData ? `incl. ${att.noData} day(s) without punching data` : "On track") : "No attendance found"}
           tone={att.absences ? "bad" : "default"}
         />
       </div>
@@ -609,7 +609,7 @@ function TeamView({ store, base, threshold, canExport }: { store: StoreReport; b
                     {p.flaggedBills ? <span className="ml-1 text-xs">⚑{p.flaggedBills}</span> : null}
                   </td>
                   <td className={`${tdc} text-right`}>{p.returns ? rupees(p.returns) : "—"}</td>
-                  <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}>{p.attendance.found ? `${p.attendance.duties}/${p.attendance.required}` : "—"}</td>
+                  <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}>{p.attendance.found ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.storeShare)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.individualBonus + p.abvBonus)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.spot.total)}</td>
