@@ -440,8 +440,10 @@ export type PersonReport = {
   group: IncentiveGroup;
   store: string | null;
   isPt: boolean;
-  /** False for groups without individual targets (e.g. Store Manager). */
+  /** False for groups without individual targets (e.g. Store Manager, Backend Staff). */
   targetApplies: boolean;
+  /** No sales target at all — shares the store pool only (e.g. data entry). Store Manager is false here (measured on the store). */
+  poolOnly: boolean;
   bills: number;
   units: number;
   gross: number;
@@ -542,6 +544,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   const [rawSettings, allRules] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
   const settings = withRoleNames(rawSettings);
   const noTargetGroups = new Set(settings.noTargetGroups);
+  const poolOnlyGroups = new Set(settings.poolOnlyGroups.filter((g) => !noTargetGroups.has(g)));
   const rules = allRules.filter((r) => overlaps(r, mFrom, mTo));
   const monthly = rulesOn(rules, mTo);
   const billRules = rules.filter((r): r is BillValueRule | WowRule => r.kind === "bill_value" || r.kind === "wow");
@@ -704,7 +707,8 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       const a = acc.get(id) ?? get(id);
       const group = groupOf(id);
       // Some groups (e.g. Store Manager) have no individual target: they are measured on the store target.
-      const targetApplies = !noTargetGroups.has(group);
+      const poolOnly = poolOnlyGroups.has(group);
+      const targetApplies = !noTargetGroups.has(group) && !poolOnly;
       const t = targetApplies ? targets.staff.get(id) : undefined;
       const pnet = a.invoiceNet - a.returns;
       const pt = isPtCode(id);
@@ -712,6 +716,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
         staffId: s?.id ?? null,
         userId: id,
         targetApplies,
+        poolOnly,
         name: s?.name ?? (pt ? settings.ptPeople[id]?.name : undefined) ?? spName.get(id) ?? id,
         roleLabel: s?.roleLabel ?? (pt ? "Daily wages" : "—"),
         group,
@@ -769,7 +774,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
 
     // Groups without individual targets (Store Manager): their target is the store target.
     for (const p of people) {
-      if (!p.targetApplies && target > 0) {
+      if (!p.targetApplies && !p.poolOnly && target > 0) {
         p.target = target;
         p.achievement = achievement;
       }

@@ -8,7 +8,20 @@ import { todayISO } from "@/lib/helpers";
 export const ATTENDANCE_KEY = "attendance";
 
 export type Presence = { status: "in" | "out"; firstIn: string; lastPunch: string; punches: number };
-export type AttendanceSettings = { keyHash?: string; keyCreatedAt?: string; lastSyncAt?: string; lastSyncCount?: number };
+export type AttendanceSettings = {
+  keyHash?: string;
+  keyCreatedAt?: string;
+  lastSyncAt?: string;
+  lastSyncCount?: number;
+  /** Version the office-PC script reports (old scripts send none). Version 2 can pull older punches. */
+  scriptVersion?: number;
+  /** Older punches asked for: from this day (YYYY-MM-DD). Cleared when the office PC has sent them. */
+  backfillFrom?: string | null;
+  backfillAskedAt?: string | null;
+  backfillDoneAt?: string | null;
+  backfillDoneFrom?: string | null;
+  backfillSent?: number;
+};
 
 export const hashKey = (k: string) => createHash("sha256").update(k).digest("hex");
 export const newSyncKey = () => randomBytes(24).toString("base64url");

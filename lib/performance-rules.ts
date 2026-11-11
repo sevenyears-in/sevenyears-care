@@ -29,6 +29,8 @@ export type PerformanceSettings = {
   salesPerSalary: number;
   /** Groups that do not get individual targets (e.g. Store Manager — measured on the store target). */
   noTargetGroups: string[];
+  /** Groups with no sales target at all (e.g. Backend Staff / data entry): they only share the store pool. */
+  poolOnlyGroups: string[];
   /** Assistant Store Manager and Floor Manager are one role for now. */
   asmIsFm: boolean;
   /** Duty start times (24-hour "09:30"). The first one is everyone's unless another is chosen. */
@@ -53,6 +55,7 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   incentiveStores: {},
   salesPerSalary: 0,
   noTargetGroups: ["sm"],
+  poolOnlyGroups: ["backend", "vm", "housekeeping"],
   asmIsFm: true,
   shifts: [{ name: "Regular", start: "09:30" }],
   lateGraceMinutes: 10,

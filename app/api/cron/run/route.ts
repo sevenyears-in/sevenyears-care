@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runEscalations } from "@/lib/escalation";
 import { runWishes } from "@/lib/wishes";
 import { syncRecentSales } from "@/lib/sales-sync";
+import { inNightWindow, runNightBackfill } from "@/lib/sales-backfill";
 
 // GET /api/cron/run — the scheduled job (every 30 minutes): escalates late service requests and
 // complaints, and sends today's birthday / anniversary wishes, and copies new bills / returns from Zoho POS. No key needed: both steps only act
@@ -9,6 +10,8 @@ import { syncRecentSales } from "@/lib/sales-sync";
 let lastRun = 0;
 
 export async function GET() {
+  // 11:30–11:59 pm: also start the night copy of earlier months (runs in the background, once at a time).
+  if (inNightWindow()) void runNightBackfill().catch(() => undefined);
   if (Date.now() - lastRun < 5 * 60_000) return NextResponse.json({ ok: true, skipped: "ran recently" });
   lastRun = Date.now();
   try {

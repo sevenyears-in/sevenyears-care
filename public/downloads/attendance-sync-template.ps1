@@ -3,6 +3,8 @@
 #  Runs every 2 minutes on the office PC. Reads only NEW punches from the
 #  eTimeTrackLite SQL Server database and sends them to the app.
 #  It never changes anything in eTimeTrackLite.
+#  Version 2: when the website asks for older punches (Settings -> Attendance ->
+#  Pull older punches), it also sends every punch from that day onwards.
 #
 #  Check:     powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Check
 #  Install:   powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Install
@@ -17,6 +19,7 @@ $SqlPassword = '__SQLPASSWORD__'
 $Url         = '__URL__'
 $Key         = '__KEY__'
 $TaskName    = 'SevenYears Attendance Sync'
+$Version     = 2
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -61,10 +64,51 @@ function Get-LogTables($conn) {
   return $found
 }
 
-function Send-Punches($list) {
-  $body = @{ punches = @($list) } | ConvertTo-Json -Depth 4 -Compress
+function Send-Punches($list, $extra) {
+  $payload = @{ punches = @($list); version = $Version }
+  if ($extra) { foreach ($k in $extra.Keys) { $payload[$k] = $extra[$k] } }
+  $body = $payload | ConvertTo-Json -Depth 4 -Compress
   $bytes = [Text.Encoding]::UTF8.GetBytes($body)
   return Invoke-RestMethod -Method Post -Uri $Url -Headers @{ 'x-sync-key' = $Key } -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec 60
+}
+
+function To-Punch($t, $r) {
+  return @{
+    id = $t + ':' + $r.DeviceLogId
+    code = ([string]$r.UserId).Trim()
+    time = ([datetime]$r.LogDate).ToString('yyyy-MM-ddTHH:mm:ss') + '+05:30'
+    device = [string]$r.DeviceId
+    direction = [string]$r.Direction
+  }
+}
+
+# Older punches asked for by the website: every month table from that day to today,
+# 2000 punches at a time. Punches already on the website are skipped there.
+function Send-OlderPunches($conn, $fromText) {
+  $from = [datetime]::ParseExact($fromText, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+  $month = New-Object DateTime $from.Year, $from.Month, 1
+  $sent = 0
+  while ($month -le (Get-Date)) {
+    $t = 'DeviceLogs_' + $month.Month + '_' + $month.Year
+    $exists = Invoke-Query $conn 'SELECT OBJECT_ID(@n) AS id' @{ '@n' = $t }
+    if ($exists.Rows[0].id -ne [DBNull]::Value) {
+      $last = [long]0
+      while ($true) {
+        $rows = Invoke-Query $conn ("SELECT TOP 2000 DeviceLogId, UserId, LogDate, DeviceId, Direction FROM [" + $t + "] WHERE DeviceLogId > @last AND LogDate >= @from ORDER BY DeviceLogId") @{ '@last' = $last; '@from' = $from }
+        if ($rows.Rows.Count -eq 0) { break }
+        $list = New-Object System.Collections.ArrayList
+        foreach ($r in $rows.Rows) {
+          [void]$list.Add((To-Punch $t $r))
+          $last = [long]$r.DeviceLogId
+        }
+        [void](Send-Punches $list $null)
+        $sent += $list.Count
+        if ($rows.Rows.Count -lt 2000) { break }
+      }
+    }
+    $month = $month.AddMonths(1)
+  }
+  return $sent
 }
 
 if ($Uninstall) {
@@ -112,13 +156,7 @@ try {
     }
     $last = if ($state.ContainsKey($t)) { $state[$t] } else { 0 }
     foreach ($r in $rows.Rows) {
-      $punches += @{
-        id = $t + ':' + $r.DeviceLogId
-        code = ([string]$r.UserId).Trim()
-        time = ([datetime]$r.LogDate).ToString('yyyy-MM-ddTHH:mm:ss') + '+05:30'
-        device = [string]$r.DeviceId
-        direction = [string]$r.Direction
-      }
+      $punches += (To-Punch $t $r)
       if ([long]$r.DeviceLogId -gt $last) { $last = [long]$r.DeviceLogId }
     }
     if (-not $state.ContainsKey($t) -and $rows.Rows.Count -eq 0) {
@@ -136,6 +174,13 @@ try {
   $result = Send-Punches $punches
   ($newState | ConvertTo-Json) | Set-Content $State
   Write-Log ('Sent ' + $punches.Count + ' punch(es); saved ' + $result.saved + '.')
+
+  if ($result.backfillFrom) {
+    Write-Log ('Sending older punches from ' + $result.backfillFrom + ' ...')
+    $older = Send-OlderPunches $conn ([string]$result.backfillFrom)
+    [void](Send-Punches @() @{ backfillDone = $true; backfillSent = $older })
+    Write-Log ('Older punches sent: ' + $older + '.')
+  }
   if ($Check) { Write-Host 'Website OK. Everything is working - now run the same command with -Install.' }
 } catch {
   Write-Log ('Sync failed: ' + $_.Exception.Message)

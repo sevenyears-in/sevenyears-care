@@ -23,6 +23,7 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       incentiveStores: v.incentiveStores ?? {},
       salesPerSalary: Number(v.salesPerSalary) || 0,
       noTargetGroups: Array.isArray(v.noTargetGroups) ? v.noTargetGroups : DEFAULT_PERFORMANCE_SETTINGS.noTargetGroups,
+      poolOnlyGroups: Array.isArray(v.poolOnlyGroups) ? v.poolOnlyGroups : DEFAULT_PERFORMANCE_SETTINGS.poolOnlyGroups,
       asmIsFm: v.asmIsFm === undefined ? true : Boolean(v.asmIsFm),
       shifts: Array.isArray(v.shifts) && v.shifts.length ? v.shifts : DEFAULT_PERFORMANCE_SETTINGS.shifts,
       lateGraceMinutes: Number.isFinite(Number(v.lateGraceMinutes)) && v.lateGraceMinutes !== undefined ? Number(v.lateGraceMinutes) : DEFAULT_PERFORMANCE_SETTINGS.lateGraceMinutes,

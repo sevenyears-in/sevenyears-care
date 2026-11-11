@@ -7,6 +7,7 @@ import { attendanceCode, attendanceSettings, hashKey, newSyncKey, saveAttendance
 // Settings → Attendance (Super Admin).
 // GET  → status (last sync, punches today, codes not linked to a staff user)
 // POST { action: "newKey" } → a new sync key, shown once (the old one stops working)
+// POST { action: "backfill", from } → the office PC sends all punches from that day at its next run
 
 export async function GET() {
   const auth = await requireStaff("super_admin");
@@ -32,13 +33,32 @@ export async function GET() {
     unlinkedCodes: codesToday.filter((c) => !userIds.has(c)).sort(),
     linkedStaff: codesToday.filter((c) => userIds.has(c)).length,
     tableReady: !punches.error,
+    scriptVersion: settings.scriptVersion ?? 0,
+    backfillFrom: settings.backfillFrom ?? null,
+    backfillAskedAt: settings.backfillAskedAt ?? null,
+    backfillDoneAt: settings.backfillDoneAt ?? null,
+    backfillDoneFrom: settings.backfillDoneFrom ?? null,
+    backfillSent: settings.backfillSent ?? 0,
   });
 }
 
 export async function POST(request: Request) {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const body = (await request.json().catch(() => ({}))) as { action?: string };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; from?: string };
+  if (body.action === "backfill") {
+    // Pull older punches: the office PC sends everything from this day at its next run (every 2 minutes).
+    const from = String(body.from ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || Number.isNaN(Date.parse(from))) return NextResponse.json({ error: "Choose a date." }, { status: 400 });
+    if (from > todayISO()) return NextResponse.json({ error: "The date is in the future." }, { status: 400 });
+    if (from < todayISO(new Date(Date.now() - 400 * 86400_000))) return NextResponse.json({ error: "Choose a date in the last 13 months." }, { status: 400 });
+    await saveAttendanceSettings({ backfillFrom: from, backfillAskedAt: new Date().toISOString() });
+    return NextResponse.json({ ok: true });
+  }
+  if (body.action === "backfillCancel") {
+    await saveAttendanceSettings({ backfillFrom: null });
+    return NextResponse.json({ ok: true });
+  }
   if (body.action !== "newKey") return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   const key = newSyncKey();
   await saveAttendanceSettings({ keyHash: hashKey(key), keyCreatedAt: new Date().toISOString() });

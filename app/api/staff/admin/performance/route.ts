@@ -7,6 +7,7 @@ import { loadIncentiveRules, loadPerformanceSettings, saveIncentiveRules, savePe
 import { GROUP_LABEL, groupList, isBuiltInGroup, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
 import { ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
 import { todayISO } from "@/lib/helpers";
+import { loadBackfill, saveBackfill } from "@/lib/sales-backfill";
 
 // Sales targets & incentives settings (Super Admin and Admin).
 
@@ -125,10 +126,34 @@ export async function POST(request: Request) {
       const key = String(body.key ?? "");
       const current = await loadPerformanceSettings();
       if (!groupList(current).some((g) => g.key === key) || key === "none") return bad("Group not found.");
-      const set = new Set(current.noTargetGroups);
-      if (body.on) set.delete(key);
-      else set.add(key);
-      await savePerformanceSettings({ noTargetGroups: [...set] });
+      // mode: "own" (own sales target) · "store" (measured on the store target) · "pool" (no target, store pool only).
+      const mode = typeof body.mode === "string" ? body.mode : body.on ? "own" : "store";
+      if (!["own", "store", "pool"].includes(mode)) return bad("Unknown choice.");
+      const store = new Set(current.noTargetGroups);
+      const pool = new Set(current.poolOnlyGroups);
+      store.delete(key);
+      pool.delete(key);
+      if (mode === "store") store.add(key);
+      if (mode === "pool") pool.add(key);
+      await savePerformanceSettings({ noTargetGroups: [...store], poolOnlyGroups: [...pool] });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "backfill_settings": {
+      // Night copy of earlier months from Zoho POS (11:30–11:59 pm).
+      const fromMonth = String(body.fromMonth ?? "");
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(fromMonth)) return bad("Choose the first month to copy.");
+      const quota = Math.round(Number(body.dailyQuota));
+      if (!Number.isFinite(quota) || quota < 500 || quota > 1_000_000) return bad("Enter the Zoho daily request quota (for example 7500).");
+      const current = await loadBackfill();
+      await saveBackfill({
+        on: Boolean(body.on),
+        fromMonth,
+        dailyQuota: quota,
+        // "Copy again": forget which months were complete so they are checked again.
+        ...(body.recheck ? { doneMonths: [], progress: null } : {}),
+        ...(current.fromMonth !== fromMonth ? { progress: null } : {}),
+      });
       return NextResponse.json({ ok: true });
     }
 

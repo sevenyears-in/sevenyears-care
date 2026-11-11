@@ -188,8 +188,69 @@ async function fetchToken(): Promise<string> {
 
 type ZohoJson = { code?: number; message?: string; [key: string]: unknown };
 
+// ------------------------------------------------------------------
+// Zoho POS limits: 100 requests a minute (all APIs together) and a daily quota.
+// Every read here waits for a free slot (at most PER_MINUTE in any 60 seconds) and is counted.
+// ------------------------------------------------------------------
+
+const PER_MINUTE = 90;
+const callTimes: number[] = [];
+let usage = { day: "", calls: 0, flushed: 0 };
+let totalCalls = 0;
+const istDay = () => new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+
+async function waitForSlot() {
+  for (;;) {
+    const now = Date.now();
+    while (callTimes.length && now - callTimes[0] >= 60_000) callTimes.shift();
+    if (callTimes.length < PER_MINUTE) {
+      callTimes.push(now);
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 60_000 - (now - callTimes[0]) + 50));
+  }
+  const day = istDay();
+  if (usage.day !== day) usage = { day, calls: 0, flushed: 0 };
+  usage.calls++;
+  totalCalls++;
+}
+
+/** Zoho reads made by this server since it started (to count a job's own reads). */
+export const zohoCallsMade = () => totalCalls;
+
+/** Zoho reads in the last 60 seconds (this server). */
+export function zohoCallsLastMinute() {
+  const now = Date.now();
+  return callTimes.filter((t) => now - t < 60_000).length;
+}
+
+const USAGE_KEY = "zoho_usage";
+
+/** Zoho reads today (India time): saved count plus reads not saved yet. */
+export async function zohoCallsToday(): Promise<number> {
+  const day = istDay();
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", USAGE_KEY).maybeSingle();
+  const saved = data?.value as { day?: string; calls?: number } | null;
+  const savedCalls = saved?.day === day ? Number(saved.calls) || 0 : 0;
+  const pending = usage.day === day ? usage.calls - usage.flushed : 0;
+  return savedCalls + pending;
+}
+
+/** Adds the reads made since the last save to today's saved count. */
+export async function flushZohoUsage() {
+  const day = istDay();
+  if (usage.day !== day || usage.calls === usage.flushed) return;
+  const delta = usage.calls - usage.flushed;
+  usage.flushed = usage.calls;
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", USAGE_KEY).maybeSingle();
+  const saved = data?.value as { day?: string; calls?: number } | null;
+  const calls = (saved?.day === day ? Number(saved.calls) || 0 : 0) + delta;
+  await supabaseAdmin.from("app_settings").upsert({ key: USAGE_KEY, value: { day, calls }, updated_at: new Date().toISOString() });
+}
+
 async function zohoGet(path: string, query: Record<string, string> = {}): Promise<ZohoJson> {
   const config = await zohoConfig();
+  await waitForSlot();
   const url = new URL(`${config.apiUrl}/inventory/v1/${path}`);
   url.searchParams.set("organization_id", config.organizationId);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);

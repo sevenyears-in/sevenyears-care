@@ -6,7 +6,7 @@
 // well inside Zoho's per-minute limit. Call it again until `pending` is 0.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { zohoConfigured, zohoRead } from "@/lib/zoho";
+import { flushZohoUsage, zohoConfigured, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
 
@@ -20,7 +20,7 @@ const obj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
 const arr = (v: unknown): Obj[] => (Array.isArray(v) ? (v as Obj[]) : []);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-const SKIP_STATUS = new Set(["void", "draft"]);
+export const SKIP_STATUS = new Set(["void", "draft"]);
 
 /** "1014 - JIYANA" → "1014". Names without a number use the links saved in Settings. */
 export function staffIdFromSalesperson(name: string, links: Record<string, string>) {
@@ -156,7 +156,7 @@ async function categoriesFor(itemIds: string[]) {
 
 type SyncLinks = Record<string, string>;
 
-async function saveInvoice(listRow: Obj, links: SyncLinks) {
+export async function saveInvoice(listRow: Obj, links: SyncLinks) {
   const d = obj((await zohoRead(`invoices/${str(listRow.invoice_id)}`)).invoice);
   const lines = arr(d.line_items);
   const categories = await categoriesFor(lines.map((l) => str(l.item_id)));
@@ -246,7 +246,7 @@ async function saveInvoice(listRow: Obj, links: SyncLinks) {
   }
 }
 
-async function saveCreditNote(listRow: Obj, links: SyncLinks) {
+export async function saveCreditNote(listRow: Obj, links: SyncLinks) {
   const d = obj((await zohoRead(`creditnotes/${str(listRow.creditnote_id)}`)).creditnote);
   const lines = arr(d.line_items);
   const id = str(d.creditnote_id || listRow.creditnote_id);
@@ -444,5 +444,6 @@ export async function syncRecentSales() {
     lastSyncAt: new Date().toISOString(),
     returnsError: out.find((r) => r.returnsError)?.returnsError ?? null,
   });
+  await flushZohoUsage().catch(() => undefined);
   return out;
 }

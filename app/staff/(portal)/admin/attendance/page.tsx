@@ -14,7 +14,20 @@ type Status = {
   unlinkedCodes: string[];
   linkedStaff: number;
   tableReady: boolean;
+  scriptVersion: number;
+  backfillFrom: string | null;
+  backfillAskedAt: string | null;
+  backfillDoneAt: string | null;
+  backfillDoneFrom: string | null;
+  backfillSent: number;
 };
+
+/** First day of last month (YYYY-MM-DD). */
+function lastMonthStart() {
+  const d = new Date();
+  const m = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-01`;
+}
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 const ps = (v: string) => v.replace(/'/g, "''"); // safe inside a PowerShell '...' string
@@ -29,6 +42,27 @@ export default function AttendanceSetupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [olderFrom, setOlderFrom] = useState(lastMonthStart);
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [olderError, setOlderError] = useState("");
+
+  const askOlder = async (action: "backfill" | "backfillCancel") => {
+    setOlderBusy(true);
+    setOlderError("");
+    try {
+      const r = await fetch("/api/staff/admin/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, from: olderFrom }),
+      }).then((x) => x.json());
+      if (r.error) throw new Error(r.error);
+      await load();
+    } catch (e) {
+      setOlderError(e instanceof Error ? e.message : "Could not ask for the punches.");
+    } finally {
+      setOlderBusy(false);
+    }
+  };
 
   const load = () =>
     fetch("/api/staff/admin/attendance", { cache: "no-store" })
@@ -123,6 +157,53 @@ export default function AttendanceSetupPage() {
               eTimeTrackLite employee code.
             </p>
           )}
+        </div>
+      )}
+
+      {status?.hasKey && (
+        <div className={card}>
+          <h2 className="text-lg font-bold">Pull older punches from eTimeTrackLite</h2>
+          <p className="mt-1 max-w-3xl text-sm text-black/60">
+            Days before the sync started show “No punching data” on the duties pages. Choose a day and the office PC sends every
+            punch from that day onwards at its next run (within 2 minutes). Punches already here are not doubled.
+          </p>
+          {status.scriptVersion < 2 && (
+            <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
+              The script on the office PC is the older version and cannot send older punches. Download the new script below
+              (steps 1–2), put it in <b className="font-mono">C:\SevenYearsSync</b> in place of the old one, and run the{" "}
+              <b>-Check</b> command once (step 3). The scheduled sync keeps running — no need to install again.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className={labelClass}>From</span>
+              <input type="date" value={olderFrom} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setOlderFrom(e.target.value)} className={inputClass} />
+            </label>
+            <button
+              type="button"
+              onClick={() => askOlder("backfill")}
+              disabled={olderBusy || !olderFrom}
+              className="rounded-2xl bg-[#161616] px-5 py-3 text-sm font-bold text-white disabled:opacity-40"
+            >
+              {olderBusy ? "Asking…" : "↻ Pull punches from this day"}
+            </button>
+            {status.backfillFrom && (
+              <button type="button" onClick={() => askOlder("backfillCancel")} disabled={olderBusy} className="rounded-2xl px-4 py-3 text-sm font-semibold ring-1 ring-black/10">
+                Cancel
+              </button>
+            )}
+          </div>
+          <ErrorBox message={olderError} />
+          {status.backfillFrom ? (
+            <p className="mt-3 text-sm font-semibold text-amber-700">
+              ⏳ Waiting for the office PC to send punches from {status.backfillFrom}
+              {status.backfillAskedAt ? ` (asked ${formatDateTime(status.backfillAskedAt)})` : ""}. This page updates by itself.
+            </p>
+          ) : status.backfillDoneAt ? (
+            <p className="mt-3 text-sm font-semibold text-green-700">
+              ✓ {status.backfillSent} punch(es) from {status.backfillDoneFrom} received on {formatDateTime(status.backfillDoneAt)}.
+            </p>
+          ) : null}
         </div>
       )}
 

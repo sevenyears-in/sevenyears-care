@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     timingSafeEqual(Buffer.from(hashKey(key)), Buffer.from(settings.keyHash));
   if (!ok) return NextResponse.json({ error: "Not allowed." }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { punches?: unknown[] };
+  const body = (await request.json().catch(() => ({}))) as { punches?: unknown[]; version?: unknown; backfillDone?: unknown; backfillSent?: unknown };
   const list = Array.isArray(body.punches) ? body.punches.slice(0, 5000) : [];
   const rows = list
     .map((p) => p as Record<string, unknown>)
@@ -41,6 +41,16 @@ export async function POST(request: Request) {
     }
     saved += data?.length ?? 0;
   }
-  await saveAttendanceSettings({ lastSyncAt: new Date().toISOString(), lastSyncCount: saved });
-  return NextResponse.json({ ok: true, received: rows.length, saved });
+  const version = Number(body.version) || 0;
+  const change: Parameters<typeof saveAttendanceSettings>[0] = { lastSyncAt: new Date().toISOString(), lastSyncCount: saved, scriptVersion: version };
+  // The office PC has finished sending the older punches that were asked for.
+  if (body.backfillDone === true && settings.backfillFrom) {
+    change.backfillDoneAt = new Date().toISOString();
+    change.backfillDoneFrom = settings.backfillFrom;
+    change.backfillSent = Number(body.backfillSent) || 0;
+    change.backfillFrom = null;
+  }
+  const after = await saveAttendanceSettings(change);
+  // Ask the script (version 2 and later) to send older punches from this day.
+  return NextResponse.json({ ok: true, received: rows.length, saved, backfillFrom: after.backfillFrom ?? null });
 }

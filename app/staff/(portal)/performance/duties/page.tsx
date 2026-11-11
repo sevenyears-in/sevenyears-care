@@ -149,6 +149,13 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
           Present = punched on the machine. Late = first punch after the shift start plus the grace minutes. Days with no punching data at all are not counted as absent. A justified day counts as a duty. The 26-duty rule: each duty short is
           one unauthorised absence (1 → 75% of incentive paid, 2 → 50%, 3 or more → nothing).
         </p>
+        {staff.role === "super_admin" && days.some((d) => d.status === "no_data") && (
+          <p className="mt-2 text-xs">
+            <Link href="/staff/admin/attendance" className="font-semibold text-[#5b55c9] underline">
+              ↻ Pull the missing punches from eTimeTrackLite
+            </Link>
+          </p>
+        )}
       </section>
     </div>
   );

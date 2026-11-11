@@ -150,7 +150,7 @@ function smPlan(f: Facts): PlanItem[] {
     out.push({
       priority: "medium",
       title: `Peak hours ${f.hrs.peak.map((h) => hourRange(h.hour)).join(", ")} · lean ${f.hrs.lean.map((h) => hourRange(h.hour)).join(", ")}`,
-      detail: `The two peak hours bring ${pc(f.hrs.peak.reduce((s, h) => s + h.net, 0) / f.hrs.sales)} of sales. Everyone on the floor then — no breaks, no stock work. Give breaks, restocking and training in the lean hours.`,
+      detail: `The two peak hours bring ${pc(f.hrs.peak.reduce((s, h) => s + h.net, 0) / f.hrs.sales)} of sales. Keep the full team on the floor then and finish stock work before. Use the lean hours for restocking, display work and training.`,
     });
   for (const c of f.falling.slice(0, 2))
     out.push({
@@ -208,9 +208,9 @@ function asmPlan(f: Facts): PlanItem[] {
     out.push({
       priority: "medium",
       title: `Floor plan by hour`,
-      detail: `Full floor at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}; use ${f.hrs.lean.map((h) => hourRange(h.hour)).join(" and ")} for breaks, VM and coaching.`,
+      detail: `Full floor at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}; use ${f.hrs.lean.map((h) => hourRange(h.hour)).join(" and ")} for VM, restocking and coaching.`,
     });
-  if (f.best) out.push({ priority: "good", title: `Be on the floor all of ${WEEKDAY[f.best.day]}`, detail: `It is the busiest day (avg ${rs(f.best.avg)}); no long breaks for the team then.` });
+  if (f.best) out.push({ priority: "good", title: `Be on the floor all of ${WEEKDAY[f.best.day]}`, detail: `It is the busiest day (avg ${rs(f.best.avg)}); plan the full team on the floor.` });
   if (f.weak.length) out.push({ priority: "medium", title: `Buddy up ${names(f.weak, 2)}`, detail: `Let them watch a top seller close a big bill, then try the same with the next customer.` });
   return out;
 }
@@ -254,7 +254,7 @@ function csaPlan(f: Facts, p?: PersonReport): PlanItem[] {
   if (f.rising[0]) out.push({ priority: "good", title: `Customers are buying ${f.rising[0].name}`, detail: `Up this week (${rs(f.rising[0].last7)}). Show it to every family with a child of the right age.` });
   out.push({ priority: "medium", title: `Aim for WOW bills`, detail: `₹10,000+ with 4+ items from 3+ categories (3 items under ₹5,000). Combine ${f.topCats.slice(0, 3).join(", ") || "different categories"}.` });
   if (f.best) out.push({ priority: "good", title: `${WEEKDAY[f.best.day]} is the busiest day`, detail: `Be on time and on the floor; it is the easiest day to meet your number.` });
-  if (f.hrs) out.push({ priority: "good", title: `Be ready at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}`, detail: `The busiest hours of the store — take breaks before or after.` });
+  if (f.hrs) out.push({ priority: "good", title: `Be ready at ${f.hrs.peak.map((h) => hourRange(h.hour)).join(" and ")}`, detail: `The busiest hours of the store — be on the floor and ready to help customers.` });
   return out;
 }
 

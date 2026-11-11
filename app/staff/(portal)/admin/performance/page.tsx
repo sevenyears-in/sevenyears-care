@@ -10,6 +10,8 @@ import { loadSalaries, loadStaffForPerformance, loadTargets, monthReport } from 
 import { isMonth, monthRange } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
+import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
+import { zohoCallsToday } from "@/lib/zoho";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sales targets & incentives" };
@@ -26,6 +28,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   await assignPtCodesForSavedBills().catch(() => undefined);
   const rawSettings = await loadPerformanceSettings();
   const settings = withRoleNames(rawSettings);
+  const [backfill, zohoToday] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0)]);
   const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
@@ -84,6 +87,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         billsCopied={counts.count ?? 0}
         lastBillDate={report?.lastBillDate ?? null}
         rules={rules}
+        backfill={{ ...backfill, pending: monthsToCopy(backfill), zohoToday }}
       />
     </div>
   );

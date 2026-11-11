@@ -409,12 +409,18 @@ function PersonView({
               {p.targetApplies ? "Net sales" : `${store.store} store net sales`} (after discounts &amp; returns, with GST)
             </p>
             <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{rupees(heroNet)}</p>
-            {!p.targetApplies && <p className="text-xs text-black/50">Your target is the store target. Your own billing: {rupees(p.net)}.</p>}
+            {!p.targetApplies && (
+              <p className="text-xs text-black/50">
+                {p.poolOnly ? `No sales target — you share the ${store.store} store pool.` : `Your target is the store target. Your own billing: ${rupees(p.net)}.`}
+              </p>
+            )}
             <p className="mt-1 text-sm text-black/55">
               {p.target ? (
                 <>
                   Target {rupees(p.target)} · <b className="text-black">{pct(p.achievement ?? 0)}</b> achieved
                 </>
+              ) : p.poolOnly ? (
+                "No sales target · store pool share"
               ) : (
                 "No individual target set for this month"
               )}
@@ -739,7 +745,7 @@ function TeamView({
                     {rupees(m.net)}
                     {m.isStore && <span className="ml-1 rounded-full bg-[#8883d7]/15 px-1.5 text-[10px] font-bold text-[#5b55c9]">store</span>}
                   </td>
-                  <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : p.targetApplies ? "—" : <span className="text-xs">Store target</span>}</td>
+                  <td className={`${tdc} text-right text-black/60`}>{p.target ? rupees(p.target) : p.targetApplies ? "—" : <span className="text-xs">{p.poolOnly ? "No target" : "Store target"}</span>}</td>
                   <td className={`${tdc} text-right font-semibold ${p.achievement === null ? "text-black/30" : p.achievement >= 1 ? "text-green-700" : p.achievement >= 0.9 ? "text-amber-600" : "text-[#d6224a]"}`}>
                     {p.achievement === null ? "—" : pct(p.achievement)}
                   </td>
@@ -909,7 +915,7 @@ function StoreDashboard({
   const topDisc = [...sellers].sort((a, b) => b.discount - a.discount)[0];
   // Store Managers are measured on the store, not on their own billing — left out here.
   const noSales = store.people.filter((p) => p.bills === 0 && p.attendance.duties > 0 && p.targetApplies && ["sales", "asm"].includes(p.group));
-  const noTarget = store.people.filter((p) => p.target === null && p.group !== "none" && p.bills > 0);
+  const noTarget = store.people.filter((p) => p.targetApplies && p.target === null && p.group !== "none" && p.bills > 0);
 
   // Things for the Store Manager to act on (most important first).
   const act: { tone: "bad" | "warn" | "good"; text: string }[] = [];
@@ -985,7 +991,7 @@ type Worth = { salary: number; ratio: number | null; incentiveShare: number | nu
 /** Management only: sales for every ₹1 of salary (salary counted for the days gone so far). */
 /** Net sales, bills and items a person is measured on: their own, or the store's for groups without individual targets (Store Manager). */
 function measureOf(p: StoreReport["people"][number], store: StoreReport) {
-  if (p.targetApplies) return { isStore: false, net: p.net, bills: p.bills, units: p.units, abv: p.abv };
+  if (p.targetApplies || p.poolOnly) return { isStore: false, net: p.net, bills: p.bills, units: p.units, abv: p.abv };
   return { isStore: true, net: store.net, bills: store.bills, units: store.units, abv: store.bills ? store.net / store.bills : 0 };
 }
 
@@ -998,13 +1004,14 @@ function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerS
   });
   // Store Manager: measured on the store — store sales for every ₹1 of the whole team's salary.
   const teamCost = rows.reduce((s, r) => s + r.cost, 0);
-  for (const r of rows) if (!r.p.targetApplies && r.cost > 0) r.ratio = teamCost > 0 ? store.net / teamCost : null;
+  for (const r of rows) if (!r.p.targetApplies && !r.p.poolOnly && r.cost > 0) r.ratio = teamCost > 0 ? store.net / teamCost : null;
   const withRatio = rows.filter((r) => r.ratio !== null && r.p.bills > 0 && r.p.targetApplies).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0));
   const avg = withRatio.length ? withRatio.reduce((s, r) => s + r.p.net, 0) / withRatio.reduce((s, r) => s + r.cost, 0) : 0;
   const totalSalary = rows.reduce((s, r) => s + r.cost, 0);
   const missing = rows.filter((r) => !r.salary).length;
   const verdict = (r: (typeof rows)[number]) => {
     if (r.ratio === null) return { text: "Salary not entered", cls: "text-black/35" };
+    if (r.p.poolOnly) return { text: "No sales role (store pool)", cls: "text-black/45" };
     if (!r.p.targetApplies) return { text: "Store (whole team)", cls: "text-black/60" };
     if (!r.p.bills) return { text: "No sales", cls: "text-black/45" };
     if (salesPerSalary && r.ratio < salesPerSalary) return { text: `Below ${salesPerSalary}× — review`, cls: "font-semibold text-[#d6224a]" };

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { groupList, groupName, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import { ruleStatus, ruleSummary, type IncentiveRule } from "@/lib/incentive-rules";
 import { IncentiveRulesEditor } from "@/components/IncentiveRulesEditor";
+import type { BackfillState } from "@/lib/sales-backfill";
 
 type Person = {
   id: string;
@@ -74,11 +75,13 @@ export function PerformanceAdmin(props: {
   billsCopied: number;
   lastBillDate: string | null;
   rules: IncentiveRule[];
+  backfill: Backfill;
 }) {
   const labels = props.settings.groupLabels;
   return (
     <div className="space-y-6">
       <SyncCard month={props.month} today={props.today} settings={props.settings} billsCopied={props.billsCopied} lastBillDate={props.lastBillDate} />
+      <NightCopyCard backfill={props.backfill} thisMonth={props.thisMonth} />
       {props.unlinked.length > 0 && <LinksCard unlinked={props.unlinked} people={props.people} />}
       <TargetsCard {...props} />
       <IncentiveRulesEditor rules={props.rules} today={props.today} labels={labels} groups={groupList(props.settings).filter((g) => g.key !== "none")} />
@@ -115,6 +118,7 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
     }
   }
   const count = (key: string) => people.filter((p) => p.group === key).length;
+  const targetMode = (key: string) => (settings.noTargetGroups.includes(key) ? "store" : settings.poolOnlyGroups.includes(key) ? "pool" : "own");
   return (
     <Card
       title="Groups"
@@ -133,7 +137,7 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
           <colgroup>
             <col />
             <col className="w-28" />
-            <col className="w-40" />
+            <col className="w-52" />
             <col className="w-24" />
             <col className="w-48" />
           </colgroup>
@@ -141,7 +145,7 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
             <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
               <th className="px-2 py-2">Group</th>
               <th className="px-2 py-2">Type</th>
-              <th className="px-2 py-2">Individual targets</th>
+              <th className="px-2 py-2">Sales target</th>
               <th className="px-2 py-2 text-right">People</th>
               <th className="px-2 py-2" />
             </tr>
@@ -161,20 +165,21 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
                   {g.key === "none" ? (
                     <span className="text-xs text-black/35">—</span>
                   ) : (
-                    <button
-                      className={`${sbtn} ${settings.noTargetGroups.includes(g.key) ? "bg-black/5 text-black/55" : "bg-green-100 text-green-800"}`}
+                    <select
+                      className={`${input} py-1 text-xs`}
                       disabled={busy || !!renaming || adding !== null}
-                      title="Click to change"
-                      onClick={() =>
-                        confirm(
-                          settings.noTargetGroups.includes(g.key)
-                            ? `Give “${g.label}” individual targets?`
-                            : `“${g.label}” will have no individual targets (measured on the store target). Continue?`
-                        ) && run({ action: "group_targets", key: g.key, on: settings.noTargetGroups.includes(g.key) })
-                      }
+                      value={targetMode(g.key)}
+                      onChange={(e) => {
+                        const mode = e.target.value;
+                        const text = mode === "own" ? "its own sales targets" : mode === "store" ? "the store target (measured on the store)" : "no sales target (store pool share only)";
+                        if (confirm(`“${g.label}” will have ${text}. Continue?`)) run({ action: "group_targets", key: g.key, mode });
+                        else e.target.value = targetMode(g.key);
+                      }}
                     >
-                      {settings.noTargetGroups.includes(g.key) ? "No — store target" : "Yes"}
-                    </button>
+                      <option value="own">Own target</option>
+                      <option value="store">Store target</option>
+                      <option value="pool">No target — pool only</option>
+                    </select>
                   )}
                 </td>
                 <td className="px-2 py-2.5 text-right tabular-nums">{count(g.key)}</td>
@@ -259,6 +264,120 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
 // ------------------------------------------------------------------
 // Copy bills from Zoho
 // ------------------------------------------------------------------
+
+type Backfill = BackfillState & { pending: string[]; zohoToday: number };
+
+function NightCopyCard({ backfill, thisMonth }: { backfill: Backfill; thisMonth: string }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [on, setOn] = useState(backfill.on);
+  const [fromMonth, setFromMonth] = useState(backfill.fromMonth);
+  const [quota, setQuota] = useState(String(backfill.dailyQuota));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(recheck = false) {
+    setBusy(true);
+    setError("");
+    try {
+      await post({ action: "backfill_settings", on, fromMonth, dailyQuota: quota, recheck });
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const n = backfill.lastNight;
+  const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "");
+  const lastMonth = shiftMonth(thisMonth, -1);
+  return (
+    <Card
+      title="Earlier months from Zoho POS (every night)"
+      intro={
+        <>
+          Every night between <b>11:30 and 11:59 pm</b> the app copies the bills and returns of earlier months, newest month first, 200
+          records per list request. It keeps under 75 requests a minute (Zoho allows 100) and stops before the daily quota. This month is
+          copied every 30 minutes as before.
+        </>
+      }
+      actions={
+        !editing ? (
+          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={() => setEditing(true)}>
+            ✎ Change
+          </button>
+        ) : undefined
+      }
+    >
+      {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      {editing ? (
+        <div className="grid gap-3 text-sm sm:grid-cols-3">
+          <label className="flex items-center gap-2 font-semibold sm:col-span-3">
+            <input type="checkbox" className="h-4 w-4" checked={on} onChange={(e) => setOn(e.target.checked)} /> Copy earlier months at night
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wide text-black/45">From month</span>
+            <input type="month" className={`${input} mt-1`} value={fromMonth} max={lastMonth} onChange={(e) => setFromMonth(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wide text-black/45">Zoho daily request quota</span>
+            <input className={`${input} mt-1`} inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value.replace(/[^\d]/g, ""))} />
+          </label>
+          <div className="flex flex-wrap items-end gap-2">
+            <button className={primary} disabled={busy} onClick={() => save(false)}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+          <p className="text-xs text-black/50 sm:col-span-3">
+            <button className="font-semibold text-[#5b55c9] underline" disabled={busy} onClick={() => confirm("Check every month again from the first month? Bills already copied are skipped, so this costs only the list requests.") && save(true)}>
+              Check all months again
+            </button>{" "}
+            — use this if bills were changed in Zoho after a month was copied.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3 text-sm sm:grid-cols-3">
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/45">Status</p>
+            <p className={`mt-1 font-bold ${backfill.on ? "text-green-700" : "text-black/45"}`}>{backfill.on ? "On" : "Off"}</p>
+            <p className="text-xs text-black/55">
+              From {monthLabel(backfill.fromMonth)} · quota {backfill.dailyQuota.toLocaleString("en-IN")} a day · {backfill.zohoToday.toLocaleString("en-IN")} used today
+            </p>
+          </div>
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/45">Months</p>
+            <p className="mt-1 font-bold">
+              {backfill.doneMonths.filter((m) => m >= backfill.fromMonth && m < thisMonth).length} copied · {backfill.pending.length} to go
+            </p>
+            <p className="text-xs text-black/55">
+              {backfill.pending.length ? `Next: ${backfill.pending.slice(0, 3).map(monthLabel).join(", ")}${backfill.pending.length > 3 ? " …" : ""}` : "All earlier months are copied."}
+              {backfill.progress ? ` · ${monthLabel(backfill.progress.month)}: ${backfill.progress.billsSaved}/${backfill.progress.bills} bills` : ""}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/45">Last night</p>
+            {n ? (
+              <>
+                <p className="mt-1 font-bold">
+                  {n.bills} bills · {n.returns} returns
+                </p>
+                <p className="text-xs text-black/55">
+                  {fmtDate(n.day)} {time(n.startedAt)}–{n.endedAt ? time(n.endedAt) : "running"} · {n.reads} requests
+                  {n.note ? ` · ${n.note}` : ""}
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-xs text-black/55">Not run yet — the first copy starts tonight at 11:30 pm.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function SyncCard({ month, today, settings, billsCopied, lastBillDate }: { month: string; today: string; settings: PerformanceSettings; billsCopied: number; lastBillDate: string | null }) {
   const router = useRouter();
@@ -382,6 +501,7 @@ function TargetsCard(props: {
   const [storeRows, setStoreRows] = useState<Record<string, string>>(startStores);
   const setRow = (id: string, change: Partial<RowState>) => setRows({ ...rows, [id]: { ...rows[id], ...change } });
 
+  const noOwnTarget = (g: string) => settings.noTargetGroups.includes(g) || settings.poolOnlyGroups.includes(g);
   const groupOf = (p: Person) => (editing ? rows[p.userId]?.group ?? p.group : p.group);
   const isCorporate = (p: Person) => !p.homeStore || !props.stores.includes(p.homeStore);
   const storeFor = (p: Person) => (editing ? (isCorporate(p) ? rows[p.userId]?.store || p.store : p.homeStore) : p.store);
@@ -418,7 +538,7 @@ function TargetsCard(props: {
         month,
         // People not in incentive, and groups without individual targets (Store Manager), have no targets.
         rows: Object.entries(rows).map(([userId, r]) =>
-          r.group === "none" || settings.noTargetGroups.includes(r.group) ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv }
+          r.group === "none" || noOwnTarget(r.group) ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv }
         ),
       });
       const salaryRows = props.people
@@ -475,7 +595,7 @@ function TargetsCard(props: {
   return (
     <Card
       title={`Targets — ${monthLabel(month)}`}
-      intro="Individual targets are net sales with GST, after discounts and returns. The Store Manager has no individual target (measured on the store target). The group decides which part of the store pool a person shares."
+      intro="Individual targets are net sales with GST, after discounts and returns. The Store Manager is measured on the store target; groups set to “No target — pool only” (e.g. data entry) only share the store pool. The group decides which part of the store pool a person shares."
       actions={
         <>
           <a href={`/staff/admin/performance?m=${shiftMonth(month, -1)}`} className={ghost}>
@@ -598,8 +718,8 @@ function TargetsCard(props: {
                             ))}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          {settings.noTargetGroups.includes(groupOf(p)) ? (
-                            <span className="text-xs text-black/45">Store target</span>
+                          {noOwnTarget(groupOf(p)) ? (
+                            <span className="text-xs text-black/45">{settings.noTargetGroups.includes(groupOf(p)) ? "Store target" : "No target — pool only"}</span>
                           ) : editing ? (
                             <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.sales ?? ""} onChange={(e) => setRow(p.userId, { sales: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.sales ? (
@@ -609,7 +729,7 @@ function TargetsCard(props: {
                           )}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          {settings.noTargetGroups.includes(groupOf(p)) ? (
+                          {noOwnTarget(groupOf(p)) ? (
                             <span className="text-xs text-black/30">—</span>
                           ) : editing ? (
                             <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRow(p.userId, { abv: e.target.value.replace(/[^\d]/g, "") })} />
@@ -637,12 +757,9 @@ function TargetsCard(props: {
           </div>
         ))}
 
-        {notIn.length > 0 && (
+        {editing && notIn.length > 0 && (
           <div>
-            <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
-              <h3 className="text-base font-bold">{groupName("none", settings.groupLabels)}</h3>
-              <span className="text-sm text-black/55">Management and office staff: no incentive and no targets.</span>
-            </div>
+            <h3 className="mb-2 text-base font-bold">{groupName("none", settings.groupLabels)}</h3>
             <ul className="divide-y divide-black/5 rounded-2xl ring-1 ring-black/5">
               {notIn.map((p) => (
                 <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm">
