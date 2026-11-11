@@ -10,6 +10,7 @@ import { after } from "next/server";
 import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
 import { notifyCustomer, siteUrl } from "@/lib/notify";
+import { isServiceCoverage } from "@/lib/warranty-coverage";
 
 // PATCH /api/staff/warranties/:id
 //  { modelNumber, serialNumber, customerAddress } — fill in details on a warranty
@@ -26,6 +27,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json().catch(() => ({}));
   if (body.action === "user") return setProductUser(id, body, auth.staff.fullName);
   if (body.action === "edit") return editWarranty(id, body, auth.staff);
+  if (body.action === "coverage") {
+    // Warranty service type (On-Site / In-Store). Super Admin only; "" = not set.
+    if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can do this." }, { status: 403 });
+    const coverage = body.coverage === "" || body.coverage === null ? null : isServiceCoverage(body.coverage) ? body.coverage : undefined;
+    if (coverage === undefined) return NextResponse.json({ error: "Choose On-Site or In-Store." }, { status: 400 });
+    const { error } = await supabaseAdmin
+      .from("warranties")
+      .update({ service_coverage: coverage, edited_at: new Date().toISOString(), edited_by: auth.staff.fullName })
+      .eq("id", id);
+    if (error) {
+      console.error("Warranty service type error:", error);
+      return NextResponse.json({ error: "Unable to save." }, { status: 500 });
+    }
+    return NextResponse.json({ success: true });
+  }
   if (body.action === "void" || body.action === "unvoid") {
     if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can do this." }, { status: 403 });
     const reason = String(body.reason ?? "").trim().slice(0, 300);

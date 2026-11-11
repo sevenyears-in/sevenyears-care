@@ -10,7 +10,7 @@ export async function GET() {
 
   const { data } = await supabaseAdmin
     .from("warranties")
-    .select("warranty_number, bill_number, bill_date, product_name, model_number, serial_number, store_name, warranty_expiry_date, status, customer_name, customer_address")
+    .select("warranty_number, bill_number, bill_date, product_name, model_number, serial_number, store_name, warranty_expiry_date, status, customer_name, customer_address, service_coverage")
     .or(`customer_mobile.eq.${customer.mobile},alternate_mobile.eq.${customer.mobile}`)
     .order("bill_date", { ascending: false });
 
@@ -30,6 +30,7 @@ export async function GET() {
         modelNumber: w.model_number,
         serialNumber: w.serial_number,
         storeName: w.store_name,
+        coverage: w.service_coverage ?? null,
         active: w.status === "active" && w.warranty_expiry_date >= today,
       })),
     },

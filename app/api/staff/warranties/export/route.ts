@@ -22,6 +22,7 @@ const COLUMNS: [string, string][] = [
   ["customer_name", "Customer Name"],
   ["customer_mobile", "Customer Mobile"],
   ["customer_address", "Address"],
+  ["service_coverage", "Warranty Service Type"],
   ["alternate_name", "Gift Recipient"],
   ["alternate_mobile", "Recipient Mobile"],
   ["warranty_start_date", "Warranty Start"],
@@ -71,6 +72,7 @@ export async function GET(request: Request) {
       const row = { ...r };
       if (row.status === "active" && String(row.warranty_expiry_date) < today) row.status = "expired";
       if (row.created_at) row.created_at = String(row.created_at).slice(0, 10);
+      row.service_coverage = row.service_coverage === "on_site" ? "On-Site" : row.service_coverage === "in_store" ? "In-Store" : "";
       lines.push(COLUMNS.map(([key]) => cell(row[key])).join(","));
     }
     if (rows.length < BATCH) break;

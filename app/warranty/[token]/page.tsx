@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDate, todayISO } from "@/lib/helpers";
 import { eligibility, extendedSettings, rupees, warrantyByToken } from "@/lib/extended-warranty";
 import { WARRANTY_TERMS } from "@/lib/certificate-pdf";
+import { ServiceCoverageBlock } from "@/components/ServiceCoverageBlock";
 
 type PageProps = {
   params: Promise<{ token: string }>;
@@ -19,7 +20,7 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
   const { data: w, error } = await supabaseAdmin
     .from("warranties")
     .select(
-      "warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status"
+      "warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, service_coverage"
     )
     .eq("verification_token", token)
     .maybeSingle();
@@ -77,6 +78,8 @@ export default async function WarrantyCertificatePage({ params }: PageProps) {
                 </span>
               </div>
             </div>
+
+            <ServiceCoverageBlock coverage={w.service_coverage} store={w.store_name} className="mt-6" />
 
             <Section title="Customer">
               <Detail label="Name" value={w.customer_name} />

@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   }
   const { data, error } = await supabaseAdmin
     .from("warranties")
-    .select("warranty_number, bill_number, bill_date, product_name, model_number, serial_number, store_name, warranty_expiry_date, status, customer_mobile, alternate_mobile")
+    .select("warranty_number, bill_number, bill_date, product_name, model_number, serial_number, store_name, warranty_expiry_date, status, customer_mobile, alternate_mobile, service_coverage")
     .or(`warranty_number.eq.${ref},bill_number.ilike.${ref}`)
     .order("product_name")
     .limit(30);
@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       model: w.model_number,
       serialEnd: w.serial_number && w.serial_number !== "Not recorded" ? String(w.serial_number).slice(-4) : "",
       store: w.store_name,
+      coverage: w.service_coverage ?? null,
       billDate: w.bill_date,
       active: w.status === "active",
       underWarranty: w.status === "active" && w.warranty_expiry_date >= today,

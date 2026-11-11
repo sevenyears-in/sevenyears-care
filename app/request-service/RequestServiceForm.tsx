@@ -11,7 +11,7 @@ import {
   primaryButtonClass,
 } from "@/components/SiteChrome";
 import { formatDateTime, todayISO } from "@/lib/helpers";
-import { PHOTO_OPTIONAL_ISSUES, PHOTO_REQUIRED_ISSUES, SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
+import { PAID_HOME_AGREEMENT, PHOTO_OPTIONAL_ISSUES, PHOTO_REQUIRED_ISSUES, SERVICE_ISSUE_TYPES, SERVICE_MODES } from "@/lib/site-config";
 import { PhotoPicker, uploadPhotos, type PickedPhoto } from "@/components/PhotoPicker";
 
 type LookupItem = {
@@ -20,6 +20,7 @@ type LookupItem = {
   model: string;
   serialEnd: string;
   store: string | null;
+  coverage?: string | null;
   active: boolean;
   underWarranty: boolean;
 };
@@ -71,7 +72,7 @@ export default function RequestServiceForm({
     loggedIn: boolean;
     name?: string;
     mobile?: string;
-    warranties?: { warrantyNumber: string; productName: string; serialNumber: string; billNumber: string; active: boolean }[];
+    warranties?: { warrantyNumber: string; productName: string; serialNumber: string; billNumber: string; active: boolean; coverage?: string | null }[];
   } | null>(null);
 
   // Logged in to My Account? Fill in the mobile number and list their warranties.
@@ -94,6 +95,11 @@ export default function RequestServiceForm({
   const loggedIn = Boolean(me?.loggedIn);
   const myWarranties = me?.warranties ?? [];
   const pickFromAccount = loggedIn && myWarranties.length > 0 && !useOther;
+  // In-Store warranty: service at a Seven Years store; a home visit / pickup is a paid extra.
+  const chosenCoverage =
+    (pickFromAccount ? myWarranties : items ?? []).find((w) => w.warrantyNumber === warrantyNumber)?.coverage ?? null;
+  const inStore = chosenCoverage === "in_store";
+  const [homeChargeAgreed, setHomeChargeAgreed] = useState(false);
 
   const lookup = async () => {
     setLookupError("");
@@ -185,6 +191,10 @@ export default function RequestServiceForm({
       setErrorMessage("Please add 3 photos of the product from different angles.");
       return;
     }
+    if (inStore && serviceMode === "home_visit" && !homeChargeAgreed) {
+      setErrorMessage("Your warranty is In-Store service. Tick the box to agree to the home visit / pickup charge, or choose to bring it to the store.");
+      return;
+    }
 
     setSubmitting(true);
 
@@ -212,6 +222,7 @@ export default function RequestServiceForm({
           photos: photoPaths,
           description,
           serviceMode,
+          homeVisitChargeAgreed: inStore && serviceMode === "home_visit" ? homeChargeAgreed : false,
           preferredDate: preferredDate || null,
           address,
           latitude,
@@ -573,10 +584,25 @@ export default function RequestServiceForm({
                   onChange={(e) => setServiceMode(e.target.value)}
                   className="accent-[#ff5e79]"
                 />
-                {mode.label}
+                <span>
+                  {mode.label}
+                  {inStore && mode.value === "home_visit" && <span className="block text-xs font-normal text-[#d6224a]">Paid service — charges apply</span>}
+                </span>
               </label>
             ))}
           </div>
+          {inStore && (
+            <p className="mt-3 rounded-2xl bg-[#ff5e79]/5 p-3 text-sm text-black/70">
+              <b>In-Store warranty:</b> this product is outside the on-site service area. Please bring it to a Seven Years store for
+              warranty inspection and service. A home visit or pickup is available as a paid service.
+            </p>
+          )}
+          {inStore && serviceMode === "home_visit" && (
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#ff5e79]/40 p-3 text-sm">
+              <input type="checkbox" checked={homeChargeAgreed} onChange={(e) => setHomeChargeAgreed(e.target.checked)} className="mt-1 h-4 w-4 accent-[#ff5e79]" />
+              <span>{PAID_HOME_AGREEMENT.replace("I also agree", "I agree")} The warranty repair itself stays free.</span>
+            </label>
+          )}
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>

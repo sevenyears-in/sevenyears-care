@@ -8,6 +8,9 @@ import { CompleteWarrantyDetails } from "@/components/CompleteWarrantyDetails";
 import { ProductUserEditor } from "@/components/ProductUserEditor";
 import { AdminDangerZone } from "@/components/AdminDangerZone";
 import { EditWarranty } from "@/components/EditWarranty";
+import { ServiceCoverageBlock } from "@/components/ServiceCoverageBlock";
+import { SetServiceCoverage } from "@/components/SetServiceCoverage";
+import { isServiceCoverage } from "@/lib/warranty-coverage";
 import { warrantyEditLevel } from "@/lib/warranty-edit";
 import { loadActiveCategories } from "@/lib/warranty-rules";
 import { formatDate, formatDateTime, one, statusLabel, todayISO } from "@/lib/helpers";
@@ -21,6 +24,7 @@ type Row = {
   bill_number: string;
   bill_date: string;
   store_name: string | null;
+  service_coverage: string | null;
   product_name: string;
   sku: string | null;
   category_name: string | null;
@@ -55,7 +59,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
   const COLS =
-    "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, staff_users:registered_by (full_name, user_id)";
+    "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, service_coverage, staff_users:registered_by (full_name, user_id)";
   const first = await supabaseAdmin.from("warranties").select(`${COLS}, edited_at, edited_by`).eq("id", id).maybeSingle();
   const { data, error } = first.error ? await supabaseAdmin.from("warranties").select(COLS).eq("id", id).maybeSingle() : first;
 
@@ -179,6 +183,15 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
             needsAddress={w.customer_address === "Not recorded"}
           />
         )}
+        <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Warranty service type</p>
+          {isServiceCoverage(w.service_coverage) ? (
+            <ServiceCoverageBlock coverage={w.service_coverage} store={w.store_name} className="mt-3" />
+          ) : (
+            <p className="mt-3 text-sm text-black/55">Not set — this warranty was issued before the service type was added. The certificate shows no service type.</p>
+          )}
+          {staff.role === "super_admin" && <SetServiceCoverage id={w.id} value={isServiceCoverage(w.service_coverage) ? w.service_coverage : null} />}
+        </div>
         {sections.map((section) => (
           <div key={section.title} className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
             <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">{section.title}</p>

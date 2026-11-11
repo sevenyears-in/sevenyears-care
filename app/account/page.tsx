@@ -15,6 +15,7 @@ import { WebPushButton } from "@/components/WebPushButton";
 import { OffersBanner } from "@/components/OffersBanner";
 import { zohoBillFeedbackId } from "@/lib/feedback";
 import { fetchInvoicesForMobile } from "@/lib/zoho";
+import { ServiceCoverageBlock } from "@/components/ServiceCoverageBlock";
 
 // Zoho bills for customers with no registered warranty (cached so the page stays quick).
 const billCache = new Map<string, { at: number; bills: { billNumber: string; billDate: string }[] }>();
@@ -38,7 +39,7 @@ export default async function AccountPage() {
     supabaseAdmin
       .from("warranties")
       .select(
-        "id, warranty_number, verification_token, product_name, model_number, serial_number, bill_number, bill_date, store_name, warranty_expiry_date, extended_warranty_purchased, status"
+        "id, warranty_number, verification_token, product_name, model_number, serial_number, bill_number, bill_date, store_name, warranty_expiry_date, extended_warranty_purchased, status, service_coverage"
       )
       .or(`customer_mobile.eq.${customer.mobile},alternate_mobile.eq.${customer.mobile}`)
       .order("bill_date", { ascending: false }),
@@ -175,6 +176,7 @@ export default async function AccountPage() {
                   Covered until <span className="font-bold">{formatDate(w.warranty_expiry_date)}</span>
                   {w.extended_warranty_purchased ? " (extended)" : ""}
                 </p>
+                <ServiceCoverageBlock coverage={w.service_coverage} store={w.store_name} className="mt-3" />
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link
                     href={`/warranty/${w.verification_token}`}

@@ -7,6 +7,7 @@ import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf
 import { embedPoppins } from "@/lib/pdf-fonts";
 import { formatDate } from "@/lib/helpers";
 import { qrMatrix } from "@/lib/qr";
+import { issuingStore, isServiceCoverage, SERVICE_COVERAGE } from "@/lib/warranty-coverage";
 
 export type CertificateData = {
   warranty_number: string;
@@ -30,6 +31,8 @@ export type CertificateData = {
   warranty_expiry_date: string;
   status: string;
   created_at: string;
+  /** On-Site / In-Store; empty for warranties issued before the type was added. */
+  service_coverage?: string | null;
 };
 
 export const WARRANTY_TERMS = [
@@ -134,7 +137,24 @@ export async function buildCertificatePdf(w: CertificateData, siteUrl: string) {
   text(page, validLabel, width - M - 18 - bold.widthOfTextAtSize(validLabel, 8), y - 22, 8, bold, rgb(0.65, 0.65, 0.65));
   text(page, validValue, width - M - 18 - bold.widthOfTextAtSize(safe(validValue), 16), y - 46, 16, bold, TEAL);
 
-  y -= bandHeight + 26;
+  y -= bandHeight + 14;
+
+  // ---------------- Warranty service type (only when chosen) ----------------
+  if (isServiceCoverage(w.service_coverage)) {
+    const c = SERVICE_COVERAGE[w.service_coverage];
+    const onSite = w.service_coverage === "on_site";
+    const accent = onSite ? TEAL : PINK;
+    const lines = wrap(c.certificate, regular, 9, contentWidth - 36);
+    const boxH = 44 + lines.length * 12;
+    page.drawRectangle({ x: M, y: y - boxH, width: contentWidth, height: boxH, color: onSite ? rgb(0.91, 0.97, 0.98) : rgb(1, 0.94, 0.95) });
+    page.drawRectangle({ x: M, y: y - boxH, width: 4, height: boxH, color: accent });
+    text(page, c.badge, M + 18, y - 18, 11, bold, accent);
+    const storeLine = `Issuing store: ${issuingStore(w.store_name)}`;
+    text(page, storeLine, width - M - 18 - bold.widthOfTextAtSize(safe(storeLine), 9), y - 18, 9, bold, DARK);
+    lines.forEach((line, i) => text(page, line, M + 18, y - 34 - i * 12, 9, regular, DARK));
+    y -= boxH + 12;
+  }
+  y -= 12;
 
   // ---------------- Two-column detail sections ----------------
   const colGap = 20;

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ErrorBox, inputClass, labelClass, phoneInputClass } from "@/components/SiteChrome";
 import { addMonths, formatDate, todayISO } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
+import { SERVICE_COVERAGE, type ServiceCoverage } from "@/lib/warranty-coverage";
 
 const extInfo = (l: { extended?: { price: number; months: number } }) => ({
   months: l.extended?.months ?? EXTENDED_WARRANTY.months,
@@ -59,6 +60,8 @@ type Entry = {
   alternateName: string;
   alternateMobile: string;
   extended: boolean;
+  /** Warranty service type — must be chosen for every product. */
+  coverage: ServiceCoverage | "";
 };
 
 type Saved = {
@@ -139,6 +142,7 @@ export default function RegisterWarrantyStaffPage() {
           alternateName: "",
           alternateMobile: "",
           extended: false,
+          coverage: "",
         };
       }
       setEntries(initial);
@@ -168,6 +172,8 @@ export default function RegisterWarrantyStaffPage() {
           userSame: source.userSame,
           alternateName: source.alternateName,
           alternateMobile: source.alternateMobile,
+          // Same address, so the same service type (only when one is chosen).
+          ...(source.coverage ? { coverage: source.coverage } : {}),
         };
       }
       return next;
@@ -189,6 +195,7 @@ export default function RegisterWarrantyStaffPage() {
       if (!/^[6-9]\d{9}$/.test(e.customerMobile.replace(/\D/g, "")))
         problems.push(`${label}: enter a valid 10-digit mobile number.`);
       if (e.customerAddress.trim().length < 5) problems.push(`${label}: enter the customer address.`);
+      if (!e.coverage) problems.push(`${label}: choose On-Site or In-Store warranty service.`);
       if (!e.userSame) {
         const altMobile = e.alternateMobile.replace(/\D/g, "");
         if (!e.alternateName.trim()) problems.push(`${label}: enter the recipient's name.`);
@@ -579,6 +586,44 @@ export default function RegisterWarrantyStaffPage() {
                         )}
                       </div>
                     </div>
+
+                    <fieldset className="mt-3">
+                      <legend className="mb-2 text-xs font-bold uppercase tracking-wide text-black/50">
+                        Warranty service type <span className="text-[#ff5e79]">*</span>
+                      </legend>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {(Object.keys(SERVICE_COVERAGE) as ServiceCoverage[]).map((kind) => {
+                          const c = SERVICE_COVERAGE[kind];
+                          const chosen = e.coverage === kind;
+                          return (
+                            <label
+                              key={kind}
+                              className={`flex cursor-pointer gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+                                chosen ? "border-[#11b8d0] bg-[#11b8d0]/5 ring-1 ring-[#11b8d0]" : e.coverage ? "border-black/10 opacity-70" : "border-black/10"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`coverage-${row.key}`}
+                                checked={chosen}
+                                onChange={() => setField(row.key, "coverage", kind)}
+                                className="mt-1 h-4 w-4 accent-[#11b8d0]"
+                              />
+                              <span>
+                                <b>{c.title}</b>
+                                <span className="block text-xs font-semibold text-black/55">{c.area}</span>
+                                <span className="mt-1 block text-xs text-black/55">{c.help}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {e.coverage && (
+                        <p className="mt-2 rounded-xl bg-black/[0.03] px-3 py-2 text-xs text-black/60">
+                          Certificate: <b>{SERVICE_COVERAGE[e.coverage].badge}</b> · Issuing store: {lookup.bill.storeName ?? "—"} · {SERVICE_COVERAGE[e.coverage].certificate}
+                        </p>
+                      )}
+                    </fieldset>
 
                     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       {row.extendedAllowed ? (

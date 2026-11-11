@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     const { data: warranty, error: warrantyError } = await supabaseAdmin
       .from("warranties")
       .select(
-        "id, warranty_number, warranty_expiry_date, status, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, product_name, store_name"
+        "id, warranty_number, warranty_expiry_date, status, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, product_name, store_name, service_coverage"
       )
       .eq("warranty_number", warrantyNumber)
       .maybeSingle();
@@ -105,6 +105,15 @@ export async function POST(request: Request) {
             "These details don't match our records. Please check and try again, or contact your nearest Seven Years store.",
         },
         { status: 403 }
+      );
+    }
+
+    // In-Store warranty: a home visit / pickup is a paid service — the customer must agree to the charge.
+    const paidHomeVisit = warranty.service_coverage === "in_store" && serviceMode === "home_visit";
+    if (paidHomeVisit && body.homeVisitChargeAgreed !== true) {
+      return NextResponse.json(
+        { error: "This warranty is In-Store service. Please agree to the home visit / pickup charge, or choose to bring it to the store." },
+        { status: 400 }
       );
     }
 
@@ -184,6 +193,22 @@ export async function POST(request: Request) {
     // Photos: move from the temporary folder to this request.
     const photos = photoPaths.length ? await attachPhotos(created.id, photoPaths).catch(() => [] as string[]) : [];
 
+    // In-Store warranty with a home visit: note on the ticket that the visit / pickup is chargeable.
+    if (paidHomeVisit) {
+      await supabaseAdmin
+        .from("ticket_status_history")
+        .insert({
+          ticket_type: "service",
+          ticket_id: created.id,
+          status: "open",
+          note: "In-Store warranty: the home visit / pickup is a paid service. The customer agreed to the visit / pickup charge; the warranty repair stays free.",
+          visibility: "customer",
+          action: "note",
+          actor_name: "System",
+        })
+        .then(({ error }) => error && console.error("Paid home visit note failed:", error));
+    }
+
     // Stores without a separate technician (e.g. the Service Head does it): give the job straight to them.
     const defaultTech = await defaultTechnicianFor(warranty.store_name ?? null).catch(() => null);
     if (defaultTech) {
@@ -221,7 +246,11 @@ export async function POST(request: Request) {
         }`,
         details: [
           `Problem: ${description}`,
-          serviceMode === "home_visit" ? "Customer asked for a home visit / pickup." : "Customer will bring it to the store.",
+          paidHomeVisit
+            ? "Customer asked for a home visit / pickup — PAID: In-Store warranty, customer agreed to the visit / pickup charge."
+            : serviceMode === "home_visit"
+              ? "Customer asked for a home visit / pickup."
+              : "Customer will bring it to the store.",
           ...(photos.length ? [`${photos.length} photo${photos.length > 1 ? "s" : ""} attached.`] : []),
           underWarranty ? "Under warranty." : "Out of warranty (chargeable).",
           ...(priority === "safety" ? ["SAFETY: ask the customer to stop using the product until it is checked."] : []),

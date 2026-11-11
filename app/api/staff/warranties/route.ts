@@ -11,6 +11,7 @@ import { extendedSettings } from "@/lib/extended-warranty";
 import { buildWarrantyRows } from "@/lib/warranty-rules";
 import { PAGE_SIZE, readFilters, searchWarranties } from "@/lib/warranty-search";
 import { fetchBill, ZohoError } from "@/lib/zoho";
+import { isServiceCoverage } from "@/lib/warranty-coverage";
 
 type IncomingItem = {
   key?: unknown;
@@ -22,6 +23,7 @@ type IncomingItem = {
   alternateName?: unknown;
   alternateMobile?: unknown;
   extended?: unknown;
+  coverage?: unknown;
 };
 
 // The PDF certificate uses standard fonts, which only support English/Western letters.
@@ -81,6 +83,7 @@ export async function POST(request: Request) {
       const extended = item.extended === true;
       const alternateName = String(item.alternateName ?? "").trim();
       const alternateMobile = cleanMobile(item.alternateMobile);
+      const coverage = isServiceCoverage(item.coverage) ? item.coverage : null;
 
       if (!row) errors.push(`${label}: this item is not warranty-eligible on this bill.`);
       else if (row.existing)
@@ -92,6 +95,7 @@ export async function POST(request: Request) {
       if (!customerName) errors.push(`${label}: customer name is required.`);
       if (!isValidMobile(customerMobile)) errors.push(`${label}: enter a valid 10-digit mobile number.`);
       if (customerAddress.length < 5) errors.push(`${label}: customer address is required.`);
+      if (!coverage) errors.push(`${label}: choose On-Site or In-Store warranty service.`);
       if (alternateMobile && !isValidMobile(alternateMobile)) errors.push(`${label}: the recipient's mobile number is not valid.`);
       if (alternateMobile && alternateMobile === customerMobile) errors.push(`${label}: the recipient's mobile is the same as the customer's.`);
       if (alternateMobile && !alternateName) errors.push(`${label}: enter the recipient's name.`);
@@ -101,7 +105,7 @@ export async function POST(request: Request) {
         errors.push(`${label}: extended warranty is not available for ${row.categoryName}.`);
 
 
-      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, alternateName: alternateMobile ? alternateName : "", alternateMobile };
+      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, coverage, alternateName: alternateMobile ? alternateName : "", alternateMobile };
     });
 
     if (errors.length > 0) {
@@ -155,6 +159,7 @@ export async function POST(request: Request) {
         customer_name: item.customerName,
         customer_mobile: item.customerMobile,
         customer_address: item.customerAddress,
+        service_coverage: item.coverage,
         ...(item.alternateMobile ? { alternate_name: item.alternateName, alternate_mobile: item.alternateMobile } : {}),
         warranty_start_date: startDate,
         standard_warranty_expiry_date: standardExpiry,

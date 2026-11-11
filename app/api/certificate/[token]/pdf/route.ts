@@ -19,7 +19,7 @@ export async function GET(
   const { data, error } = await supabaseAdmin
     .from("warranties")
     .select(
-      "warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at"
+      "warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, service_coverage"
     )
     .eq("verification_token", token)
     .maybeSingle();
