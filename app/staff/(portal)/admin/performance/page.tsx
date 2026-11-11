@@ -11,6 +11,7 @@ import { isMonth, monthRange } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
 import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
+import { loadStockState } from "@/lib/stock";
 import { zohoCallsToday } from "@/lib/zoho";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   await assignPtCodesForSavedBills().catch(() => undefined);
   const rawSettings = await loadPerformanceSettings();
   const settings = withRoleNames(rawSettings);
-  const [backfill, zohoToday] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0)]);
+  const [backfill, zohoToday, stockState] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0), loadStockState().catch(() => null)]);
   const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
@@ -88,6 +89,8 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         lastBillDate={report?.lastBillDate ?? null}
         rules={rules}
         backfill={{ ...backfill, pending: monthsToCopy(backfill), zohoToday }}
+        stock={stockState}
+        isSuperAdmin={staff.role === "super_admin"}
       />
     </div>
   );

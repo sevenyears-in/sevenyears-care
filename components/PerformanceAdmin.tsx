@@ -6,6 +6,8 @@ import { groupList, groupName, rupees, type IncentiveGroup, type PerformanceSett
 import { ruleStatus, ruleSummary, type IncentiveRule } from "@/lib/incentive-rules";
 import { IncentiveRulesEditor } from "@/components/IncentiveRulesEditor";
 import type { BackfillState } from "@/lib/sales-backfill";
+import type { StockReadState } from "@/lib/stock";
+import { ExcelImport } from "@/components/ExcelImport";
 
 type Person = {
   id: string;
@@ -76,12 +78,18 @@ export function PerformanceAdmin(props: {
   lastBillDate: string | null;
   rules: IncentiveRule[];
   backfill: Backfill;
+  stock: StockReadState | null;
+  isSuperAdmin: boolean;
 }) {
   const labels = props.settings.groupLabels;
   return (
     <div className="space-y-6">
       <SyncCard month={props.month} today={props.today} settings={props.settings} billsCopied={props.billsCopied} lastBillDate={props.lastBillDate} />
       <NightCopyCard backfill={props.backfill} thisMonth={props.thisMonth} />
+      <StockCard stock={props.stock} isSuperAdmin={props.isSuperAdmin} zohoToday={props.backfill.zohoToday} quota={props.backfill.dailyQuota} />
+      <Card title="Upload from Excel" intro="For urgent cases, or when Zoho requests are running short: upload sales (item-wise, by date) or stock on hand exported from Zoho POS.">
+        <ExcelImport stores={props.stores} />
+      </Card>
       {props.unlinked.length > 0 && <LinksCard unlinked={props.unlinked} people={props.people} />}
       <TargetsCard {...props} />
       <IncentiveRulesEditor rules={props.rules} today={props.today} labels={labels} groups={groupList(props.settings).filter((g) => g.key !== "none")} />
@@ -266,6 +274,71 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
 // ------------------------------------------------------------------
 
 type Backfill = BackfillState & { pending: string[]; zohoToday: number };
+
+function StockCard({ stock, isSuperAdmin, zohoToday, quota }: { stock: StockReadState | null; isSuperAdmin: boolean; zohoToday: number; quota: number }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  async function readNow() {
+    if (!confirm(`Read stock from Zoho POS now? It uses about 1 request for every 50 items (${zohoToday.toLocaleString("en-IN")} of ${quota.toLocaleString("en-IN")} used today). It also runs every night at 11:30 pm.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/staff/admin/stock-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "read_stock" }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not start.");
+      setMsg("Reading stock in the background — refresh this page in a few minutes.");
+      setTimeout(() => router.refresh(), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const at = stock?.lastAt ? new Date(stock.lastAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }) : null;
+  return (
+    <Card
+      title="Stock from Zoho POS (every night)"
+      intro="Stock per store is read every night at 11:30 pm, before the night copy, for sell-through, stock cover, stock-outs and the low-stock alerts."
+      actions={
+        isSuperAdmin ? (
+          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} disabled={busy} onClick={readNow}>
+            {busy ? "Starting…" : "↻ Read stock now"}
+          </button>
+        ) : undefined
+      }
+    >
+      {error && <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      {msg && <p className="mb-2 text-sm font-semibold text-green-700">{msg}</p>}
+      <div className="grid gap-3 text-sm sm:grid-cols-3">
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Last read</p>
+          <p className="mt-1 font-bold">{at ?? "Not read yet"}</p>
+          <p className="text-xs text-black/55">{stock?.lastAt ? `${stock.items.toLocaleString("en-IN")} items · ${stock.reads} requests · ${stock.stores.join(", ")}` : "First read tonight at 11:30 pm."}</p>
+        </div>
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5 sm:col-span-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Alerts</p>
+          {stock && Object.keys(stock.alerts).length ? (
+            <ul className="mt-1 space-y-0.5">
+              {Object.entries(stock.alerts).map(([s, a]) => (
+                <li key={s}>
+                  <a className="font-semibold text-[#5b55c9] underline" href={`/staff/performance/stock?store=${encodeURIComponent(s)}&show=low`}>
+                    {s}
+                  </a>
+                  : {a.low} fast mover(s) low · {a.out} out of stock
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-xs text-black/55">Shown after the first stock read.</p>
+          )}
+          {stock?.note && <p className="mt-1 text-xs text-amber-800">Last attempt: {stock.note}</p>}
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 function NightCopyCard({ backfill, thisMonth }: { backfill: Backfill; thisMonth: string }) {
   const router = useRouter();

@@ -58,11 +58,6 @@ const lastDay = (m: string) => {
   const [y, mo] = m.split("-").map(Number);
   return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`;
 };
-/** Financial year start (April) of a day. */
-const fyStart = (d: string) => {
-  const y = Number(d.slice(0, 4));
-  return `${Number(d.slice(5, 7)) >= 4 ? y : y - 1}-04`;
-};
 
 export const istMinutes = (at = new Date()) => {
   const t = new Date(at.getTime() + 5.5 * 3_600_000);
@@ -78,7 +73,8 @@ export async function loadBackfill(): Promise<BackfillState> {
   const v = (data?.value ?? {}) as Partial<BackfillState>;
   return {
     on: v.on === undefined ? true : Boolean(v.on),
-    fromMonth: /^\d{4}-\d{2}$/.test(String(v.fromMonth)) ? String(v.fromMonth) : fyStart(todayISO()),
+    // Default: the same month last year onwards (for LFL), e.g. November 2025 in November 2026.
+    fromMonth: /^\d{4}-\d{2}$/.test(String(v.fromMonth)) ? String(v.fromMonth) : shiftMonth(monthOf(todayISO()), -12),
     dailyQuota: Number(v.dailyQuota) > 0 ? Number(v.dailyQuota) : 7500,
     doneMonths: Array.isArray(v.doneMonths) ? v.doneMonths.map(String) : [],
     progress: v.progress ?? null,
@@ -94,13 +90,17 @@ export async function saveBackfill(change: Partial<BackfillState>) {
   return value;
 }
 
-/** Earlier months still to copy, newest first. */
+/**
+ * Earlier months still to copy: first the same month last year (for LFL), then last month (for MoM),
+ * then the rest, newest first.
+ */
 export function monthsToCopy(s: BackfillState, today = todayISO()) {
-  const out: string[] = [];
-  for (let m = shiftMonth(monthOf(today), -1); m >= s.fromMonth && out.length < 36; m = shiftMonth(m, -1)) {
-    if (!s.doneMonths.includes(m)) out.push(m);
+  const all: string[] = [];
+  for (let m = shiftMonth(monthOf(today), -1); m >= s.fromMonth && all.length < 36; m = shiftMonth(m, -1)) {
+    if (!s.doneMonths.includes(m)) all.push(m);
   }
-  return out;
+  const first = [shiftMonth(monthOf(today), -12), shiftMonth(monthOf(today), -1)].filter((m) => all.includes(m));
+  return [...first, ...all.filter((m) => !first.includes(m))];
 }
 
 async function listMonth(path: "invoices" | "creditnotes", key: string, month: string) {

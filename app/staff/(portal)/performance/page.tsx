@@ -5,6 +5,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
+import { merchStores } from "@/lib/merch-access";
+import { loadStockState } from "@/lib/stock";
 import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
@@ -168,8 +170,10 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const thisMonth = todayISO().slice(0, 7);
   const month = isMonth(sp.m) && sp.m <= thisMonth ? sp.m : thisMonth;
-  const [report, access] = await Promise.all([monthReport(month), performanceAccess(staff)]);
+  const [report, access, stockState] = await Promise.all([monthReport(month), performanceAccess(staff), loadStockState().catch(() => null)]);
   const allStores = report.stores.map((s) => s.store);
+  // Stock & categories (Store Manager, ASM / Floor Manager and management).
+  const stockStores = await merchStores(staff, allStores).catch(() => [] as string[]);
   const myStores = access.teamAll ? allStores : allStores.filter((s) => access.teamStores.includes(s));
   // Only people in an incentive group have their own page; managers see their stores.
   if (!access.eligible && !access.teamAll && !access.teamStores.length) redirect("/staff");
@@ -244,6 +248,30 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     </div>
   ) : null;
 
+  const stockBar = (store: string | null) => {
+    if (!store || !stockStores.includes(store)) return null;
+    const a = stockState?.alerts?.[store];
+    return (
+      <div className="flex flex-wrap items-stretch gap-3">
+        {a && a.low > 0 && (
+          <Link
+            href={`/staff/performance/stock?store=${encodeURIComponent(store)}&show=low`}
+            className="flex flex-1 items-center justify-between gap-3 rounded-2xl bg-[#d6224a] px-5 py-3 text-white shadow-md transition hover:opacity-95"
+          >
+            <span className="text-sm font-bold">⚠ {a.low} fast-moving item(s) at {store} are running low{a.out ? ` · ${a.out} out of stock` : ""}</span>
+            <span className="shrink-0 rounded-full bg-white/20 px-3 py-1 text-sm font-bold">View items →</span>
+          </Link>
+        )}
+        <Link
+          href={`/staff/performance/stock?store=${encodeURIComponent(store)}`}
+          className="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#5b55c9] soft-card ring-1 ring-black/5 hover:bg-black/[0.02]"
+        >
+          📦 Stock &amp; categories →
+        </Link>
+      </div>
+    );
+  };
+
   if (!report.stores.length || report.lastBillDate === null) {
     return (
       <div className="space-y-6">
@@ -272,6 +300,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <div className="space-y-6">
         {header}
         {switcher}
+        {stockBar(store.store)}
         <TeamView
           store={store}
           base={base}
@@ -315,6 +344,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     <div className="space-y-6">
       {header}
       {switcher}
+      {wanted === me && stockBar(found.store.store)}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
       <PeakLean
         title="Your peak and lean times"
