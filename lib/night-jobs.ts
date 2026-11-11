@@ -22,7 +22,7 @@ export async function nightTick(): Promise<string> {
     if (!stock.lastAt || todayISO(new Date(stock.lastAt)) !== todayISO()) {
       const settings = await loadBackfill();
       const room = settings.dailyQuota - (await zohoCallsToday()) - 250;
-      if (room > 50) stockNote = `stock: ${await readStockFromZoho(Math.min(600, Math.floor(room / 2)))}; `;
+      if (room > 50) stockNote = `stock: ${await readStockFromZoho(Math.min(1200, Math.floor(room / 2)))}; `;
     }
     return stockNote + `earlier months: ${await runNightBackfill()}`;
   } finally {

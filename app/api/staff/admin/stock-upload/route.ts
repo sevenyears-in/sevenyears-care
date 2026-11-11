@@ -48,7 +48,7 @@ export async function POST(request: Request) {
       const settings = await loadBackfill();
       const room = settings.dailyQuota - (await zohoCallsToday()) - 500;
       if (room < 100) return bad("Not enough Zoho requests left today. Stock will be read tonight at 11:30 pm.");
-      after(() => readStockFromZoho(Math.min(600, room)).then((r) => console.log("Stock read:", r)).catch(() => undefined));
+      after(() => readStockFromZoho(Math.min(1000, room)).then((r) => console.log("Stock read:", r)).catch(() => undefined));
       return NextResponse.json({ ok: true });
     }
 

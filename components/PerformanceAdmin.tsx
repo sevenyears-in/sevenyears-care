@@ -281,7 +281,7 @@ function StockCard({ stock, isSuperAdmin, zohoToday, quota }: { stock: StockRead
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   async function readNow() {
-    if (!confirm(`Read stock from Zoho POS now? It uses about 1 request for every 50 items (${zohoToday.toLocaleString("en-IN")} of ${quota.toLocaleString("en-IN")} used today). It also runs every night at 11:30 pm.`)) return;
+    if (!confirm(`Read stock from Zoho POS now? It uses about 1 request for every 200 items plus 1 for every 100 items in stock (${zohoToday.toLocaleString("en-IN")} of ${quota.toLocaleString("en-IN")} used today). It also runs every night at 11:30 pm.`)) return;
     setBusy(true);
     setError("");
     try {

@@ -66,87 +66,131 @@ const pace = async () => {
 let running = false;
 export const isStockReading = () => running;
 
-/** Reads stock for every active item and store. `maxReads` keeps it inside the day's quota. */
+/**
+ * Reads stock for every active item and store, keeping inside `maxReads` requests.
+ * Items whose total stock is 0 are 0 in every store, so only items with stock need the
+ * per-store details (100 items a request). Progress is saved as it goes.
+ */
 export async function readStockFromZoho(maxReads = 600): Promise<string> {
   if (running) return "already running";
   if (!(await zohoConfigured())) return "Zoho POS is not connected";
   running = true;
   let reads = 0;
+  let saved = 0;
+  const today = todayISO();
+  const now = new Date().toISOString();
+  const stores = new Set<string>();
   try {
-    // 1. Active items, 200 a request.
-    const items: Obj[] = [];
-    for (let page = 1; page <= 200; page++) {
-      if (reads >= maxReads) throw new Error("Stopped to stay inside the Zoho request limit while listing items.");
+    // 1. Active items with their total stock, 200 a request.
+    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; total: number }>();
+    for (let page = 1; page <= 400; page++) {
+      if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests while listing items (Zoho limit).`);
       await pace();
       const res = await zohoRead("items", { per_page: "200", page: String(page), filter_by: "Status.Active" });
       reads++;
-      items.push(...arr(res.items));
+      for (const i of arr(res.items)) {
+        const id = str(i.item_id);
+        if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
+        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: num(i.rate), total: num(i.stock_on_hand) });
+      }
       if (!obj(res.page_context).has_more_page) break;
     }
-    const meta = new Map(
-      items
-        .filter((i) => str(i.item_id) && i.is_combo_product !== true && str(i.product_type) !== "service" && str(i.item_type) !== "service")
-        .map((i) => [str(i.item_id), { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: num(i.rate) }])
-    );
-    const ids = [...meta.keys()];
 
-    // 2. Stock per store, 50 items a request.
-    const rows: { store: string; item_id: string; sku: string | null; name: string; category: string | null; rate: number; stock: number }[] = [];
-    const stores = new Set<string>();
-    for (let i = 0; i < ids.length; i += 50) {
-      if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests to stay inside the Zoho limit (${Math.round((i / ids.length) * 100)}% of items read).`);
+    // What is saved now (to keep the date an item went out of stock) and what sold in 60 days.
+    const prev = new Map<string, string | null>();
+    for (let start = 0; start < 500_000; start += 1000) {
+      const { data } = await supabaseAdmin.from("stock_levels").select("store, item_id, out_since").range(start, start + 999);
+      for (const r of data ?? []) prev.set(`${r.store}|${r.item_id}`, (r.out_since as string | null) ?? null);
+      if (!data || data.length < 1000) break;
+    }
+    type Row = { store: string; item_id: string; sku: string | null; name: string; category: string | null; rate: number; stock: number };
+    let pending: Row[] = [];
+    const flush = async () => {
+      if (!pending.length) return;
+      const rows = pending.map((r) => ({ ...r, out_since: r.stock <= 0 ? prev.get(`${r.store}|${r.item_id}`) || today : null, source: "zoho", updated_at: now }));
+      pending = [];
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await supabaseAdmin.from("stock_levels").upsert(rows.slice(i, i + 500));
+        if (error) throw error;
+      }
+      saved += rows.length;
+    };
+
+    // 2. Stock per store for items that have stock somewhere (100 a request; 50 if Zoho refuses 100).
+    const withStock = [...meta.entries()].filter(([, m]) => m.total !== 0).map(([id]) => id);
+    let size = 100;
+    let done = 0;
+    for (let i = 0; i < withStock.length; ) {
+      if (reads >= maxReads) {
+        await flush();
+        throw new Error(`Stopped after ${reads} requests to stay inside the Zoho limit (${Math.round((done / Math.max(1, withStock.length)) * 100)}% of items with stock read; saved so far).`);
+      }
       await pace();
-      const res = await zohoRead("itemdetails", { item_ids: ids.slice(i, i + 50).join(",") });
-      reads++;
+      const chunk = withStock.slice(i, i + size);
+      let res: Obj;
+      try {
+        res = await zohoRead("itemdetails", { item_ids: chunk.join(",") });
+        reads++;
+      } catch (error) {
+        reads++;
+        if (size > 50) {
+          size = 50;
+          continue;
+        }
+        throw error;
+      }
       for (const it of arr(res.items)) {
         const id = str(it.item_id);
         const m = meta.get(id);
         if (!m) continue;
         for (const [store, stock] of stockByStore(it)) {
           stores.add(store);
-          rows.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: m.rate, stock });
+          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: m.rate, stock });
         }
       }
+      i += chunk.length;
+      done = i;
+      if (pending.length >= 2000) await flush();
     }
-    if (!rows.length) throw new Error("Zoho returned no stock per store for the items (check the Zoho connection).");
+    await flush();
 
-    // 3. Save: current stock, out-of-stock date, month-opening stock.
-    const today = todayISO();
+    // 3. Items with no stock anywhere: 0 in each store where we keep them or where they sold in 60 days.
+    if (!stores.size) {
+      const { data } = await supabaseAdmin.from("sales_invoices").select("store").gte("invoice_date", addDays(today, -30)).limit(1000);
+      for (const r of data ?? []) if (r.store) stores.add(String(r.store));
+    }
+    const sold60 = new Map<string, Set<string>>();
+    for (const store of stores) sold60.set(store, new Set((await itemSales(store, addDays(today, -59), today).catch(() => new Map())).keys()));
+    for (const [id, m] of meta) {
+      if (m.total !== 0) continue;
+      for (const store of stores) {
+        if (!prev.has(`${store}|${id}`) && !sold60.get(store)?.has(id)) continue;
+        pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, stock: 0 });
+      }
+      if (pending.length >= 2000) await flush();
+    }
+    await flush();
+
+    // 4. Month-opening stock (first read of the month) and today's stock-outs.
     const month = today.slice(0, 7);
-    const prevOut = new Map<string, string | null>();
-    for (let start = 0; start < 200_000; start += 1000) {
-      const { data } = await supabaseAdmin.from("stock_levels").select("store, item_id, out_since").range(start, start + 999);
-      for (const r of data ?? []) prevOut.set(`${r.store}|${r.item_id}`, (r.out_since as string | null) ?? null);
-      if (!data || data.length < 1000) break;
-    }
-    const now = new Date().toISOString();
-    const save = rows.map((r) => ({
-      ...r,
-      out_since: r.stock <= 0 ? prevOut.get(`${r.store}|${r.item_id}`) || today : null,
-      source: "zoho",
-      updated_at: now,
-    }));
-    for (let i = 0; i < save.length; i += 500) {
-      const { error } = await supabaseAdmin.from("stock_levels").upsert(save.slice(i, i + 500));
-      if (error) throw error;
-    }
     const { count: opened } = await supabaseAdmin.from("stock_month_open").select("item_id", { count: "exact", head: true }).eq("month", month);
     if (!opened) {
-      const open = rows.map((r) => ({ month, store: r.store, item_id: r.item_id, stock: r.stock }));
-      for (let i = 0; i < open.length; i += 500) await supabaseAdmin.from("stock_month_open").upsert(open.slice(i, i + 500));
+      for (const store of stores) {
+        const rows = (await stockFor(store)).filter((r) => r.stock !== 0).map((r) => ({ month, store, item_id: r.item_id, stock: r.stock }));
+        for (let i = 0; i < rows.length; i += 500) await supabaseAdmin.from("stock_month_open").upsert(rows.slice(i, i + 500));
+      }
     }
-    // Out of stock today and sold in the last 60 days (old discontinued items are left out).
     const alerts: StockReadState["alerts"] = {};
     for (const store of stores) {
       const { lowFast, out } = await stockAlertsFor(store);
       alerts[store] = { low: lowFast, out: out.length, at: now };
-      if (out.length) for (let i = 0; i < out.length; i += 500) await supabaseAdmin.from("stock_out_days").upsert(out.slice(i, i + 500).map((item_id) => ({ day: today, store, item_id })));
+      for (let i = 0; i < out.length; i += 500) await supabaseAdmin.from("stock_out_days").upsert(out.slice(i, i + 500).map((item_id) => ({ day: today, store, item_id })));
     }
-    await saveStockState({ lastAt: now, items: ids.length, rows: rows.length, reads, stores: [...stores].sort(), note: null, alerts });
-    return `read ${ids.length} items in ${stores.size} store(s) with ${reads} request(s)`;
+    await saveStockState({ lastAt: now, items: meta.size, rows: saved, reads, stores: [...stores].sort(), note: null, alerts });
+    return `read ${meta.size} items (${withStock.length} with stock) in ${stores.size} store(s) with ${reads} request(s)`;
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
-    await saveStockState({ note, reads }).catch(() => undefined);
+    await saveStockState({ note: `${note}${saved ? ` (${saved} rows saved)` : ""}`, reads }).catch(() => undefined);
     return `failed: ${note}`;
   } finally {
     running = false;
