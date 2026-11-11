@@ -87,7 +87,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
   const lfl: [string, string] = [`${ly}-01`, dayOf(ly, n)];
   const end = mtd[1];
 
-  const [now, before, lastYear, s28, s60, stock, momDays, lflDays] = await Promise.all([
+  const [now, before, lastYear, s28, s60, stock, momDays, lflDays, days28] = await Promise.all([
     itemSales(store, ...mtd),
     itemSales(store, ...mom),
     itemSales(store, ...lfl),
@@ -96,7 +96,10 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
     stockFor(store),
     daysWithData(store, ...mom),
     daysWithData(store, ...lfl),
+    daysWithData(store, addDays(end, -27), end),
   ]);
+  // Average a day over the days that have sales data (earlier months may not be copied yet).
+  const window28 = Math.max(1, Math.min(28, days28));
   const momCoverage = momDays / Math.max(1, Number(mom[1].slice(8, 10)));
   const lflCoverage = lflDays / Math.max(1, Number(lfl[1].slice(8, 10)));
   const momOk = momCoverage >= 0.8;
@@ -116,7 +119,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
     // Items with no sales in 60 days and no stock are old lines: leave them out.
     if (!a && !sold60 && (!st || st.stock <= 0)) continue;
     const stockQty = st ? st.stock : null;
-    const perDay = units28 / 28;
+    const perDay = units28 / window28;
     const cover = stockQty === null ? null : perDay > 0 ? Math.max(0, stockQty) / perDay : null;
     const isFast = fast.has(id);
     const status: MerchItem["status"] =
@@ -187,7 +190,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
   }
   for (const x of [...cats.values(), total]) {
     x.sellThrough = x.units + x.stock > 0 ? x.units / (x.units + x.stock) : null;
-    x.cover = x.units28 > 0 ? x.stock / (x.units28 / 28) : null;
+    x.cover = x.units28 > 0 ? x.stock / (x.units28 / window28) : null;
   }
   const stockAt = stock.reduce<string | null>((m, r) => (!m || r.updated_at > m ? r.updated_at : m), null);
   const value: MerchReport = {

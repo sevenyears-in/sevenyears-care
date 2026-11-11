@@ -187,7 +187,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
 
       <p className="text-xs text-black/45">
         MoM: {fmtRange(m.periods.mtd)} against {fmtRange(m.periods.mom)}. LFL: against {fmtRange(m.periods.lfl)} (same store). Sell-through = units sold this month ÷ (units sold + stock on hand).
-        Stock cover = stock ÷ average units sold a day (last 28 days). Under {REORDER_DAYS} days = reorder; over {OVERSTOCK_DAYS} days = overstock. Stock-out = 0 in the store and sold in the
+        Stock cover = stock ÷ average units sold a day (last 28 days, counting only days with sales data). Under {REORDER_DAYS} days = reorder; over {OVERSTOCK_DAYS} days = overstock. Stock-out = 0 in the store and sold in the
         last 60 days. Fast movers = the top fifth of items by units sold in the last 28 days (at least 4 units). Carry bags are left out. Item amounts are before any whole-bill discount, so totals can be a little higher than on the store dashboard.
       </p>
     </div>

@@ -248,7 +248,13 @@ export const OVERSTOCK_DAYS = 90;
 /** Count of fast movers under 7 days of cover (or out), and items out of stock that sold in 60 days. */
 export async function stockAlertsFor(store: string) {
   const today = todayISO();
-  const [s28, s60, stock] = await Promise.all([itemSales(store, addDays(today, -27), today), itemSales(store, addDays(today, -59), today), stockFor(store)]);
+  const [s28, s60, stock, days28] = await Promise.all([
+    itemSales(store, addDays(today, -27), today),
+    itemSales(store, addDays(today, -59), today),
+    stockFor(store),
+    daysWithData(store, addDays(today, -27), today),
+  ]);
+  const window28 = Math.max(1, Math.min(28, days28));
   const fast = fastMovers(s28);
   let lowFast = 0;
   const out: string[] = [];
@@ -256,7 +262,7 @@ export async function stockAlertsFor(store: string) {
     const sold60 = (s60.get(r.item_id)?.u ?? 0) > 0;
     if (r.stock <= 0 && sold60) out.push(r.item_id);
     if (fast.has(r.item_id)) {
-      const perDay = (s28.get(r.item_id)?.u ?? 0) / 28;
+      const perDay = (s28.get(r.item_id)?.u ?? 0) / window28;
       if (r.stock <= 0 || (perDay > 0 && r.stock / perDay < REORDER_DAYS)) lowFast++;
     }
   }
