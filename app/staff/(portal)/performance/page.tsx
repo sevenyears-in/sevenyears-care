@@ -46,6 +46,42 @@ function Tile({ label, value, note, tone = "default" }: { label: string; value: 
   );
 }
 
+/** Today's sales so far (bills are copied from Zoho every 30 minutes). */
+function TodayStrip({ day, label, needed, target }: { day: StoreReport["today"]; label: string; needed: number; target: string | null }) {
+  const abv = day.bills ? day.net / day.bills : 0;
+  const upb = day.bills ? day.units / day.bills : 0;
+  const reached = needed > 0 ? day.net / needed : null;
+  return (
+    <section className="rounded-3xl bg-[#161616] p-5 text-white soft-card sm:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/55">{label} · today so far</p>
+          <p className="mt-1 text-4xl font-bold tabular-nums">{rupees(day.net)}</p>
+          <p className="mt-1 text-sm text-white/65">
+            {day.bills} bill(s) · ABV {day.bills ? rupees(abv) : "—"} · UPB {day.bills ? upb.toFixed(1) : "—"}
+            {day.returns ? ` · returns ${rupees(day.returns)}` : ""}
+          </p>
+        </div>
+        {needed > 0 && (
+          <div className="text-right">
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/55">Needed today{target ? ` for ${target}` : ""}</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums">{rupees(needed)}</p>
+            <p className={`text-sm font-semibold ${reached !== null && reached >= 1 ? "text-green-300" : "text-amber-300"}`}>
+              {reached !== null && reached >= 1 ? "✓ Done for today" : `${rupees(Math.max(0, needed - day.net))} to go`}
+            </p>
+          </div>
+        )}
+      </div>
+      {needed > 0 && (
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15">
+          <div className={`h-full rounded-full ${reached !== null && reached >= 1 ? "bg-green-400" : "bg-amber-300"}`} style={{ width: `${Math.min(100, Math.round((reached ?? 0) * 100))}%` }} />
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-white/45">Bills are copied from Zoho POS every 30 minutes.</p>
+    </section>
+  );
+}
+
 function Panel({ title, intro, children, tone }: { title: string; intro?: ReactNode; children: ReactNode; tone?: "good" | "bad" }) {
   const bar = tone === "good" ? "bg-green-500" : tone === "bad" ? "bg-[#ff5e79]" : "bg-[#8883d7]";
   return (
@@ -439,6 +475,16 @@ function PersonView({
           </p>
         ) : null}
       </section>
+
+      {store.month === todayISO().slice(0, 7) && (
+        <TodayStrip
+          day={m.isStore ? store.today : p.today}
+          label={m.isStore ? `${store.store} store` : p.name.split(" ").slice(0, 2).join(" ")}
+          // Today's share of what is left: (target − sold before today) ÷ days left including today.
+          needed={p.target ? Math.max(0, (p.target - (heroNet - (m.isStore ? store.today.net : p.today.net))) / Math.max(1, daysLeft + 1)) : 0}
+          target={p.target ? "target" : null}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Tile label={m.isStore ? "Store bills" : "Bills"} value={m.bills} note={`${m.units} items · ${m.bills ? (m.units / m.bills).toFixed(1) : "0"} per bill (UPB)`} />
@@ -959,6 +1005,14 @@ function StoreDashboard({
 
   return (
     <>
+      {store.month === todayISO().slice(0, 7) && (
+        <TodayStrip
+          day={store.today}
+          label={`${store.store} store`}
+          needed={store.target ? Math.max(0, (store.target - (store.net - store.today.net)) / Math.max(1, daysLeft + 1)) : 0}
+          target={store.target ? "store target" : null}
+        />
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Tile label="Bills" value={store.bills} note={prev ? <Delta now={store.bills} before={prev.bills} /> : `${store.units} items`} />
         <Tile label="Avg bill (ABV)" value={rupees(abv)} note={<Delta now={abv} before={prevAbv} money />} />

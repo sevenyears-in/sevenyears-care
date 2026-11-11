@@ -48,6 +48,41 @@ export async function POST(request: Request) {
   const by = auth.staff.userId;
 
   switch (body.action) {
+    case "stock_probe": {
+      // Super Admin: how Zoho returns stock per store (field names and a few numbers only; ~5 reads).
+      if (auth.staff.role !== "super_admin") return bad("Only the Super Admin can do this.", 403);
+      if (!(await zohoConfigured())) return bad("Zoho POS is not connected.");
+      const keys = (o: unknown) => (o && typeof o === "object" ? Object.keys(o as object) : []);
+      const out: Record<string, unknown> = {};
+      try {
+        const locs = await zohoRead("locations").catch((e) => ({ error: String(e) }) as Body);
+        const locList = (Array.isArray((locs as Body).locations) ? ((locs as Body).locations as Body[]) : []).flatMap((l) => [l, ...((Array.isArray(l.child_locations) ? l.child_locations : []) as Body[])]);
+        out.locations = locList.map((l) => ({ id: String(l.location_id ?? ""), name: String(l.location_name ?? ""), type: String(l.type ?? l.location_type ?? ""), parent: String(l.parent_location_id ?? "") }));
+        out.locationsError = (locs as Body).error ?? null;
+        const list = await zohoRead("items", { per_page: "3", filter_by: "Status.Active" });
+        const items = (Array.isArray(list.items) ? list.items : []) as Body[];
+        out.listKeys = keys(items[0]);
+        out.listSample = items.map((i) => ({ id: String(i.item_id), stock_on_hand: i.stock_on_hand, available_stock: i.available_stock, actual_available_stock: i.actual_available_stock }));
+        out.pageContext = list.page_context;
+        const firstLoc = (out.locations as { id: string }[])[0]?.id;
+        if (firstLoc) {
+          const byLoc = await zohoRead("items", { per_page: "3", filter_by: "Status.Active", location_id: firstLoc }).catch((e) => ({ error: String(e) }) as Body);
+          out.listByLocation = ((Array.isArray((byLoc as Body).items) ? (byLoc as Body).items : []) as Body[]).map((i) => ({ id: String(i.item_id), stock_on_hand: i.stock_on_hand, available_stock: i.available_stock }));
+          out.listByLocationError = (byLoc as Body).error ?? null;
+        }
+        if (items.length) {
+          const det = await zohoRead("itemdetails", { item_ids: items.map((i) => String(i.item_id)).join(",") }).catch((e) => ({ error: String(e) }) as Body);
+          const d = ((Array.isArray((det as Body).items) ? (det as Body).items : []) as Body[])[0] ?? {};
+          out.detailKeys = keys(d);
+          out.detailLocations = ["locations", "warehouses", "branches"].map((k) => ({ key: k, entries: Array.isArray(d[k]) ? (d[k] as Body[]).map((x) => Object.fromEntries(Object.entries(x).filter(([kk]) => /name|id|stock/i.test(kk)))) : null }));
+          out.detailError = (det as Body).error ?? null;
+        }
+      } catch (error) {
+        out.error = error instanceof Error ? error.message : String(error);
+      }
+      return NextResponse.json(out);
+    }
+
     case "settings": {
       const pct = Number(body.highDiscountPct);
       if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return bad("High discount must be between 0 and 100%.");

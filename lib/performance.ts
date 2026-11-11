@@ -471,6 +471,8 @@ export type PersonReport = {
   earnedBeforeAttendance: number;
   attendanceCut: number;
   total: number;
+  /** Today's sales (only in the current month). */
+  today: DayFigures;
 };
 
 export type StoreReport = {
@@ -502,6 +504,8 @@ export type StoreReport = {
   flagged: InvoiceRow[];
   daysInMonth: number;
   daysGone: number;
+  /** Today's sales for the store (only in the current month). */
+  today: DayFigures;
 };
 
 export type MonthReport = {
@@ -528,7 +532,13 @@ type Acc = {
   /** per rule: count / units / value and amount */
   per: Map<string, { count: number; amount: number; units: number; value: number; lost: number; lostCount: number }>;
   lostToReturns: number;
+  /** Today only (India date): bills, items, net with GST before returns, returns. */
+  today: DayFigures;
 };
+
+/** One day's sales. `net` = bills minus returns that day (with GST). */
+export type DayFigures = { bills: number; units: number; invoiceNet: number; returns: number; net: number };
+const emptyDay = (): DayFigures => ({ bills: 0, units: 0, invoiceNet: 0, returns: 0, net: 0 });
 
 let cache: { key: string; at: number; value: MonthReport } | null = null;
 
@@ -588,7 +598,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
 
   const acc = new Map<string, Acc>();
   const get = (id: string) => {
-    if (!acc.has(id)) acc.set(id, { bills: 0, units: 0, gross: 0, discount: 0, invoiceNet: 0, returns: 0, returnCount: 0, flaggedBills: 0, stores: new Map(), per: new Map(), lostToReturns: 0 });
+    if (!acc.has(id)) acc.set(id, { bills: 0, units: 0, gross: 0, discount: 0, invoiceNet: 0, returns: 0, returnCount: 0, flaggedBills: 0, stores: new Map(), per: new Map(), lostToReturns: 0, today: emptyDay() });
     return acc.get(id)!;
   };
   const per = (a: Acc, ruleId: string) => {
@@ -611,6 +621,11 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     if (!id) continue;
     if (b.salesperson && !spName.has(id)) spName.set(id, b.salesperson);
     const a = get(id);
+    if (b.invoice_date === today) {
+      a.today.bills++;
+      a.today.units += b.quantity;
+      a.today.invoiceNet += b.net;
+    }
     a.bills++;
     a.units += b.quantity;
     a.gross += b.gross;
@@ -636,6 +651,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   for (const r of returns) {
     if (!r.staff_user_id) continue;
     const a = get(r.staff_user_id);
+    if (r.return_date === today) a.today.returns += r.net;
     a.returns += r.net;
     a.returnCount++;
   }
@@ -751,6 +767,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
           duties.firstIn.get(id),
           shiftStartOf(settings, id).start + settings.lateGraceMinutes
         ),
+        today: { ...a.today, net: a.today.invoiceNet - a.today.returns },
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,
@@ -853,6 +870,13 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       flagged: bills.filter((b) => discountShare(b) > threshold).sort((x, y) => discountShare(y) - discountShare(x)),
       daysInMonth,
       daysGone,
+      today: (() => {
+        const tb = bills.filter((b) => b.invoice_date === today);
+        const tr = back.filter((r) => r.return_date === today);
+        const inv = tb.reduce((s2, b) => s2 + b.net, 0);
+        const ret = tr.reduce((s2, r) => s2 + r.net, 0);
+        return { bills: tb.length, units: tb.reduce((s2, b) => s2 + b.quantity, 0), invoiceNet: inv, returns: ret, net: inv - ret };
+      })(),
     });
   }
 
