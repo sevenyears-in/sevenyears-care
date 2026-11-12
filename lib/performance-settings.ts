@@ -43,6 +43,9 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       alertEmailTo: audiences(v.alertEmailTo, DEFAULT_PERFORMANCE_SETTINGS.alertEmailTo),
       eodOn: Boolean(v.eodOn),
       eodEmailTo: audiences(v.eodEmailTo, DEFAULT_PERFORMANCE_SETTINGS.eodEmailTo),
+      stockAlertOn: Boolean(v.stockAlertOn),
+      stockAlertTime: typeof v.stockAlertTime === "string" && /^\d{1,2}:\d{2}$/.test(v.stockAlertTime) ? v.stockAlertTime : DEFAULT_PERFORMANCE_SETTINGS.stockAlertTime,
+      stockAlertEmailTo: audiences(v.stockAlertEmailTo, DEFAULT_PERFORMANCE_SETTINGS.stockAlertEmailTo),
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

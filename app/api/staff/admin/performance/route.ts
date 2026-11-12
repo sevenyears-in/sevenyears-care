@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 }
 
 // Actions that only read or copy data (not logged as setting changes).
-const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day", "alert_test", "eod_regenerate"]);
+const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day", "alert_test", "eod_regenerate", "stock_alert_test"]);
 // Actions that change tables (targets, salaries, products …): the request is logged as the change.
 const TABLE_ACTIONS = new Set(["backfill_settings", "targets", "salaries", "copy_targets", "store_target", "promo_add", "promo_remove", "link", "group"]);
 
@@ -271,16 +271,22 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
     case "alert_plan": {
       // Sales update alerts and end-of-day reports: on / off and who gets them.
       const pick = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x): x is AlertAudience => ALERT_AUDIENCES.some((a) => a.key === x)) : []);
-      if (auth.staff.role !== "super_admin" && (body.alertsOn || body.eodOn)) {
+      if (auth.staff.role !== "super_admin" && (body.alertsOn || body.eodOn || body.stockAlertOn)) {
         const cur = await loadPerformanceSettings();
-        if ((Boolean(body.alertsOn) && !cur.alertsOn) || (Boolean(body.eodOn) && !cur.eodOn)) return bad("Only the Super Admin can switch alerts or reports on.", 403);
+        if ((Boolean(body.alertsOn) && !cur.alertsOn) || (Boolean(body.eodOn) && !cur.eodOn) || (Boolean(body.stockAlertOn) && !cur.stockAlertOn))
+          return bad("Only the Super Admin can switch alerts or reports on.", 403);
       }
+      const stockTime = String(body.stockAlertTime ?? "10:00").trim();
+      if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(stockTime)) return bad("Stock alert time: use a time like 10:00.");
       await savePerformanceSettings({
         alertsOn: Boolean(body.alertsOn),
         alertTo: pick(body.alertTo),
         alertEmailTo: pick(body.alertEmailTo),
         eodOn: Boolean(body.eodOn),
         eodEmailTo: pick(body.eodEmailTo).filter((x) => x !== "staff"),
+        stockAlertOn: Boolean(body.stockAlertOn),
+        stockAlertTime: stockTime.padStart(5, "0"),
+        stockAlertEmailTo: pick(body.stockAlertEmailTo).filter((x) => x !== "staff"),
       });
       return NextResponse.json({ ok: true });
     }
@@ -294,6 +300,15 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
       const r = await sendTestAlert(me as { id: string; full_name: string; email: string | null });
       if (!r.ok) return bad(r.error);
       return NextResponse.json(r);
+    }
+
+    case "stock_alert_test": {
+      // Builds today's stock alert of each store and sends it only to the person pressing the button.
+      if (auth.staff.role !== "super_admin") return bad("Only the Super Admin can do this.", 403);
+      const { data: me } = await supabaseAdmin.from("staff_users").select("id, full_name, email").eq("id", auth.staff.id).maybeSingle();
+      if (!me) return bad("Your account was not found.");
+      const { sendTestStockAlert } = await import("@/lib/stock-alerts");
+      return NextResponse.json({ ok: true, stores: await sendTestStockAlert(me as { id: string; full_name: string; email: string | null }) });
     }
 
     case "eod_regenerate": {

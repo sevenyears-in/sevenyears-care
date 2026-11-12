@@ -46,6 +46,8 @@ export default async function AlertsPage() {
                 ? "/staff/extended-warranty"
               : /^(TEST · )?(Updated: )?End of day /.test(a.title)
                 ? "/staff/performance/reports"
+              : /^(TEST · )?[A-Z][A-Z ]+ stock alert$/.test(a.title)
+                ? `/staff/performance/stock?store=${encodeURIComponent(a.title.replace(/^TEST · /, "").replace(/ stock alert$/, ""))}`
               : /^(TEST · )?(Sales update|Your sales|[A-Z][A-Z ]+ sales) \d/.test(a.title)
                 ? "/staff/performance"
               : a.ticket_id

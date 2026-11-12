@@ -36,6 +36,9 @@ async function dayTick() {
   const { eodTick } = await import("@/lib/eod-report");
   const a = await alertTick().catch((e) => `alerts error: ${e instanceof Error ? e.message : e}`);
   if (!/alerts off|no slot due|already/.test(a)) console.log("Sales alerts:", a);
+  const { stockAlertTick } = await import("@/lib/stock-alerts");
+  const st = await stockAlertTick().catch((e) => `stock alert error: ${e instanceof Error ? e.message : e}`);
+  if (!/off|no slot due|already/.test(st)) console.log("Stock alert:", st);
   const r = await eodTick().catch((e) => `end-of-day error: ${e instanceof Error ? e.message : e}`);
   if (!/off|nothing due|already running/.test(r)) console.log("End-of-day reports:", r);
 }

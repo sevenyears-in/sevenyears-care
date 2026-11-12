@@ -70,6 +70,12 @@ export type PerformanceSettings = {
   eodOn: boolean;
   /** Who gets the end-of-day report by e-mail ("sm", "management"). */
   eodEmailTo: AlertAudience[];
+  /** Daily stock alert per store (fast movers low / out of stock), after the nightly stock read. */
+  stockAlertOn: boolean;
+  /** Time of the stock alert (store time, e.g. "10:00"). */
+  stockAlertTime: string;
+  /** Who gets the stock alert by e-mail ("sm", "management"); everyone gets it in the app and on the phone. */
+  stockAlertEmailTo: AlertAudience[];
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -103,6 +109,9 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   alertEmailTo: ["sm", "management"],
   eodOn: false,
   eodEmailTo: ["sm", "management"],
+  stockAlertOn: false,
+  stockAlertTime: "10:00",
+  stockAlertEmailTo: ["sm", "management"],
 };
 
 /** "09:30" → 570 minutes after midnight. */

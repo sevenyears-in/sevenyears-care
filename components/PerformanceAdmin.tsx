@@ -1480,6 +1480,14 @@ export type AlertRunView = {
   } | null;
 };
 
+type StockTestRow = {
+  store: string;
+  summary: string;
+  preview: string;
+  wouldReach: number;
+  delivered: { inApp: number; push: { devices: number; sent: number; failed: number; error: string | null }; email: { sent: number; failed: number; skipped: number } } | null;
+};
+
 type TestResult = {
   title: string;
   preview: string;
@@ -1498,7 +1506,11 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
   const [mail, setMail] = useState<AlertAudience[]>(settings.alertEmailTo);
   const [eodOn, setEodOn] = useState(settings.eodOn);
   const [eodMail, setEodMail] = useState<AlertAudience[]>(settings.eodEmailTo);
+  const [stockOn, setStockOn] = useState(settings.stockAlertOn);
+  const [stockTime, setStockTime] = useState(settings.stockAlertTime);
+  const [stockMail, setStockMail] = useState<AlertAudience[]>(settings.stockAlertEmailTo);
   const [test, setTest] = useState<TestResult | null>(null);
+  const [stockTest, setStockTest] = useState<StockTestRow[] | null>(null);
   const toggle = (list: AlertAudience[], k: AlertAudience) => (list.includes(k) ? list.filter((x) => x !== k) : [...list, k]);
   function start() {
     setOn(settings.alertsOn);
@@ -1506,6 +1518,9 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
     setMail(settings.alertEmailTo);
     setEodOn(settings.eodOn);
     setEodMail(settings.eodEmailTo);
+    setStockOn(settings.stockAlertOn);
+    setStockTime(settings.stockAlertTime);
+    setStockMail(settings.stockAlertEmailTo);
     setError("");
     setEditing(true);
   }
@@ -1513,11 +1528,12 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
     const changes: string[] = [];
     if (on !== settings.alertsOn) changes.push(`Sales update alerts: ${on ? "ON" : "off"}`);
     if (eodOn !== settings.eodOn) changes.push(`End-of-day reports: ${eodOn ? "ON" : "off"}`);
+    if (stockOn !== settings.stockAlertOn) changes.push(`Daily stock alert: ${stockOn ? "ON" : "off"}`);
     if (changes.length && !window.confirm(`Save these changes?\n\n${changes.join("\n")}`)) return;
     setBusy(true);
     setError("");
     try {
-      await post({ action: "alert_plan", alertsOn: on, alertTo: to, alertEmailTo: mail, eodOn, eodEmailTo: eodMail });
+      await post({ action: "alert_plan", alertsOn: on, alertTo: to, alertEmailTo: mail, eodOn, eodEmailTo: eodMail, stockAlertOn: stockOn, stockAlertTime: stockTime, stockAlertEmailTo: stockMail });
       setEditing(false);
       router.refresh();
     } catch (e) {
@@ -1538,12 +1554,24 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
       setBusy(false);
     }
   }
+  async function sendStockTest() {
+    setBusy(true);
+    setError("");
+    setStockTest(null);
+    try {
+      setStockTest(((await post({ action: "stock_alert_test" })) as { stores: StockTestRow[] }).stores);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send the test.");
+    } finally {
+      setBusy(false);
+    }
+  }
   const names = (list: AlertAudience[]) => (list.length ? ALERT_AUDIENCES.filter((a) => list.includes(a.key)).map((a) => a.label).join(", ") : "No one");
   const box = "rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5";
   const label = "text-xs font-bold uppercase tracking-wide text-black/45";
   return (
     <Card
-      title="Sales alerts & end-of-day reports"
+      title="Sales alerts, stock alerts & end-of-day reports"
       intro={`Sales updates at ${settings.alertTimes.join(", ")} (change the times above) and a report per store after closing. Everyone chosen gets them in the app and as a phone / browser notification; e-mail only for the groups ticked.`}
       actions={
         editing ? (
@@ -1558,9 +1586,14 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
         ) : (
           <div className="flex gap-2">
             {isSuperAdmin && (
-              <button className={`${sbtn} bg-[#0b7f91] text-white`} disabled={busy} onClick={sendTest}>
-                {busy ? "Sending…" : "Send a test to me"}
-              </button>
+              <>
+                <button className={`${sbtn} bg-[#0b7f91] text-white`} disabled={busy} onClick={sendTest}>
+                  {busy ? "Sending…" : "Test sales update"}
+                </button>
+                <button className={`${sbtn} bg-[#b45309] text-white`} disabled={busy} onClick={sendStockTest}>
+                  {busy ? "Sending…" : "Test stock alert"}
+                </button>
+              </>
             )}
             <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={start}>
               ✎ Edit
@@ -1637,6 +1670,49 @@ function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { s
           )}
         </div>
       </div>
+      <div className={`${box} mt-3 text-sm`}>
+        <p className={label}>Daily stock alert per store (fast movers low / out of stock)</p>
+        {editing ? (
+          <div className="mt-1 space-y-2">
+            <label className="flex items-center gap-2 font-semibold">
+              <input type="checkbox" checked={stockOn} disabled={!isSuperAdmin && !settings.stockAlertOn} onChange={(e) => setStockOn(e.target.checked)} /> Send the stock alert every day at
+              <input type="time" className={`${input} w-28 py-1`} value={stockTime} onChange={(e) => setStockTime(e.target.value)} />
+            </label>
+            <p className="text-xs text-black/45">Goes to the store’s Store Manager / ASM and management in the app and as a phone notification. E-mail it to:</p>
+            {ALERT_AUDIENCES.filter((a) => a.key !== "staff").map((a) => (
+              <label key={a.key} className="flex items-center gap-1.5">
+                <input type="checkbox" checked={stockMail.includes(a.key)} onChange={() => setStockMail(toggle(stockMail, a.key))} /> {a.label}
+              </label>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-1 space-y-1">
+            <p>
+              <b className={settings.stockAlertOn ? "text-green-700" : "text-black/50"}>{settings.stockAlertOn ? "ON" : "OFF"}</b> · every day at {settings.stockAlertTime} (after the 11:30 pm stock read) · e-mailed to {names(settings.stockAlertEmailTo)}
+            </p>
+            <p className="text-xs text-black/55">Lists each fast mover running low or out with stock, sales a day, days left and how much to reorder, plus the best sellers that are out of stock. Not sent when nothing is low.</p>
+          </div>
+        )}
+      </div>
+      {stockTest && (
+        <div className="mt-4 space-y-3 rounded-2xl bg-amber-50 p-4 text-sm ring-1 ring-amber-200">
+          <p className="font-bold">Stock alert test — sent to you only</p>
+          {stockTest.map((r) => (
+            <div key={r.store}>
+              <p className="font-semibold">
+                {r.store}: {r.summary}
+              </p>
+              {r.delivered && (
+                <p className="text-xs text-black/60">
+                  In the app: {r.delivered.inApp ? "yes" : "no"} · phone: {r.delivered.push.error ? r.delivered.push.error : `${r.delivered.push.sent} of ${r.delivered.push.devices} device(s)`} · e-mail:{" "}
+                  {r.delivered.email.sent ? "sent" : r.delivered.email.failed ? "failed" : "not sent"} · when on, it would reach {r.wouldReach} person(s)
+                </p>
+              )}
+              {r.preview && <pre className="mt-1 whitespace-pre-wrap rounded-xl bg-white p-3 text-xs ring-1 ring-black/5">{r.preview}</pre>}
+            </div>
+          ))}
+        </div>
+      )}
       {test && (
         <div className="mt-4 rounded-2xl bg-[#0b7f91]/5 p-4 text-sm ring-1 ring-[#0b7f91]/20">
           <p className="font-bold">Test sent to you only: {test.title}</p>

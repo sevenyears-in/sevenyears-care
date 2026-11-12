@@ -260,13 +260,25 @@ export async function stockAlertsFor(store: string) {
   const fast = fastMovers(s28);
   let lowFast = 0;
   const out: string[] = [];
+  /** The fast movers running low or out, most urgent first (for the daily stock alert). */
+  const lowItems: { name: string; sku: string | null; category: string | null; stock: number; perDay: number; coverDays: number | null }[] = [];
+  /** Out-of-stock items that sold in 60 days, best sellers first. */
+  const outItems: { name: string; sku: string | null; sold60: number }[] = [];
   for (const r of stock) {
-    const sold60 = (s60.get(r.item_id)?.u ?? 0) > 0;
-    if (r.stock <= 0 && sold60) out.push(r.item_id);
+    const sold60 = s60.get(r.item_id)?.u ?? 0;
+    if (r.stock <= 0 && sold60 > 0) {
+      out.push(r.item_id);
+      outItems.push({ name: r.name ?? r.sku ?? r.item_id, sku: r.sku, sold60 });
+    }
     if (fast.has(r.item_id)) {
       const perDay = (s28.get(r.item_id)?.u ?? 0) / window28;
-      if (r.stock <= 0 || (perDay > 0 && r.stock / perDay < REORDER_DAYS)) lowFast++;
+      if (r.stock <= 0 || (perDay > 0 && r.stock / perDay < REORDER_DAYS)) {
+        lowFast++;
+        lowItems.push({ name: r.name ?? r.sku ?? r.item_id, sku: r.sku, category: r.category, stock: Math.max(0, r.stock), perDay, coverDays: perDay > 0 ? Math.max(0, r.stock) / perDay : null });
+      }
     }
   }
-  return { lowFast, out };
+  lowItems.sort((a, b) => (a.coverDays ?? 0) - (b.coverDays ?? 0) || b.perDay - a.perDay);
+  outItems.sort((a, b) => b.sold60 - a.sold60);
+  return { lowFast, out, lowItems, outItems };
 }

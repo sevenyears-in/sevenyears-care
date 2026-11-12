@@ -147,10 +147,10 @@ export function eodText(d: EodData, status: "provisional" | "final") {
   return lines.join("\n");
 }
 
-type Recipient = { id: string; full_name: string; email: string | null; notify_email: boolean | null; audience: AlertAudience };
+export type Recipient = { id: string; full_name: string; email: string | null; notify_email: boolean | null; audience: AlertAudience };
 
 /** Store Managers / ASM of the store and the management that looks after it. */
-async function recipients(store: string): Promise<Recipient[]> {
+export async function recipients(store: string): Promise<Recipient[]> {
   const { data } = await supabaseAdmin
     .from("staff_users")
     .select("id, full_name, role, store_name, email, notify_email, director_stores, incentive_group")
