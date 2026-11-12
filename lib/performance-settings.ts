@@ -1,7 +1,10 @@
 // Settings for the sales performance dashboard (Supabase app_settings). Server only.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { DEFAULT_PERFORMANCE_SETTINGS, type PerformanceSettings } from "@/lib/performance-rules";
+import { ALERT_AUDIENCES, DEFAULT_PERFORMANCE_SETTINGS, type AlertAudience, type PerformanceSettings } from "@/lib/performance-rules";
+
+const audiences = (v: unknown, fallback: AlertAudience[]): AlertAudience[] =>
+  Array.isArray(v) ? v.filter((x): x is AlertAudience => ALERT_AUDIENCES.some((a) => a.key === x)) : fallback;
 import { DEFAULT_RULES, type IncentiveRule } from "@/lib/incentive-rules";
 
 const KEY = "sales_performance";
@@ -35,6 +38,11 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       alertTimes: Array.isArray(v.alertTimes) && v.alertTimes.length ? v.alertTimes.map(String) : DEFAULT_PERFORMANCE_SETTINGS.alertTimes,
       velocityDays: Number(v.velocityDays) >= 7 ? Number(v.velocityDays) : DEFAULT_PERFORMANCE_SETTINGS.velocityDays,
       reorderToDays: Number(v.reorderToDays) >= 7 ? Number(v.reorderToDays) : DEFAULT_PERFORMANCE_SETTINGS.reorderToDays,
+      alertsOn: Boolean(v.alertsOn),
+      alertTo: audiences(v.alertTo, DEFAULT_PERFORMANCE_SETTINGS.alertTo),
+      alertEmailTo: audiences(v.alertEmailTo, DEFAULT_PERFORMANCE_SETTINGS.alertEmailTo),
+      eodOn: Boolean(v.eodOn),
+      eodEmailTo: audiences(v.eodEmailTo, DEFAULT_PERFORMANCE_SETTINGS.eodEmailTo),
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

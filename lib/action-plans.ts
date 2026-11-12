@@ -14,6 +14,79 @@ export const PLAN_ROLE_LABEL: Record<PlanRole, string> = {
 
 export type PlanItem = { priority: "high" | "medium" | "good"; title: string; detail: string };
 
+/** A plan point laid out for follow-up: what we see, what to do, who, by when, what should change. */
+export type PlanView = {
+  key: string;
+  priority: PlanItem["priority"];
+  kind: "Problem" | "Opportunity";
+  observation: string;
+  action: string;
+  owner: string;
+  timeframe: string;
+  outcome: string;
+};
+
+/** Stable key of a point (numbers taken out), so its follow-up status survives new figures. */
+export function planKey(role: string, title: string) {
+  const words = title
+    .toLowerCase()
+    .replace(/₹[\d,.]+|\d+(\.\d+)?%?|\([^)]*\)/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .join("-");
+  return `${role}:${words}`;
+}
+
+const OUTCOMES: [RegExp, string][] = [
+  [/^lift daily sales|run the floor for|daily number/i, "The daily pace reaches the number needed for 100% of the target by month end."],
+  [/on pace/i, "Pace held for the rest of the month; next pool slab reached."],
+  [/sales fell/i, "This week's sales back to last week's level."],
+  [/sales up/i, "The same growth repeated on the slow days."],
+  [/discount/i, "No bill above the discount limit next week."],
+  [/returns/i, "Returns under 2% of sales; every return has a reason noted."],
+  [/salesperson/i, "0 bills without a salesperson."],
+  [/categor(y|ised)|uncategorised/i, "Every product sold has a category in Zoho."],
+  [/no target/i, "Every seller has a monthly target."],
+  [/late/i, "No late arrivals next week."],
+  [/no sales/i, "Everyone on duty makes sales every day."],
+  [/coach|buddy|add-on coaching/i, "Their sales and items per bill up within two weeks."],
+  [/items per bill|add one more item|last add-on/i, "Items per bill back at or above the store level."],
+  [/average bill/i, "Average bill back at or above the store average."],
+  [/dropped|revive/i, "The category back to last week's sales."],
+  [/rising|buying/i, "Growth kept; the category never out of stock."],
+  [/fast mover|stock|reorder/i, "No fast mover out of stock; reorders placed before cover falls under 7 days."],
+  [/peak hours|floor plan|busiest|be ready|be on the floor|plan staff|floor ready/i, "Full team on the floor in the busy hours and days; more bills in those hours."],
+  [/wow/i, "At least one WOW bill a week."],
+  [/warranty/i, "Every eligible product registered and feedback asked."],
+  [/cross-category/i, "More bills with 3+ categories."],
+];
+
+/** Lays out a point for follow-up (rule-based; uses only the figures already in the point). */
+export function planView(role: PlanRole, item: PlanItem): PlanView {
+  const outcome = OUTCOMES.find(([re]) => re.test(item.title))?.[1] ?? "The figure in the observation improves by next week.";
+  return {
+    key: planKey(role, item.title),
+    priority: item.priority,
+    kind: item.priority === "good" ? "Opportunity" : "Problem",
+    observation: item.title,
+    action: item.detail,
+    owner: PLAN_ROLE_LABEL[role],
+    timeframe: item.priority === "high" ? "Today" : item.priority === "medium" ? "This week" : "Ongoing",
+    outcome,
+  };
+}
+
+/** Store Manager points from stock (fast movers low / out of stock), from the nightly stock read. */
+export function stockPlanItems(alert: { low: number; out: number } | null | undefined): PlanItem[] {
+  if (!alert) return [];
+  const out: PlanItem[] = [];
+  if (alert.low) out.push({ priority: "high", title: `${alert.low} fast mover(s) running low or out of stock`, detail: "Open Stock & categories → Fast-moving items running low, and place the reorder today (suggested quantities are shown)." });
+  if (alert.out) out.push({ priority: "medium", title: `${alert.out} item(s) out of stock that sold in the last 60 days`, detail: "Check Stock & categories → Out of stock; replenish what still sells, mark the rest discontinued." });
+  return out;
+}
+
 const rs = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const lakh = (n: number) => (Math.abs(n) >= 100000 ? `₹${(n / 100000).toFixed(2)} L` : rs(n));
 const pc = (n: number, d = 0) => `${(n * 100).toFixed(d)}%`;

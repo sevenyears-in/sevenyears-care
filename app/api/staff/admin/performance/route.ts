@@ -8,6 +8,7 @@ import type { StaffUser } from "@/lib/auth";
 import { appendSyncLog } from "@/lib/sync-log";
 import { reconcileDay } from "@/lib/reconcile";
 import { loadIncentiveRules, loadPerformanceSettings, saveIncentiveRules, savePerformanceSettings } from "@/lib/performance-settings";
+import { ALERT_AUDIENCES, type AlertAudience } from "@/lib/performance-rules";
 import { GROUP_LABEL, groupList, isBuiltInGroup, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
 import { ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
 import { todayISO } from "@/lib/helpers";
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
 }
 
 // Actions that only read or copy data (not logged as setting changes).
-const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day"]);
+const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day", "alert_test", "eod_regenerate"]);
 // Actions that change tables (targets, salaries, products …): the request is logged as the change.
 const TABLE_ACTIONS = new Set(["backfill_settings", "targets", "salaries", "copy_targets", "store_target", "promo_add", "promo_remove", "link", "group"]);
 
@@ -265,6 +266,45 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
         reorderToDays: reorderTo,
       });
       return NextResponse.json({ ok: true });
+    }
+
+    case "alert_plan": {
+      // Sales update alerts and end-of-day reports: on / off and who gets them.
+      const pick = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x): x is AlertAudience => ALERT_AUDIENCES.some((a) => a.key === x)) : []);
+      if (auth.staff.role !== "super_admin" && (body.alertsOn || body.eodOn)) {
+        const cur = await loadPerformanceSettings();
+        if ((Boolean(body.alertsOn) && !cur.alertsOn) || (Boolean(body.eodOn) && !cur.eodOn)) return bad("Only the Super Admin can switch alerts or reports on.", 403);
+      }
+      await savePerformanceSettings({
+        alertsOn: Boolean(body.alertsOn),
+        alertTo: pick(body.alertTo),
+        alertEmailTo: pick(body.alertEmailTo),
+        eodOn: Boolean(body.eodOn),
+        eodEmailTo: pick(body.eodEmailTo).filter((x) => x !== "staff"),
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "alert_test": {
+      // Builds the alerts now and sends one copy only to the person pressing the button.
+      if (auth.staff.role !== "super_admin") return bad("Only the Super Admin can do this.", 403);
+      const { data: me } = await supabaseAdmin.from("staff_users").select("id, full_name, email").eq("id", auth.staff.id).maybeSingle();
+      if (!me) return bad("Your account was not found.");
+      const { sendTestAlert } = await import("@/lib/sales-alerts");
+      const r = await sendTestAlert(me as { id: string; full_name: string; email: string | null });
+      if (!r.ok) return bad(r.error);
+      return NextResponse.json(r);
+    }
+
+    case "eod_regenerate": {
+      if (auth.staff.role !== "super_admin") return bad("Only the Super Admin can do this.", 403);
+      const store = String(body.store ?? "").toUpperCase();
+      if (!store || !isDate(body.day)) return bad("Store and day needed.");
+      if (body.day > todayISO()) return bad("That day has not come yet.");
+      const { regenerateEod } = await import("@/lib/eod-report");
+      const r = await regenerateEod(store, body.day, Boolean(body.email));
+      await logAudit(auth.staff, "eod_report", "regenerate", null, { store, day: body.day, email: Boolean(body.email), status: r.status });
+      return NextResponse.json({ ok: true, ...r });
     }
 
     case "person_shift": {

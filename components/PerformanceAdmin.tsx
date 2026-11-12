@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { groupList, groupName, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { ALERT_AUDIENCES, groupList, groupName, rupees, type AlertAudience, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import { ruleStatus, ruleSummary, type IncentiveRule } from "@/lib/incentive-rules";
 import { IncentiveRulesEditor } from "@/components/IncentiveRulesEditor";
 import type { BackfillState } from "@/lib/sales-backfill";
@@ -81,6 +81,9 @@ export function PerformanceAdmin(props: {
   stock: StockReadState | null;
   isSuperAdmin: boolean;
   audit: AuditView[];
+  alertRuns: AlertRunView[];
+  pushReady: boolean;
+  emailReady: boolean;
 }) {
   const labels = props.settings.groupLabels;
   return (
@@ -98,6 +101,7 @@ export function PerformanceAdmin(props: {
       <GroupNamesCard settings={props.settings} people={props.people} />
       <SettingsCard settings={props.settings} stores={props.stores} />
       <BusinessDayCard settings={props.settings} stores={props.stores} />
+      <AlertsCard settings={props.settings} runs={props.alertRuns} isSuperAdmin={props.isSuperAdmin} pushReady={props.pushReady} emailReady={props.emailReady} />
       <AuditCard rows={props.audit} />
     </div>
   );
@@ -1457,6 +1461,236 @@ function LinksCard({ unlinked, people }: { unlinked: { name: string; net: number
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+export type AlertRunView = {
+  day: string;
+  slot: string;
+  status: string;
+  stale: boolean | null;
+  started_at: string;
+  result: {
+    recipients: number;
+    inApp: number;
+    push: { devices: number; sent: number; failed: number; error: string | null };
+    email: { sent: number; failed: number; skipped: number };
+    error: string | null;
+  } | null;
+};
+
+type TestResult = {
+  title: string;
+  preview: string;
+  stale: boolean;
+  wouldReach: Record<AlertAudience, number>;
+  delivered: { inApp: number; push: { devices: number; sent: number; failed: number; error: string | null }; email: { sent: number; failed: number; skipped: number } };
+};
+
+function AlertsCard({ settings, runs, isSuperAdmin, pushReady, emailReady }: { settings: PerformanceSettings; runs: AlertRunView[]; isSuperAdmin: boolean; pushReady: boolean; emailReady: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [on, setOn] = useState(settings.alertsOn);
+  const [to, setTo] = useState<AlertAudience[]>(settings.alertTo);
+  const [mail, setMail] = useState<AlertAudience[]>(settings.alertEmailTo);
+  const [eodOn, setEodOn] = useState(settings.eodOn);
+  const [eodMail, setEodMail] = useState<AlertAudience[]>(settings.eodEmailTo);
+  const [test, setTest] = useState<TestResult | null>(null);
+  const toggle = (list: AlertAudience[], k: AlertAudience) => (list.includes(k) ? list.filter((x) => x !== k) : [...list, k]);
+  function start() {
+    setOn(settings.alertsOn);
+    setTo(settings.alertTo);
+    setMail(settings.alertEmailTo);
+    setEodOn(settings.eodOn);
+    setEodMail(settings.eodEmailTo);
+    setError("");
+    setEditing(true);
+  }
+  async function save() {
+    const changes: string[] = [];
+    if (on !== settings.alertsOn) changes.push(`Sales update alerts: ${on ? "ON" : "off"}`);
+    if (eodOn !== settings.eodOn) changes.push(`End-of-day reports: ${eodOn ? "ON" : "off"}`);
+    if (changes.length && !window.confirm(`Save these changes?\n\n${changes.join("\n")}`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await post({ action: "alert_plan", alertsOn: on, alertTo: to, alertEmailTo: mail, eodOn, eodEmailTo: eodMail });
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function sendTest() {
+    setBusy(true);
+    setError("");
+    setTest(null);
+    try {
+      setTest((await post({ action: "alert_test" })) as TestResult);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send the test.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const names = (list: AlertAudience[]) => (list.length ? ALERT_AUDIENCES.filter((a) => list.includes(a.key)).map((a) => a.label).join(", ") : "No one");
+  const box = "rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5";
+  const label = "text-xs font-bold uppercase tracking-wide text-black/45";
+  return (
+    <Card
+      title="Sales alerts & end-of-day reports"
+      intro={`Sales updates at ${settings.alertTimes.join(", ")} (change the times above) and a report per store after closing. Everyone chosen gets them in the app and as a phone / browser notification; e-mail only for the groups ticked.`}
+      actions={
+        editing ? (
+          <div className="flex gap-2">
+            <button className={primary} disabled={busy} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            {isSuperAdmin && (
+              <button className={`${sbtn} bg-[#0b7f91] text-white`} disabled={busy} onClick={sendTest}>
+                {busy ? "Sending…" : "Send a test to me"}
+              </button>
+            )}
+            <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={start}>
+              ✎ Edit
+            </button>
+          </div>
+        )
+      }
+    >
+      {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        <span className={`rounded-full px-2.5 py-1 font-semibold ${pushReady ? "bg-green-50 text-green-700" : "bg-amber-100 text-amber-800"}`}>
+          Phone notifications: {pushReady ? "set up" : "not set up (Firebase key missing — in-app and e-mail still work)"}
+        </span>
+        <span className={`rounded-full px-2.5 py-1 font-semibold ${emailReady ? "bg-green-50 text-green-700" : "bg-amber-100 text-amber-800"}`}>
+          E-mail: {emailReady ? "set up" : "not set up (Alerts Setup)"}
+        </span>
+      </div>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        <div className={box}>
+          <p className={label}>Sales updates during the day</p>
+          {editing ? (
+            <div className="mt-1 space-y-2">
+              <label className="flex items-center gap-2 font-semibold">
+                <input type="checkbox" checked={on} disabled={!isSuperAdmin && !settings.alertsOn} onChange={(e) => setOn(e.target.checked)} /> Send sales updates
+              </label>
+              <p className="text-xs text-black/45">Who gets them / who also gets an e-mail:</p>
+              {ALERT_AUDIENCES.map((a) => (
+                <div key={a.key} className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={to.includes(a.key)} onChange={() => setTo(toggle(to, a.key))} /> {a.label}
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-black/55">
+                    <input type="checkbox" checked={mail.includes(a.key)} onChange={() => setMail(toggle(mail, a.key))} /> e-mail
+                  </label>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 space-y-1">
+              <p>
+                <b className={settings.alertsOn ? "text-green-700" : "text-black/50"}>{settings.alertsOn ? "ON" : "OFF"}</b> · to {names(settings.alertTo)}
+              </p>
+              <p className="text-xs text-black/55">E-mail also to: {names(settings.alertEmailTo)}</p>
+            </div>
+          )}
+        </div>
+        <div className={box}>
+          <p className={label}>End-of-day report per store</p>
+          {editing ? (
+            <div className="mt-1 space-y-2">
+              <label className="flex items-center gap-2 font-semibold">
+                <input type="checkbox" checked={eodOn} disabled={!isSuperAdmin && !settings.eodOn} onChange={(e) => setEodOn(e.target.checked)} /> Make the report after closing
+              </label>
+              <p className="text-xs text-black/45">E-mail it to:</p>
+              {ALERT_AUDIENCES.filter((a) => a.key !== "staff").map((a) => (
+                <label key={a.key} className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={eodMail.includes(a.key)} onChange={() => setEodMail(toggle(eodMail, a.key))} /> {a.label}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-1 space-y-1">
+              <p>
+                <b className={settings.eodOn ? "text-green-700" : "text-black/50"}>{settings.eodOn ? "ON" : "OFF"}</b> · e-mailed to {names(settings.eodEmailTo)}
+              </p>
+              <p className="text-xs text-black/55">
+                Kept on{" "}
+                <a href="/staff/performance/reports" className="font-semibold text-[#5b55c4] underline">
+                  End-of-day reports
+                </a>
+                .
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+      {test && (
+        <div className="mt-4 rounded-2xl bg-[#0b7f91]/5 p-4 text-sm ring-1 ring-[#0b7f91]/20">
+          <p className="font-bold">Test sent to you only: {test.title}</p>
+          <p className="mt-1 text-xs text-black/60">
+            In the app: {test.delivered.inApp ? "yes" : "no"} · phone notification:{" "}
+            {test.delivered.push.error ? test.delivered.push.error : `${test.delivered.push.sent} of ${test.delivered.push.devices} device(s)`} · e-mail:{" "}
+            {test.delivered.email.sent ? "sent" : test.delivered.email.failed ? "failed" : "not sent (no e-mail address or e-mail not set up)"}
+            {test.stale ? " · figures were NOT up to date" : ""}
+          </p>
+          <p className="mt-1 text-xs text-black/60">
+            When switched on, a run now would reach: {test.wouldReach.staff} sales staff, {test.wouldReach.sm} store manager(s), {test.wouldReach.management} in management.
+          </p>
+          <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-white p-3 text-xs ring-1 ring-black/5">{test.preview}</pre>
+        </div>
+      )}
+      <div className="mt-4">
+        <p className={label}>Last runs</p>
+        {runs.length ? (
+          <div className="mt-1 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-black/45">
+                  <th className="py-1 pr-3">Day</th>
+                  <th className="pr-3">Time</th>
+                  <th className="pr-3">Status</th>
+                  <th className="pr-3">People</th>
+                  <th className="pr-3">In app</th>
+                  <th className="pr-3">Phone</th>
+                  <th className="pr-3">E-mail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={`${r.day}|${r.slot}`} className="border-t border-black/5">
+                    <td className="py-1 pr-3">{fmtDate(r.day)}</td>
+                    <td className="pr-3">{r.slot}</td>
+                    <td className={`pr-3 font-semibold ${r.status === "sent" ? "text-green-700" : r.status === "failed" ? "text-red-700" : "text-black/50"}`}>
+                      {r.status}
+                      {r.stale ? " · data not up to date" : ""}
+                      {r.result?.error ? ` · ${r.result.error}` : ""}
+                    </td>
+                    <td className="pr-3">{r.result?.recipients ?? "—"}</td>
+                    <td className="pr-3">{r.result?.inApp ?? "—"}</td>
+                    <td className="pr-3">{r.result ? (r.result.push.error ? "not set up" : `${r.result.push.sent}/${r.result.push.devices}`) : "—"}</td>
+                    <td className="pr-3">{r.result ? `${r.result.email.sent} sent${r.result.email.failed ? `, ${r.result.email.failed} failed` : ""}` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-1 text-sm text-black/50">No runs yet.</p>
+        )}
+      </div>
     </Card>
   );
 }

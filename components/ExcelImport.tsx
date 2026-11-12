@@ -12,7 +12,7 @@ type Field = { key: string; label: string; required?: boolean; guess: RegExp };
 
 const FIELDS: Record<Kind, Field[]> = {
   sales: [
-    { key: "date", label: "Date", required: true, guess: /invoice\s*date|bill\s*date|^date$|transaction\s*date/i },
+    { key: "date", label: "Date", guess: /invoice\s*date|bill\s*date|^date$|transaction\s*date/i },
     { key: "store", label: "Store / location", guess: /location|branch|warehouse|store|outlet/i },
     { key: "item_id", label: "Item ID", guess: /^item\s*id$|product\s*id/i },
     { key: "sku", label: "SKU", guess: /^sku$|item\s*code|product\s*code|barcode/i },
@@ -47,6 +47,7 @@ export function ExcelImport({ stores }: { stores: string[] }) {
   const [file, setFile] = useState<{ name: string; header: string[]; rows: string[][] } | null>(null);
   const [map, setMap] = useState<Record<string, number>>({});
   const [store, setStore] = useState("");
+  const [oneDay, setOneDay] = useState("");
   const [withGst, setWithGst] = useState(true);
   const [gstPct, setGstPct] = useState("");
   const [replace, setReplace] = useState(true);
@@ -81,6 +82,8 @@ export function ExcelImport({ stores }: { stores: string[] }) {
     const missing = FIELDS[kind].filter((f) => f.required && (map[f.key] === undefined || map[f.key] < 0)).map((f) => f.label);
     if (missing.length) return { rows: [], problems: [`Choose the column for: ${missing.join(", ")}.`] };
     if ((map.store === undefined || map.store < 0) && !store) problems.push("Choose the store (the file has no store column).");
+    const noDateColumn = kind === "sales" && (map.date === undefined || map.date < 0);
+    if (noDateColumn && !oneDay) return { rows: [], problems: ["The file has no date column: choose the date of these sales (export one day at a time)."] };
     const rows: Record<string, string | number | null>[] = [];
     let skipped = 0;
     for (const r of file.rows) {
@@ -91,7 +94,7 @@ export function ExcelImport({ stores }: { stores: string[] }) {
         continue;
       }
       if (kind === "sales") {
-        const day = toISODate(cell(r, "date"));
+        const day = noDateColumn ? oneDay : toISODate(cell(r, "date"));
         const qty = toNumber(cell(r, "qty"));
         let amount = toNumber(cell(r, "amount"));
         if (!day || !Number.isFinite(qty) || !Number.isFinite(amount)) {
@@ -115,7 +118,7 @@ export function ExcelImport({ stores }: { stores: string[] }) {
     if (skipped) problems.push(`${skipped} row(s) without a usable ${kind === "sales" ? "date, item, quantity or amount" : "item or stock"} will be left out.`);
     return { rows, problems };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, map, kind, store, withGst, gstPct]);
+  }, [file, map, kind, store, withGst, gstPct, oneDay]);
 
   const summary = useMemo(() => {
     if (!parsed?.rows.length) return null;
@@ -134,12 +137,42 @@ export function ExcelImport({ stores }: { stores: string[] }) {
     setDone("");
     try {
       const uploadId = `${Date.now()}`;
+      const storesIn = [...new Set(parsed.rows.map((r) => String(r.store)))];
+      if (kind === "sales") {
+        // Check first: days uploaded before (duplicates) and days that already have bills from Zoho.
+        const pairs = [...new Set(parsed.rows.map((r) => `${r.store}|${r.day}`))].map((k) => ({ store: k.split("|")[0], day: k.split("|")[1] }));
+        const check = (await post({ action: "history_check", pairs })) as { uploaded: { store: string; day: string }[]; zoho: { store: string; day: string }[] };
+        if (check.uploaded.length && !replace) {
+          throw new Error(
+            `${check.uploaded.length} store-day(s) in this file were uploaded before (e.g. ${check.uploaded
+              .slice(0, 3)
+              .map((x) => `${x.store} ${x.day}`)
+              .join(", ")}). Tick “Replace earlier uploads” to replace them — nothing was uploaded.`
+          );
+        }
+        const lines = [
+          `Upload ${parsed.rows.length} sales line(s) for ${storesIn.join(", ")}?`,
+          check.uploaded.length ? `• Earlier uploads for ${check.uploaded.length} store-day(s) will be replaced.` : "",
+          check.zoho.length
+            ? `• ${check.zoho.length} store-day(s) already have bills copied from Zoho POS. Those bills are kept; the uploaded lines for those days are saved but NOT counted.`
+            : "",
+          "Bills copied from Zoho POS are never changed by an upload.",
+        ].filter(Boolean);
+        if (!window.confirm(lines.join("\n\n"))) {
+          setBusy(false);
+          return;
+        }
+      } else if (!window.confirm(`Replace the stock on hand of ${parsed.rows.length} item(s) in ${storesIn.join(", ")} with the figures in this file?\n\nThe current figures are kept in the change history. The next nightly read from Zoho POS will update them again.`)) {
+        setBusy(false);
+        return;
+      }
       if (kind === "sales" && replace) {
         const byStore = new Map<string, string[]>();
         for (const r of parsed.rows) byStore.set(String(r.store), [...(byStore.get(String(r.store)) ?? []), String(r.day)]);
         for (const [s, ds] of byStore) {
           ds.sort();
-          await post({ action: "history_clear", store: s, from: ds[0], to: ds[ds.length - 1] });
+          const days = [...new Set(ds)];
+          await post({ action: "history_clear", store: s, from: ds[0], to: ds[ds.length - 1], days });
         }
       }
       let saved = 0;
@@ -181,6 +214,7 @@ export function ExcelImport({ stores }: { stores: string[] }) {
           ? "For LFL / MoM when the night copy from Zoho has not reached those days yet. Export an item-wise sales report or the invoice list with line items (one row per item, with date, item, quantity and amount) from Zoho POS, as Excel (.xlsx) or CSV. Uploaded lines are used only for days that have no bills copied from Zoho."
           : "Export the stock report (item, SKU, stock on hand, location) from Zoho POS as Excel or CSV. It replaces the stock of those items until the next nightly stock read."}
       </p>
+      <ExportGuide kind={kind} />
       <input type="file" accept=".xlsx,.csv" onChange={(e) => choose(e.target.files?.[0])} className="block text-sm" />
       {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-red-800">{error}</p>}
       {file && (
@@ -219,6 +253,13 @@ export function ExcelImport({ stores }: { stores: string[] }) {
               </select>
             </label>
           )}
+          {kind === "sales" && (map.date === undefined || map.date < 0) && (
+            <label className="block max-w-xs">
+              <span className="text-xs font-bold uppercase tracking-wide text-black/45">Date of every row *</span>
+              <input type="date" className={`${input} mt-1`} value={oneDay} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setOneDay(e.target.value)} />
+              <span className="mt-1 block text-xs text-black/45">A “Sales by Item” export adds up the whole date range, so export one day at a time.</span>
+            </label>
+          )}
           {kind === "sales" && (
             <div className="flex flex-wrap items-center gap-4">
               <label className="flex items-center gap-2">
@@ -247,5 +288,74 @@ export function ExcelImport({ stores }: { stores: string[] }) {
       )}
       {done && <p className="font-semibold text-green-700">{done}</p>}
     </div>
+  );
+}
+
+/** How to get the file out of Zoho POS (Phase 6 guide). Menu names that may differ on screen are marked. */
+function ExportGuide({ kind }: { kind: Kind }) {
+  return (
+    <details className="rounded-2xl bg-[#0b7f91]/5 p-4 ring-1 ring-[#0b7f91]/15">
+      <summary className="cursor-pointer font-semibold text-[#0b7f91]">How to export this from Zoho POS</summary>
+      {kind === "sales" ? (
+        <div className="mt-2 space-y-2 text-black/70">
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              In Zoho POS open <b>Reports → Sales reports → Sales by Item</b> (or type “Sales by Item” in the reports search).
+            </li>
+            <li>
+              Set <b>Date Range → Custom</b> to <b>one day</b> (from and to the same date). The report adds up the whole range, so one day per file keeps day-wise LFL / MoM correct.
+            </li>
+            <li>If the report lets you pick a location / store, pick one store. If not, choose the store here when uploading.</li>
+            <li>
+              Use the report’s <b>Export</b> option and save as <b>XLSX</b> or <b>CSV</b>. (If you cannot see Export on your screen, copy the table into Excel and save it.)
+            </li>
+            <li>Upload here, choose the date of the sales and the store, check the columns, then Upload.</li>
+          </ol>
+          <p className="font-semibold">Columns it needs</p>
+          <ul className="list-disc pl-5">
+            <li>
+              <b>Item name</b> (required) · <b>Quantity</b> (quantity sold, required) · <b>Amount</b> (sales value, required)
+            </li>
+            <li>
+              <b>SKU</b> or <b>Item ID</b> (recommended — matches the item to Zoho stock and categories) · <b>Category</b> (optional)
+            </li>
+            <li>
+              <b>Date</b> — only for files with one row per bill line; otherwise choose the date here.
+            </li>
+            <li>Tick “Amounts include GST” only if the amount column includes tax; otherwise give the GST % (or map a Tax % column).</li>
+          </ul>
+          <p className="font-semibold">What happens to your data</p>
+          <ul className="list-disc pl-5">
+            <li>Bills copied from Zoho POS are never changed or deleted by an upload.</li>
+            <li>Uploaded lines count only for days with no bills copied from Zoho for that store, so a day is never counted twice.</li>
+            <li>The same store-day cannot be uploaded twice: you are stopped unless you tick “Replace earlier uploads”, which replaces only earlier uploads for the days in the file.</li>
+            <li>Rows without a usable date, item, quantity or amount are left out and counted on screen. Every upload is kept in the change history.</li>
+          </ul>
+        </div>
+      ) : (
+        <div className="mt-2 space-y-2 text-black/70">
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              In Zoho POS open <b>Reports</b> and find the stock report that lists <b>stock on hand per item</b> (its name can differ, e.g. a stock / inventory summary; search “stock” in the reports search).
+            </li>
+            <li>Filter it to one store / location if it allows; otherwise choose the store here.</li>
+            <li>
+              Export as <b>XLSX</b> or <b>CSV</b>.
+            </li>
+          </ol>
+          <p className="font-semibold">Columns it needs</p>
+          <ul className="list-disc pl-5">
+            <li>
+              <b>Item name</b> and <b>Stock on hand</b> (required) · <b>SKU</b> or <b>Item ID</b> (needed — rows without either are left out, so they never create look-alike items) · <b>Category</b> (optional)
+            </li>
+          </ul>
+          <p className="font-semibold">What happens to your data</p>
+          <ul className="list-disc pl-5">
+            <li>Stock is a snapshot: the upload replaces the stock of the items in the file, after you confirm. The figures it replaces are kept in the change history.</li>
+            <li>The nightly read from Zoho POS (11:30 pm) updates them again.</li>
+          </ul>
+        </div>
+      )}
+    </details>
   );
 }

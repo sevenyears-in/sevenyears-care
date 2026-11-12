@@ -161,3 +161,27 @@ export async function pushToCustomer(mobile: string, msg: PushMessage) {
   }
   return delivered;
 }
+
+/**
+ * Staff phones / browsers (the app or a home-screen web app where they switched notifications on).
+ * Returns how many devices were reached; dead tokens are removed. Throws when push is not set up.
+ */
+export async function pushToStaff(staffIds: string[], msg: PushMessage): Promise<{ devices: number; sent: number; failed: number }> {
+  const ids = [...new Set(staffIds.filter(Boolean))];
+  if (!ids.length) return { devices: 0, sent: 0, failed: 0 };
+  if (!(await loadServiceAccount())) throw new Error("Phone notifications are not set up yet (Firebase key missing).");
+  const { data } = await supabaseAdmin.from("push_tokens").select("token").in("staff_id", ids);
+  let sent = 0;
+  let failed = 0;
+  for (const t of data ?? []) {
+    try {
+      await send({ token: t.token }, msg);
+      sent++;
+    } catch (error) {
+      failed++;
+      const status = (error as { status?: string }).status;
+      if (status === "NOT_FOUND" || status === "UNREGISTERED") await supabaseAdmin.from("push_tokens").delete().eq("token", t.token);
+    }
+  }
+  return { devices: (data ?? []).length, sent, failed };
+}

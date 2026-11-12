@@ -30,10 +30,21 @@ export async function nightTick(): Promise<string> {
   }
 }
 
+/** Daytime jobs every minute: sales update alerts (at the alert times) and end-of-day reports (after closing). */
+async function dayTick() {
+  const { alertTick } = await import("@/lib/sales-alerts");
+  const { eodTick } = await import("@/lib/eod-report");
+  const a = await alertTick().catch((e) => `alerts error: ${e instanceof Error ? e.message : e}`);
+  if (!/alerts off|no slot due|already/.test(a)) console.log("Sales alerts:", a);
+  const r = await eodTick().catch((e) => `end-of-day error: ${e instanceof Error ? e.message : e}`);
+  if (!/off|nothing due|already running/.test(r)) console.log("End-of-day reports:", r);
+}
+
 export function startNightJobs() {
   if (g.__syNightJobs) return;
   g.__syNightJobs = true;
   const tick = () => {
+    void dayTick().catch((e) => console.error("Day jobs error:", e));
     if (!inNightWindow()) return;
     nightTick()
       .then((r) => {

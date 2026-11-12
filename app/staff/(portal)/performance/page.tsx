@@ -8,7 +8,9 @@ import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
 import { dayState, hoursOf, peakLeanDays } from "@/lib/business-day";
 import { merchStores } from "@/lib/merch-access";
 import { loadStockState } from "@/lib/stock";
-import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
+import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, planView, stockPlanItems, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
+import { loadFollow, type Follow } from "@/lib/plan-follow";
+import { PlanFollow } from "@/components/PlanFollow";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
@@ -284,6 +286,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         >
           📅 Day-wise sales →
         </Link>
+        <Link
+          href={`/staff/performance/reports?store=${encodeURIComponent(store)}`}
+          className="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#5b55c9] soft-card ring-1 ring-black/5 hover:bg-black/[0.02]"
+        >
+          🧾 End-of-day reports →
+        </Link>
       </div>
     );
   };
@@ -307,11 +315,16 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     const store = report.stores.find((s) => s.store === teamStore)!;
     // Salary-based view is for management only (not the Store Manager).
     const management = isAdmin(staff.role) || staff.role === "director";
-    const [prev, salaries, trends] = await Promise.all([
+    const [prev, salaries, trends, fl] = await Promise.all([
       storePreviousPeriod(month, store.store, store.daysGone).catch(() => null),
       management ? loadSalaries().catch(() => null) : Promise.resolve(null),
       storeTrends(month, store.store).catch(() => null),
+      loadFollow(store.store, month, shiftMonth(month, -1)).catch(() => null),
     ]);
+    // Follow-up of plan points: Store Manager / ASM / Floor Manager of the store and management.
+    const follow: FollowCtx | null = fl
+      ? { store: store.store, month, now: Object.fromEntries(fl.now), before: Object.fromEntries(fl.before), canEdit: stockStores.includes(store.store) }
+      : null;
     return (
       <div className="space-y-6">
         {header}
@@ -330,6 +343,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           asmIsFm={report.settings.asmIsFm}
           rules={report.settings}
           lastSyncAt={report.settings.lastSyncAt ?? null}
+          follow={follow}
+          stockAlert={stockState?.alerts?.[store.store] ?? null}
         />
       </div>
     );
@@ -377,7 +392,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       />
       {myPlan.length > 0 && (
         <Panel title={`Action plan — ${planRole === "asm" && asmIsFm ? "ASM / Floor Manager" : PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
-          <PlanList items={myPlan} />
+          <PlanList items={myPlan} role={planRole} />
         </Panel>
       )}
       {yearly.length > 0 && (
@@ -729,7 +744,11 @@ function TeamView({
   asmIsFm,
   rules,
   lastSyncAt,
+  follow,
+  stockAlert,
 }: {
+  follow: FollowCtx | null;
+  stockAlert: { low: number; out: number } | null;
   rules: Pick<PerformanceSettings, "storeHours" | "specialDays" | "leanBelowPct" | "shortDayPct">;
   lastSyncAt: string | null;
   store: StoreReport;
@@ -801,7 +820,12 @@ function TeamView({
         />
       )}
 
-      {trends && <ActionPlans plans={actionPlans(store, trends, prev, asmIsFm)} />}
+      {trends && (
+        <ActionPlans
+          plans={actionPlans(store, trends, prev, asmIsFm).map((pl) => (pl.role === "sm" ? { ...pl, items: [...stockPlanItems(stockAlert), ...pl.items] } : pl))}
+          follow={follow}
+        />
+      )}
 
 
       <Panel
@@ -1149,30 +1173,70 @@ function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerS
 // Action plans
 // ------------------------------------------------------------------
 
-function PlanList({ items }: { items: PlanItem[] }) {
+type FollowCtx = { store: string; month: string; now: Record<string, Follow>; before: Record<string, Follow>; canEdit: boolean };
+
+function PlanList({ items, role, follow }: { items: PlanItem[]; role: PlanRole; follow?: FollowCtx | null }) {
   const order = { high: 0, medium: 1, good: 2 } as const;
+  const PRI = { high: { t: "High", c: "bg-red-100 text-red-800" }, medium: { t: "Medium", c: "bg-amber-100 text-amber-800" }, good: { t: "Opportunity", c: "bg-green-100 text-green-800" } } as const;
   return (
     <ol className="space-y-3">
       {[...items]
         .sort((a, b) => order[a.priority] - order[b.priority])
-        .map((it, i) => (
-          <li key={`${it.title}-${i}`} className="flex gap-3">
-            <span aria-hidden className="mt-0.5">
-              {it.priority === "high" ? "🔴" : it.priority === "medium" ? "🟠" : "🟢"}
-            </span>
-            <div>
-              <p className="text-sm font-semibold">{it.title}</p>
-              <p className="text-sm text-black/60">{it.detail}</p>
-            </div>
-          </li>
-        ))}
+        .map((it, i) => {
+          const v = planView(role, it);
+          const f = follow?.now[v.key];
+          const last = follow?.before[v.key];
+          return (
+            <li key={`${v.key}-${i}`} className="rounded-2xl bg-white p-3 ring-1 ring-black/5">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-sm font-semibold">
+                  <span className={`mr-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${PRI[it.priority].c}`}>{PRI[it.priority].t}</span>
+                  {v.observation}
+                </p>
+                {last && (
+                  <span className="rounded-full bg-[#8883d7]/10 px-2 py-0.5 text-[10px] font-bold text-[#5b55c9]" title={last.note ?? ""}>
+                    Recurring · last month {last.status.replace("_", " ")}
+                  </span>
+                )}
+              </div>
+              <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[110px_1fr]">
+                <dt className="font-bold text-black/45">{v.kind}</dt>
+                <dd className="text-black/70">{v.observation}</dd>
+                <dt className="font-bold text-black/45">Action</dt>
+                <dd className="text-black/80">{v.action}</dd>
+                <dt className="font-bold text-black/45">Who · by when</dt>
+                <dd className="text-black/70">
+                  {v.owner} · {v.timeframe}
+                </dd>
+                <dt className="font-bold text-black/45">Expected</dt>
+                <dd className="text-black/70">{v.outcome}</dd>
+              </dl>
+              {follow && (
+                <div className="mt-2 border-t border-black/5 pt-2">
+                  <PlanFollow
+                    store={follow.store}
+                    month={follow.month}
+                    role={role}
+                    pkey={v.key}
+                    title={v.observation}
+                    status={f?.status ?? "open"}
+                    note={f?.note ?? null}
+                    by={f?.updated_by ?? null}
+                    at={f?.updated_at ?? null}
+                    canEdit={follow.canEdit}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
     </ol>
   );
 }
 
-function ActionPlans({ plans }: { plans: { role: PlanRole; label: string; items: PlanItem[] }[] }) {
+function ActionPlans({ plans, follow }: { plans: { role: PlanRole; label: string; items: PlanItem[] }[]; follow: FollowCtx | null }) {
   return (
-    <Panel title="Action plans" intro="From this store's sales trend (last 7 days against the 7 before, busiest days, categories rising and falling). Open each role.">
+    <Panel title="Action plans" intro="From this store's actual figures (sales pace, last 7 days against the 7 before, people, categories, stock). Each point has an owner, a time and an expected result; update its status as you act. Points seen last month are marked Recurring.">
       <div className="space-y-2">
         {plans.map(({ role, label, items }, i) => (
           <details key={role} open={i === 0} className="group rounded-2xl ring-1 ring-black/5 open:bg-black/[0.015]">
@@ -1182,7 +1246,7 @@ function ActionPlans({ plans }: { plans: { role: PlanRole; label: string; items:
                 {items.filter((x) => x.priority === "high").length} urgent · {items.length} points <span className="ml-1 inline-block transition group-open:rotate-180">▾</span>
               </span>
             </summary>
-            <div className="px-4 pb-4">{items.length ? <PlanList items={items} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
+            <div className="px-4 pb-4">{items.length ? <PlanList items={items} role={role} follow={follow} /> : <p className="text-sm text-black/50">Nothing urgent.</p>}</div>
           </details>
         ))}
       </div>

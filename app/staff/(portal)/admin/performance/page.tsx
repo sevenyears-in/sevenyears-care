@@ -14,6 +14,9 @@ import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
 import { loadStockState } from "@/lib/stock";
 import { loadAudit } from "@/lib/audit";
 import { zohoCallsToday } from "@/lib/zoho";
+import { loadAlertRuns } from "@/lib/sales-alerts";
+import { loadServiceAccount } from "@/lib/push";
+import { emailConfigured } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sales targets & incentives" };
@@ -30,7 +33,15 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   await assignPtCodesForSavedBills().catch(() => undefined);
   const rawSettings = await loadPerformanceSettings();
   const settings = withRoleNames(rawSettings);
-  const [backfill, zohoToday, stockState, audit] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0), loadStockState().catch(() => null), loadAudit(undefined, 150).catch(() => [])]);
+  const [backfill, zohoToday, stockState, audit, alertRuns, pushReady, emailReady] = await Promise.all([
+    loadBackfill(),
+    zohoCallsToday().catch(() => 0),
+    loadStockState().catch(() => null),
+    loadAudit(undefined, 150).catch(() => []),
+    loadAlertRuns(30).catch(() => []),
+    loadServiceAccount().then(Boolean).catch(() => false),
+    emailConfigured().catch(() => false),
+  ]);
   const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
@@ -98,6 +109,9 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         stock={stockState}
         isSuperAdmin={staff.role === "super_admin"}
         audit={audit}
+        alertRuns={alertRuns}
+        pushReady={pushReady}
+        emailReady={emailReady}
       />
     </div>
   );

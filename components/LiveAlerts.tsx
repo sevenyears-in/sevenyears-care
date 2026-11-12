@@ -22,6 +22,8 @@ const POLL_MS = 30_000;
 function alertHref(a: LiveAlert) {
   if (/explanation is needed/i.test(a.title)) return "/staff/explanations";
   if (/extended warranty/i.test(a.title)) return "/staff/extended-warranty";
+  if (/^(TEST · )?(Updated: )?End of day /.test(a.title)) return "/staff/performance/reports";
+  if (/^(TEST · )?(Sales update|Your sales|[A-Z][A-Z ]+ sales) \d/.test(a.title)) return "/staff/performance";
   if (a.ticket_id) return `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`;
   return /feedback/i.test(a.title) ? "/staff/feedback" : "/staff/alerts";
 }

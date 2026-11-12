@@ -44,6 +44,10 @@ export default async function AlertsPage() {
               ? "/staff/explanations"
               : /extended warranty/i.test(a.title)
                 ? "/staff/extended-warranty"
+              : /^(TEST · )?(Updated: )?End of day /.test(a.title)
+                ? "/staff/performance/reports"
+              : /^(TEST · )?(Sales update|Your sales|[A-Z][A-Z ]+ sales) \d/.test(a.title)
+                ? "/staff/performance"
               : a.ticket_id
               ? `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`
               : /feedback/i.test(a.title)

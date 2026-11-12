@@ -6,6 +6,13 @@ import type { Role } from "@/lib/roles";
 
 export type PtPerson = { name: string; group?: IncentiveGroup };
 
+export type AlertAudience = "staff" | "sm" | "management";
+export const ALERT_AUDIENCES: { key: AlertAudience; label: string }[] = [
+  { key: "staff", label: "Sales staff (own sales)" },
+  { key: "sm", label: "Store Managers / ASM (own store)" },
+  { key: "management", label: "Management (Admins, Operations, Directors)" },
+];
+
 export type PerformanceSettings = {
   /** A bill is flagged when its discount is more than this % of the bill (before discount). */
   highDiscountPct: number;
@@ -53,6 +60,16 @@ export type PerformanceSettings = {
   velocityDays: number;
   /** Days of stock a reorder should bring the item up to. */
   reorderToDays: number;
+  /** Sales update alerts at the alert times (switched on by the Super Admin after a test). */
+  alertsOn: boolean;
+  /** Who gets the sales updates: "staff" (own sales), "sm" (own store), "management" (all their stores). */
+  alertTo: AlertAudience[];
+  /** Who also gets them by e-mail (everyone above gets them in the app and as a phone notification). */
+  alertEmailTo: AlertAudience[];
+  /** End-of-day report per store (after closing and the last copy from Zoho). */
+  eodOn: boolean;
+  /** Who gets the end-of-day report by e-mail ("sm", "management"). */
+  eodEmailTo: AlertAudience[];
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -81,6 +98,11 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   alertTimes: ["11:00", "14:00", "17:00", "20:00"],
   velocityDays: 28,
   reorderToDays: 30,
+  alertsOn: false,
+  alertTo: ["staff", "sm", "management"],
+  alertEmailTo: ["sm", "management"],
+  eodOn: false,
+  eodEmailTo: ["sm", "management"],
 };
 
 /** "09:30" → 570 minutes after midnight. */
