@@ -14,20 +14,22 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
-import { monthReport, type StoreReport } from "@/lib/performance";
+import { loadStaffForPerformance, monthReport, type StoreReport } from "@/lib/performance";
 import { hoursOf, istNow } from "@/lib/business-day";
 import { timeToMinutes, type AlertAudience, type PerformanceSettings } from "@/lib/performance-rules";
 import { isAdmin, asRole } from "@/lib/roles";
 import { sendEmail, siteUrl } from "@/lib/notify";
 import { pushToStaff } from "@/lib/push";
 import { syncRecentSales } from "@/lib/sales-sync";
+import { clock, storeReportLines } from "@/lib/report-format";
+import { loadWalkinsMany, type Walkins } from "@/lib/walkins";
 
 /** Minutes after a slot during which it may still be sent (late server start, busy tick). */
 const SLOT_WINDOW = 25;
 /** Figures older than this are marked as not up to date. */
 const STALE_MINUTES = 45;
 
-export type AlertMessage = { audience: AlertAudience; staffId: string; name: string; email: string | null; emailOn: boolean; title: string; body: string };
+export type AlertMessage = { audience: AlertAudience; staffId: string; name: string; email: string | null; emailOn: boolean; title: string; body: string; summary: string };
 
 export type AlertRunResult = {
   slot: string;
@@ -43,10 +45,6 @@ export type AlertRunResult = {
 const rupees = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const first2 = (name: string) => name.split(" ").slice(0, 2).join(" ");
-const clock = (m: number) => {
-  const h = Math.floor(m / 60);
-  return `${((h + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
-};
 
 /** Today's share of what is left of a target (same rule as the dashboard). */
 function neededToday(target: number, monthNet: number, todayNet: number, daysLeftAfterToday: number) {
@@ -62,21 +60,31 @@ function dayGone(s: PerformanceSettings, store: string, minutes: number) {
   return Math.min(1, Math.max(0, (minutes - open) / (close - open)));
 }
 
-function storeLines(st: StoreReport, s: PerformanceSettings, minutes: number) {
+function storeLines(st: StoreReport, s: PerformanceSettings, minutes: number, day: string, when: string, walkins: number | null) {
   const daysLeft = Math.max(0, st.daysInMonth - st.daysGone);
   const need = neededToday(st.target, st.net, st.today.net, daysLeft);
   const gone = dayGone(s, st.store, minutes);
-  const pace = need > 0 && gone > 0 ? st.today.net / (need * gone) : null;
-  const lines = [
-    `${st.store}: ${rupees(st.today.net)} today from ${st.today.bills} bill(s)${need > 0 ? ` — ${pct(st.today.net / need)} of the ${rupees(need)} needed today` : ""}.`,
-  ];
-  if (pace !== null && gone < 1) lines.push(pace >= 1 ? `On pace for the day (time-based).` : `Behind the time-based pace: about ${rupees(need * gone - st.today.net)} short for this hour.`);
-  if (st.target > 0) lines.push(`Month so far ${rupees(st.net)} of ${rupees(st.target)} (${pct(st.net / st.target)}), ${daysLeft} day(s) left after today.`);
-  return { lines, need };
+  const paceShort = need > 0 && gone > 0 && gone < 1 ? Math.max(0, need * gone - st.today.net) : null;
+  const lines = storeReportLines({
+    store: st.store,
+    day,
+    when,
+    closing: false,
+    monthTarget: st.target,
+    daysInMonth: st.daysInMonth,
+    dayOfMonth: st.daysGone,
+    net: st.today.net,
+    bills: st.today.bills,
+    mtd: st.net,
+    paceShort,
+    walkins,
+  });
+  const summary = `${st.store}: ${rupees(st.today.net)} from ${st.today.bills} bill(s)${st.target > 0 ? ` · MTD ${pct(st.net / st.target)}` : ""}${paceShort ? ` · behind by ${rupees(paceShort)}` : ""}`;
+  return { lines, need, summary };
 }
 
 /** Builds every message for this moment. Nothing is sent here. */
-export async function buildSalesAlerts(at = new Date()): Promise<{ messages: AlertMessage[]; stale: boolean; lastSyncAt: string | null; slotLabel: string }> {
+export async function buildSalesAlerts(at = new Date(), slotTime?: string): Promise<{ messages: AlertMessage[]; stale: boolean; lastSyncAt: string | null; slotLabel: string }> {
   const s = await loadPerformanceSettings();
   const now = istNow(at);
   const month = now.date.slice(0, 7);
@@ -84,7 +92,7 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
   const lastSyncAt = report.settings.lastSyncAt ?? s.lastSyncAt ?? null;
   const ageMin = lastSyncAt ? (at.getTime() - Date.parse(lastSyncAt)) / 60_000 : Infinity;
   const stale = ageMin > STALE_MINUTES;
-  const slotLabel = clock(now.minutes);
+  const slotLabel = clock(slotTime ? timeToMinutes(slotTime) : now.minutes);
   const synced = lastSyncAt ? istNow(new Date(lastSyncAt)) : null;
   const staleLine = stale
     ? `⚠ Figures are not up to date — last copy from Zoho POS ${synced ? `at ${clock(synced.minutes)}${synced.date !== now.date ? ` on ${synced.date}` : ""}` : "not done yet"}.`
@@ -108,12 +116,17 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
   }[];
 
   const stores = report.stores.filter((st) => !s.excludedStores.includes(st.store));
+  const walkins = await loadWalkinsMany(
+    stores.map((st) => st.store),
+    now.date
+  ).catch(() => new Map<string, Walkins>());
+  const block = (st: StoreReport) => storeLines(st, s, now.minutes, now.date, slotLabel, walkins.get(st.store)?.count ?? null);
   const messages: AlertMessage[] = [];
   const sent = new Set<string>();
-  const add = (audience: AlertAudience, r: (typeof staff)[number], title: string, body: string[]) => {
+  const add = (audience: AlertAudience, r: (typeof staff)[number], title: string, body: string[], summary?: string) => {
     if (sent.has(r.id)) return;
     sent.add(r.id);
-    messages.push({ audience, staffId: r.id, name: r.full_name, email: r.email, emailOn: r.notify_email !== false, title, body: [...body, ...tail].join("\n") });
+    messages.push({ audience, staffId: r.id, name: r.full_name, email: r.email, emailOn: r.notify_email !== false, title, body: [...body, ...tail].join("\n"), summary: summary ?? body[0] ?? title });
   };
 
   // Management: every store they look after.
@@ -128,13 +141,18 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
       } else continue;
       if (!list.length) continue;
       const body: string[] = [];
-      for (const st of list) body.push(...storeLines(st, s, now.minutes).lines, "");
+      const sums: string[] = [];
+      for (const st of list) {
+        const b = block(st);
+        body.push(...b.lines, "");
+        sums.push(b.summary);
+      }
       if (list.length > 1) {
         const total = list.reduce((a, st) => a + st.today.net, 0);
         const bills = list.reduce((a, st) => a + st.today.bills, 0);
         body.push(`All stores: ${rupees(total)} today from ${bills} bill(s).`);
       }
-      add("management", r, `Sales update ${slotLabel}`, body);
+      add("management", r, `Sales update ${slotLabel}`, body, sums.join(" | "));
     }
   }
 
@@ -145,7 +163,7 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
       const smIds = new Set(leaders.map((p) => p.staffId!));
       for (const r of staff) if (asRole(r.role) === "store_manager" && (r.store_name ?? "").toUpperCase() === st.store) smIds.add(r.id);
       if (!smIds.size) continue;
-      const { lines } = storeLines(st, s, now.minutes);
+      const { lines, summary } = block(st);
       const sellers = st.people.filter((p) => p.targetApplies && !p.poolOnly);
       const top = [...sellers].filter((p) => p.today.net > 0).sort((a, b) => b.today.net - a.today.net).slice(0, 3);
       const none = sellers.filter((p) => p.today.bills === 0);
@@ -155,7 +173,7 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
         body.push(`No bills yet today (if on duty): ${none.slice(0, 8).map((p) => first2(p.name)).join(", ")}${none.length > 8 ? ` and ${none.length - 8} more` : ""}.`);
       for (const id of smIds) {
         const r = staff.find((x) => x.id === id);
-        if (r) add("sm", r, `${st.store} sales ${slotLabel}`, body);
+        if (r) add("sm", r, `${st.store} sales ${slotLabel}`, body, summary);
       }
     }
   }
@@ -178,6 +196,25 @@ export async function buildSalesAlerts(at = new Date()): Promise<{ messages: Ale
     }
   }
 
+  // CREs: a reminder to post the walk-ins so far (added to their own update, or on its own).
+  const perfStaff = await loadStaffForPerformance(s.asmIsFm).catch(() => []);
+  for (const c of perfStaff) {
+    if (c.group !== "cashier_cre" || !c.store || !stores.some((st) => st.store === c.store)) continue;
+    const w = walkins.get(c.store);
+    const line = w
+      ? `Walk-ins posted so far: ${w.count} (at ${clock(istNow(new Date(w.updated_at)).minutes)}). Update the total now: ${link}`
+      : `Walk-ins are not posted yet for ${c.store} today — post the total so far now: ${link}`;
+    const mine = messages.find((m) => m.staffId === c.id);
+    if (mine) mine.body = `${line}\n\n${mine.body}`;
+    else {
+      const r = staff.find((x) => x.id === c.id);
+      if (r) {
+        sent.add(r.id);
+        messages.push({ audience: "staff", staffId: r.id, name: r.full_name, email: r.email, emailOn: r.notify_email !== false, title: `Walk-ins ${slotLabel} · ${c.store}`, body: line, summary: line.split(":")[0] });
+      }
+    }
+  }
+
   return { messages, stale, lastSyncAt, slotLabel };
 }
 
@@ -194,7 +231,7 @@ async function deliver(messages: AlertMessage[], emailTo: AlertAudience[], meta:
   // One phone notification per person (their first line is the summary).
   for (const m of messages) {
     try {
-      const r = await pushToStaff([m.staffId], { title: m.title, body: m.body.split("\n")[0], url: `${siteUrl()}/staff/performance` });
+      const r = await pushToStaff([m.staffId], { title: m.title, body: m.summary.slice(0, 180), url: `${siteUrl()}/staff/performance` });
       out.push.devices += r.devices;
       out.push.sent += r.sent;
       out.push.failed += r.failed;
@@ -254,7 +291,7 @@ async function runAlerts(slot: string, s: PerformanceSettings): Promise<AlertRun
   const base: AlertRunResult = { slot, stale: false, lastSyncAt: null, recipients: 0, inApp: 0, push: { devices: 0, sent: 0, failed: 0, error: null }, email: { sent: 0, failed: 0, skipped: 0 }, error: null };
   try {
     await freshen(s);
-    const built = await buildSalesAlerts();
+    const built = await buildSalesAlerts(new Date(), slot);
     const d = await deliver(built.messages, s.alertEmailTo, { slot });
     return { ...base, stale: built.stale, lastSyncAt: built.lastSyncAt, recipients: built.messages.length, ...d };
   } catch (e) {

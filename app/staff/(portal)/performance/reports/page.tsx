@@ -5,7 +5,7 @@ import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
 import { rupees } from "@/lib/performance-rules";
 import { monthReport } from "@/lib/performance";
 import { merchStores } from "@/lib/merch-access";
-import { loadEodReports, type EodRow } from "@/lib/eod-report";
+import { eodBlock, loadEodReports, type EodRow } from "@/lib/eod-report";
 import { RegenerateEod } from "@/components/RegenerateEod";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +85,7 @@ export default async function EodReportsPage({ searchParams }: { searchParams: P
               {pick.status === "failed" && <p className="text-sm text-red-700">Could not be made: {pick.error}</p>}
               {d && (
                 <>
+                  <pre className="whitespace-pre-wrap rounded-2xl bg-[#0b7f91]/5 p-4 font-sans text-sm leading-6 ring-1 ring-[#0b7f91]/15">{eodBlock(d).join("\n")}</pre>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {[
                       ["Net sales", rupees(d.net)],

@@ -1,3 +1,5 @@
+import { WalkinBox } from "@/components/WalkinBox";
+import { creStoreOf, loadWalkins } from "@/lib/walkins";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -5,7 +7,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
-import { dayState, hoursOf, peakLeanDays } from "@/lib/business-day";
+import { dayState, hoursOf, istNow, peakLeanDays } from "@/lib/business-day";
 import { merchStores } from "@/lib/merch-access";
 import { loadStockState } from "@/lib/stock";
 import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, planView, stockPlanItems, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
@@ -187,8 +189,25 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Stock & categories (Store Manager, ASM / Floor Manager and management).
   const stockStores = await merchStores(staff, allStores).catch(() => [] as string[]);
   const myStores = access.teamAll ? allStores : allStores.filter((s) => access.teamStores.includes(s));
+  // Walk-ins: the CRE of a store posts today's running total; SM / ASM / management can correct it.
+  const creStore = month === thisMonth ? await creStoreOf(staff).catch(() => null) : null;
+  const walkinBox = async (store: string | null) => {
+    if (!store || month !== thisMonth) return null;
+    const st = report.stores.find((x) => x.store === store);
+    const w = await loadWalkins(store, istNow().date).catch(() => null);
+    return (
+      <WalkinBox
+        store={store}
+        bills={st?.today.bills ?? 0}
+        count={w?.count ?? null}
+        updatedBy={w?.updated_by_name ?? null}
+        updatedAt={w?.updated_at ?? null}
+        canEdit={creStore === store || stockStores.includes(store)}
+      />
+    );
+  };
   // Only people in an incentive group have their own page; managers see their stores.
-  if (!access.eligible && !access.teamAll && !access.teamStores.length) redirect("/staff");
+  if (!access.eligible && !access.teamAll && !access.teamStores.length && !creStore) redirect("/staff");
   const base: Search = { m: month !== thisMonth ? month : undefined };
   const labels = report.settings.groupLabels;
 
@@ -330,6 +349,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         {header}
         {switcher}
         {stockBar(store.store)}
+        {await walkinBox(store.store)}
         <TeamView
           store={store}
           base={base}
@@ -355,6 +375,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <div className="space-y-6">
         {header}
         {switcher}
+        {await walkinBox(creStore)}
         <Panel title="No sales found for you this month">
           <p className="text-sm text-black/60">
             Sales are matched by your User ID ({staff.userId}) as the salesperson on the Zoho POS bill (for example “{staff.userId} - {staff.fullName.split(" ")[0]?.toUpperCase()}”).
@@ -378,6 +399,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       {header}
       {switcher}
       {wanted === me && stockBar(found.store.store)}
+      {wanted === me && creStore ? await walkinBox(creStore) : null}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
       <PeakLean
         title="Your peak and lean times"

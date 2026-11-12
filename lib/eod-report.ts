@@ -11,6 +11,8 @@ import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { monthReport } from "@/lib/performance";
 import { closingAt, istNow, isSpecialDay } from "@/lib/business-day";
 import { dailySales } from "@/lib/daily-sales";
+import { storeReportLines } from "@/lib/report-format";
+import { loadWalkins } from "@/lib/walkins";
 import { itemSales, stockAlertsFor } from "@/lib/stock";
 import { isAdmin, asRole } from "@/lib/roles";
 import { sendEmail, siteUrl } from "@/lib/notify";
@@ -42,6 +44,10 @@ export type EodData = {
   stock: { lowFast: number; out: number } | null;
   lastSyncAt: string | null;
   teamAsAt: string | null;
+  /** Walk-ins posted by the CRE for the day (null = not posted). Missing on reports made before walk-ins existed. */
+  walkins?: number | null;
+  daysInMonth?: number;
+  dayOfMonth?: number;
 };
 
 export type EodRow = {
@@ -62,12 +68,17 @@ const pct = (x: number | null) => (x === null ? "—" : `${Math.round(x * 100)}%
 
 /** Builds the report figures for one store and day. Team lines only when `day` is today (live month report). */
 export async function buildEod(store: string, day: string, s: PerformanceSettings): Promise<EodData> {
-  const [rows, items] = await Promise.all([dailySales(day, day, [store], false), itemSales(store, day, day)]);
+  const monthStart = `${day.slice(0, 7)}-01`;
+  const [rows, items, w] = await Promise.all([dailySales(monthStart, day, [store], false), itemSales(store, day, day), loadWalkins(store, day).catch(() => null)]);
   const r = rows.find((x) => x.date === day && x.store === store);
   const isToday = istNow().date === day;
-  let monthNet: number | null = null;
-  let monthTarget: number | null = null;
-  let daysLeft: number | null = null;
+  const [y, mo] = day.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const dayOfMonth = Number(day.slice(8, 10));
+  // Month to date and month target from the day-wise figures (works for any day, not only today).
+  let monthNet: number | null = rows.filter((x) => x.store === store && x.date <= day).reduce((a, x) => a + x.net, 0);
+  let monthTarget: number | null = r && r.target > 0 ? Math.round(r.target * daysInMonth) : null;
+  let daysLeft: number | null = daysInMonth - dayOfMonth;
   let people: EodData["people"] = null;
   let noSales: string[] | null = null;
   let units: number | null = null;
@@ -124,20 +135,38 @@ export async function buildEod(store: string, day: string, s: PerformanceSetting
     stock,
     lastSyncAt: s.lastSyncAt ?? null,
     teamAsAt: isToday ? new Date().toISOString() : null,
+    walkins: w?.count ?? null,
+    daysInMonth,
+    dayOfMonth,
   };
+}
+
+/** The closing report in the stores' layout (same as the 3-hourly updates, marked "Closing"). */
+export function eodBlock(d: EodData): string[] {
+  const [y, mo] = d.day.split("-").map(Number);
+  return storeReportLines({
+    store: d.store,
+    day: d.day,
+    when: "Closing",
+    closing: true,
+    monthTarget: d.monthTarget ?? 0,
+    daysInMonth: d.daysInMonth ?? new Date(Date.UTC(y, mo, 0)).getUTCDate(),
+    dayOfMonth: d.dayOfMonth ?? Number(d.day.slice(8, 10)),
+    net: d.net,
+    bills: d.bills,
+    mtd: d.monthNet,
+    paceShort: null,
+    walkins: d.walkins ?? null,
+  });
 }
 
 /** Plain-text report (e-mail and in-app). */
 export function eodText(d: EodData, status: "provisional" | "final") {
   const lines = [
-    `${d.store} — end of day ${d.day}${status === "provisional" ? " (PROVISIONAL: the last copy from Zoho POS after closing has not worked yet)" : ""}`,
-    "",
-    `Net sales ${rupees(d.net)} (billed ${rupees(d.billed)} − returns ${rupees(d.returned)}), ${d.bills} bill(s).`,
-    `Average bill ${d.bills ? rupees(d.abv) : "—"}${d.upb !== null ? ` · items per bill ${d.upb.toFixed(1)}` : ""}.`,
-    d.dayTarget ? `Day target ${rupees(d.dayTarget)} → ${pct(d.achievement)} (${d.net >= d.dayTarget ? "+" : "−"}${rupees(Math.abs(d.net - d.dayTarget))}).` : "",
-    d.prevNet !== null ? `Previous day ${rupees(d.prevNet)}.` : "",
-    d.monthNet !== null ? `Month so far ${rupees(d.monthNet)}${d.monthTarget ? ` of ${rupees(d.monthTarget)} (${pct(d.monthAchievement)}), ${d.daysLeft} day(s) left` : ""}.` : "",
-  ].filter((x) => x !== "");
+    ...eodBlock(d),
+    `Returns: ${rupees(d.returned)} (billed ${rupees(d.billed)})${d.upb !== null ? ` | Items per bill: ${d.upb.toFixed(1)}` : ""}${d.prevNet !== null ? ` | Previous day: ${rupees(d.prevNet)}` : ""}`,
+  ];
+  if (status === "provisional") lines.push("PROVISIONAL: the last copy from Zoho POS after closing has not worked yet — it is made again once it does.");
   if (d.people?.length) lines.push("", "Team today:", ...d.people.slice(0, 15).map((p) => `  ${p.name}: ${rupees(p.net)} (${p.bills} bill(s))`));
   if (d.noSales?.length) lines.push(`No bills today: ${d.noSales.join(", ")}.`);
   if (d.categories.length) lines.push("", "Top categories:", ...d.categories.map((c) => `  ${c.name}: ${rupees(c.net)} (${c.units} item(s))`));
@@ -173,7 +202,7 @@ async function deliverEod(d: EodData, status: "provisional" | "final", emailTo: 
   const title = `${again ? "Updated: " : ""}End of day ${d.day} · ${d.store}${status === "provisional" ? " (provisional)" : ""}`;
   const text = eodText(d, status);
   if (people.length)
-    await supabaseAdmin.from("staff_notifications").insert(people.map((p) => ({ staff_id: p.id, ticket_type: null, ticket_id: null, ticket_number: null, title, body: text.split("\n").slice(2, 6).join("\n") })));
+    await supabaseAdmin.from("staff_notifications").insert(people.map((p) => ({ staff_id: p.id, ticket_type: null, ticket_id: null, ticket_number: null, title, body: text.split("\n").slice(0, 8).join("\n") })));
   await pushToStaff(people.map((p) => p.id), { title, body: `Net ${rupees(d.net)} from ${d.bills} bill(s)${d.dayTarget ? ` — ${pct(d.achievement)} of the day target` : ""}.`, url: `${siteUrl()}/staff/performance/reports` }).catch(() => undefined);
   const result = { sent: 0, failed: 0, skipped: 0, to: [] as string[] };
   for (const p of people) {
