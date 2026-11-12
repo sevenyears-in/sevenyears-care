@@ -12,7 +12,7 @@ import { OVERSTOCK_DAYS, REORDER_DAYS } from "@/lib/stock";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Stock & categories" };
 
-type Search = { store?: string; cat?: string; show?: string; q?: string };
+type Search = { store?: string; cat?: string; show?: string; q?: string; page?: string };
 
 const STORE_COLOURS = ["#0fa8bf", "#f39237", "#ff5e79", "#5b55c9", "#2f9e44"];
 const short = (n: number) => (Math.abs(n) >= 100000 ? `₹${(n / 100000).toFixed(2)} L` : rupees(n));
@@ -53,13 +53,45 @@ const STATUS: Record<MerchItem["status"], { text: string; cls: string }> = {
   no_stock_data: { text: "No stock data", cls: "bg-black/5 text-black/45" },
 };
 
-const SHOW: Record<string, { title: string; test: (i: MerchItem) => boolean }> = {
-  low: { title: "Fast-moving items running low", test: (i) => i.fast && (i.status === "out" || i.status === "low") },
-  out: { title: "Out of stock (sold in the last 60 days)", test: (i) => i.status === "out" },
-  reorder: { title: `Under ${REORDER_DAYS} days of cover — reorder`, test: (i) => i.status === "low" || i.status === "out" },
-  over: { title: `Over ${OVERSTOCK_DAYS} days of cover — overstock`, test: (i) => i.status === "over" },
-  fast: { title: "Fast movers", test: (i) => i.fast },
+const SHOW: Record<string, { title: string; test: (i: MerchItem) => boolean; tone: string; advice: (n: number) => string; sort: (a: MerchItem, b: MerchItem) => number }> = {
+  low: {
+    title: "Fast-moving items running low",
+    test: (i) => i.fast && (i.status === "out" || i.status === "low"),
+    tone: "border-red-200 bg-red-50/60",
+    advice: (n) => `${n} best seller(s) about to run out — reorder today.`,
+    sort: (a, b) => (b.perDay ?? 0) - (a.perDay ?? 0),
+  },
+  out: {
+    title: "Out of stock",
+    test: (i) => i.status === "out",
+    tone: "border-red-200 bg-red-50/40",
+    advice: (n) => `${n} item(s) at 0 that sold in the last 60 days — replenish; fast movers first.`,
+    sort: (a, b) => (b.perDay ?? 0) - (a.perDay ?? 0),
+  },
+  reorder: {
+    title: `Under ${REORDER_DAYS} days of cover`,
+    test: (i) => i.status === "low",
+    tone: "border-amber-200 bg-amber-50/50",
+    advice: (n) => `${n} item(s) to reorder before they run out.`,
+    sort: (a, b) => (a.cover ?? 0) - (b.cover ?? 0),
+  },
+  over: {
+    title: `Over ${OVERSTOCK_DAYS} days of cover`,
+    test: (i) => i.status === "over",
+    tone: "border-[#8883d7]/30 bg-[#8883d7]/[0.05]",
+    advice: (n) => `${n} item(s) overstocked — display better, bundle, run an offer or transfer.`,
+    sort: (a, b) => (b.excessUnits ?? 0) * (b.rate ?? 0) - (a.excessUnits ?? 0) * (a.rate ?? 0),
+  },
+  fast: {
+    title: "Fast movers",
+    test: (i) => i.fast,
+    tone: "border-[#0fa8bf]/30 bg-[#0fa8bf]/[0.05]",
+    advice: (n) => `${n} top seller(s) — keep them in stock and on display.`,
+    sort: (a, b) => (b.perDay ?? 0) - (a.perDay ?? 0),
+  },
 };
+const HEADINGS = ["low", "out", "reorder", "over", "fast"] as const;
+const PAGE = 100;
 
 export default async function StockPage({ searchParams }: { searchParams: Promise<Search> }) {
   const staff = await getCurrentStaff();
@@ -92,10 +124,21 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const q = (sp.q ?? "").trim().toLowerCase();
   const lowFast = m.items.filter(SHOW.low.test);
   let list: MerchItem[] | null = null;
-  if (cat || show || q) {
+  if (cat || q) {
     list = m.items.filter((i) => (!cat || i.category === cat.name) && (!show || SHOW[show].test(i)) && (!q || i.name.toLowerCase().includes(q) || (i.sku ?? "").toLowerCase().includes(q)));
-    if (show === "low" || show === "out" || show === "reorder") list.sort((a, b) => b.units28 - a.units28);
+    if (show) list.sort(SHOW[show].sort);
   }
+  const page = Math.max(1, Number(sp.page) || 1);
+  const pages = list ? Math.max(1, Math.ceil(list.length / PAGE)) : 1;
+  // Category cards under each heading.
+  const groups = Object.fromEntries(
+    HEADINGS.map((h) => {
+      const items = m.items.filter(SHOW[h].test).sort(SHOW[h].sort);
+      const byCat = new Map<string, MerchItem[]>();
+      for (const i of items) byCat.set(i.category, [...(byCat.get(i.category) ?? []), i]);
+      return [h, { items, cats: [...byCat.entries()].sort((a, b) => b[1].length - a[1].length) }];
+    })
+  ) as Record<(typeof HEADINGS)[number], { items: MerchItem[]; cats: [string, MerchItem[]][] }>;
   const fmtRange = (r: [string, string]) => `${formatDate(r[0])} – ${formatDate(r[1])}`;
 
   return (
@@ -151,44 +194,112 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        {(["low", "out", "reorder", "over", "fast"] as const).map((k) => (
-          <Link key={k} href={qs(base, { show: show === k ? undefined : k, cat: sp.cat })} className={`rounded-full px-3 py-1.5 font-semibold ring-1 ${show === k ? "bg-[#161616] text-white ring-[#161616]" : "bg-white ring-black/10 hover:bg-black/5"}`}>
-            {SHOW[k].title.split(" — ")[0].replace(" (sold in the last 60 days)", "")}
-          </Link>
-        ))}
-        <form action="/staff/performance/stock" className="ml-auto flex gap-2">
-          <input type="hidden" name="store" value={store} />
-          {sp.cat && <input type="hidden" name="cat" value={sp.cat} />}
-          {show && <input type="hidden" name="show" value={show} />}
-          <input name="q" defaultValue={sp.q ?? ""} placeholder="Search product or SKU" className="w-56 rounded-full border border-black/10 bg-white px-4 py-1.5 text-sm" />
-        </form>
-      </div>
+      <form action="/staff/performance/stock" className="flex flex-wrap gap-2">
+        <input type="hidden" name="store" value={store} />
+        <input name="q" defaultValue={sp.q ?? ""} placeholder="Search product or SKU" className="w-64 rounded-full border border-black/10 bg-white px-4 py-1.5 text-sm" />
+        <button className="rounded-full bg-[#161616] px-4 py-1.5 text-sm font-semibold text-white">Search</button>
+      </form>
 
       {list ? (
         <section className="rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5 sm:p-5">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-bold">
-              {[cat?.name, show ? SHOW[show].title : null, q ? `“${sp.q}”` : null].filter(Boolean).join(" · ")} ({list.length})
+              {[show ? SHOW[show].title : null, cat?.name, q ? `“${sp.q}”` : null].filter(Boolean).join(" · ")} ({list.length})
             </h2>
             <Link href={qs(base, {})} className="text-sm font-semibold text-[#5b55c9]">
-              ← All categories
+              ← All headings
             </Link>
           </div>
-          <ItemTable items={list.slice(0, 400)} />
-          {list.length > 400 && <p className="mt-2 text-xs text-black/45">Showing the first 400 — search to narrow down.</p>}
+          <ItemTable items={list.slice((page - 1) * PAGE, page * PAGE)} />
+          {pages > 1 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              Page
+              {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+                <Link key={n} href={qs(base, { cat: sp.cat, show: show ?? undefined, q: sp.q, page: String(n) })} className={`rounded-full px-3 py-1 font-semibold ring-1 ${n === page ? "bg-[#161616] text-white ring-[#161616]" : "ring-black/10 hover:bg-black/5"}`}>
+                  {n}
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
       ) : (
-        <section className="rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5 sm:p-5">
-          <h2 className="mb-3 text-lg font-bold">Categories</h2>
-          <CategoryTable rows={m.categories} total={t} base={base} />
-        </section>
+        <>
+          {HEADINGS.map((h) => {
+            const g = groups[h];
+            return (
+              <details key={h} open={show === h || (h === "low" && !show)} className="group rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5 sm:p-5">
+                <summary className="flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="text-lg font-bold">
+                    {SHOW[h].title} <span className="text-black/45">({g.items.length})</span>
+                  </h2>
+                  <span className="text-sm text-black/55">
+                    {g.items.length ? SHOW[h].advice(g.items.length) : "Nothing here."} <span className="ml-1 text-[#5b55c9] group-open:hidden">Show ▾</span>
+                  </span>
+                </summary>
+                {g.cats.length > 0 && (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {g.cats.map(([name, items]) => {
+                      const stock = items.reduce((a, i) => a + Math.max(0, i.stock ?? 0), 0);
+                      const reorder = items.reduce((a, i) => a + (i.reorderQty ?? 0), 0);
+                      const excess = items.reduce((a, i) => a + (i.excessUnits ?? 0), 0);
+                      return (
+                        <details key={name} className={`rounded-2xl border p-3 ${SHOW[h].tone}`}>
+                          <summary className="cursor-pointer list-none">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <p className="font-bold">{name}</p>
+                              <p className="text-2xl font-bold tabular-nums">{items.length}</p>
+                            </div>
+                            <p className="text-xs text-black/60">
+                              {h === "over"
+                                ? `${stock} units in stock · about ${excess} units over ${OVERSTOCK_DAYS} days`
+                                : h === "fast"
+                                  ? `${Math.round(items.reduce((a, i) => a + (i.perDay ?? 0), 0) * 10) / 10} units a day · ${stock} in stock`
+                                  : `${stock} units in stock${reorder ? ` · reorder about ${reorder} units` : ""}`}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold text-[#5b55c9]">Show products ▾</p>
+                          </summary>
+                          <div className="mt-2 space-y-1.5">
+                            {items.slice(0, 25).map((i) => (
+                              <div key={i.id} className="rounded-xl bg-white/80 p-2 text-xs ring-1 ring-black/5">
+                                <p className="font-semibold">
+                                  {i.name} {i.fast && <span className="ml-1 rounded-full bg-[#0fa8bf]/15 px-1.5 text-[10px] font-bold text-[#0b7f91]">FAST</span>}
+                                </p>
+                                <p className="text-black/55">
+                                  {i.sku ?? "—"} · {i.category}
+                                </p>
+                                <p className="tabular-nums">
+                                  Stock <b>{i.stock === null ? "—" : Math.round(i.stock)}</b> · {i.perDay ? `${Math.round(i.perDay * 10) / 10} a day` : "no sales"} · cover {days(i.cover)} day(s) ·{" "}
+                                  <span className={`rounded-full px-1.5 font-bold ${STATUS[i.status].cls}`}>{STATUS[i.status].text}</span>
+                                </p>
+                                <p className="font-semibold text-black/75">→ {i.action}</p>
+                              </div>
+                            ))}
+                            {items.length > 25 && (
+                              <Link href={qs(base, { show: h, cat: name })} className="block text-xs font-semibold text-[#5b55c9]">
+                                View all {items.length} →
+                              </Link>
+                            )}
+                          </div>
+                        </details>
+                      );
+                    })}
+                  </div>
+                )}
+              </details>
+            );
+          })}
+
+          <section className="rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5 sm:p-5">
+            <h2 className="mb-3 text-lg font-bold">Categories</h2>
+            <CategoryTable rows={m.categories} total={t} base={base} />
+          </section>
+        </>
       )}
 
       <p className="text-xs text-black/45">
         MoM: {fmtRange(m.periods.mtd)} against {fmtRange(m.periods.mom)}. LFL: against {fmtRange(m.periods.lfl)} (same store). Sell-through = units sold this month ÷ (units sold + stock on hand).
-        Stock cover = stock ÷ average units sold a day (last 28 days, counting only days with sales data). Under {REORDER_DAYS} days = reorder; over {OVERSTOCK_DAYS} days = overstock. Stock-out = 0 in the store and sold in the
-        last 60 days. Fast movers = the top fifth of items by units sold in the last 28 days (at least 4 units). Carry bags are left out. Item amounts are before any whole-bill discount, so totals can be a little higher than on the store dashboard.
+        Stock cover = stock ÷ average units sold a day (last {m.velocityDays} days with sales data). Reorder quantity brings the item to {m.reorderToDays} days of stock. Under {REORDER_DAYS} days = reorder; over {OVERSTOCK_DAYS} days = overstock. Stock-out = 0 in the store and sold in the
+        last 60 days. Fast movers = the top fifth of items by units sold in the last {m.velocityDays} days (at least 4 units). Items with no sales show “no sales” instead of a cover figure. Carry bags are left out. Item amounts are before any whole-bill discount, so totals can be a little higher than on the store dashboard.
       </p>
     </div>
   );
@@ -252,7 +363,7 @@ function CategoryTable({ rows, total, base }: { rows: MerchCategory[]; total: Me
 function ItemTable({ items }: { items: MerchItem[] }) {
   return (
     <div className="-mx-2 overflow-x-auto">
-      <table className="min-w-[1050px] w-full text-sm">
+      <table className="min-w-[1200px] w-full text-sm">
         <thead>
           <tr>
             <th className={thc}>Product</th>
@@ -262,9 +373,10 @@ function ItemTable({ items }: { items: MerchItem[] }) {
             <th className={`${thc} text-right`}>LFL</th>
             <th className={`${thc} text-right`}>Sell-through</th>
             <th className={`${thc} text-right`}>Stock</th>
-            <th className={`${thc} text-right`}>Sold 28 days</th>
+            <th className={`${thc} text-right`}>Avg a day</th>
             <th className={`${thc} text-right`}>Cover days</th>
             <th className={thc}>Status</th>
+            <th className={thc}>Recommended action</th>
           </tr>
         </thead>
         <tbody>
@@ -287,17 +399,18 @@ function ItemTable({ items }: { items: MerchItem[] }) {
               </td>
               <td className={`${tdc} text-right`}>{pc(i.sellThrough)}</td>
               <td className={`${tdc} text-right ${i.stock !== null && i.stock <= 0 ? "font-bold text-[#d6224a]" : ""}`}>{i.stock === null ? "—" : Math.round(i.stock)}</td>
-              <td className={`${tdc} text-right`}>{Math.round(i.units28)}</td>
+              <td className={`${tdc} text-right`}>{i.perDay ? (Math.round(i.perDay * 10) / 10).toString() : "—"}</td>
               <td className={`${tdc} text-right`}>{days(i.cover)}</td>
               <td className="px-3 py-2">
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${STATUS[i.status].cls}`}>{STATUS[i.status].text}</span>
                 {i.outSince && <span className="block text-[11px] text-black/45">since {formatDate(i.outSince)}</span>}
               </td>
+              <td className="max-w-[260px] px-3 py-2 text-xs font-semibold">{i.action}</td>
             </tr>
           ))}
           {!items.length && (
             <tr>
-              <td colSpan={10} className="px-3 py-6 text-center text-sm text-black/45">
+              <td colSpan={11} className="px-3 py-6 text-center text-sm text-black/45">
                 Nothing here.
               </td>
             </tr>

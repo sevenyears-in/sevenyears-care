@@ -8,6 +8,7 @@
 import { todayISO } from "@/lib/helpers";
 import { addDays, daysWithData, fastMovers, itemSales, OVERSTOCK_DAYS, REORDER_DAYS, stockFor, type ItemSales } from "@/lib/stock";
 import { isCarryBag } from "@/lib/sales-sync";
+import { loadPerformanceSettings } from "@/lib/performance-settings";
 
 export type MerchItem = {
   id: string;
@@ -26,6 +27,14 @@ export type MerchItem = {
   outSince: string | null;
   fast: boolean;
   status: "out" | "low" | "over" | "ok" | "no_stock_data";
+  /** Average units sold a day over the velocity window (days with data only); null without sales. */
+  perDay: number | null;
+  /** Units to order to reach the reorder cover (only for low / out items with sales). */
+  reorderQty: number | null;
+  /** Units above the overstock limit. */
+  excessUnits: number | null;
+  /** What to do, in one line. */
+  action: string;
 };
 
 export type MerchCategory = {
@@ -54,6 +63,8 @@ export type MerchReport = {
   momCoverage: number;
   lflCoverage: number;
   stockAt: string | null;
+  velocityDays: number;
+  reorderToDays: number;
   totals: MerchCategory;
   categories: MerchCategory[];
   items: MerchItem[];
@@ -87,19 +98,21 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
   const lfl: [string, string] = [`${ly}-01`, dayOf(ly, n)];
   const end = mtd[1];
 
+  const settings = await loadPerformanceSettings();
+  const vDays = settings.velocityDays;
   const [now, before, lastYear, s28, s60, stock, momDays, lflDays, days28] = await Promise.all([
     itemSales(store, ...mtd),
     itemSales(store, ...mom),
     itemSales(store, ...lfl),
-    itemSales(store, addDays(end, -27), end),
+    itemSales(store, addDays(end, -(vDays - 1)), end),
     itemSales(store, addDays(end, -59), end),
     stockFor(store),
     daysWithData(store, ...mom),
     daysWithData(store, ...lfl),
-    daysWithData(store, addDays(end, -27), end),
+    daysWithData(store, addDays(end, -(vDays - 1)), end),
   ]);
   // Average a day over the days that have sales data (earlier months may not be copied yet).
-  const window28 = Math.max(1, Math.min(28, days28));
+  const window28 = Math.max(1, Math.min(vDays, days28));
   const momCoverage = momDays / Math.max(1, Number(mom[1].slice(8, 10)));
   const lflCoverage = lflDays / Math.max(1, Number(lfl[1].slice(8, 10)));
   const momOk = momCoverage >= 0.8;
@@ -122,6 +135,9 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
     const perDay = units28 / window28;
     const cover = stockQty === null ? null : perDay > 0 ? Math.max(0, stockQty) / perDay : null;
     const isFast = fast.has(id);
+    const reorderQty =
+      stockQty !== null && perDay > 0 && cover !== null && cover < REORDER_DAYS ? Math.max(1, Math.ceil(perDay * settings.reorderToDays - Math.max(0, stockQty))) : stockQty !== null && stockQty <= 0 && perDay > 0 ? Math.ceil(perDay * settings.reorderToDays) : null;
+    const excessUnits = stockQty !== null && stockQty > 0 ? (perDay > 0 ? (cover !== null && cover > OVERSTOCK_DAYS ? Math.floor(stockQty - perDay * OVERSTOCK_DAYS) : null) : !sold60 ? stockQty : null) : null;
     const status: MerchItem["status"] =
       stockQty === null
         ? "no_stock_data"
@@ -149,6 +165,23 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
       outSince: st && st.stock <= 0 ? st.out_since : null,
       fast: isFast,
       status,
+      perDay: perDay > 0 ? perDay : null,
+      reorderQty,
+      excessUnits,
+      action:
+        status === "out"
+          ? `Replenish now${reorderQty ? ` — order about ${reorderQty}` : ""}${isFast ? " (fast mover: urgent)" : ""}`
+          : status === "low"
+            ? `Reorder about ${reorderQty ?? 1} to cover ${settings.reorderToDays} days`
+            : status === "over"
+              ? perDay > 0
+                ? `Overstock: about ${excessUnits ?? 0} units above ${OVERSTOCK_DAYS} days — display better, bundle or transfer`
+                : `No sales in 60 days — promote, bundle or return / transfer`
+              : status === "no_stock_data"
+                ? "No stock data — check the item in Zoho"
+                : isFast
+                  ? "Keep in stock; watch daily"
+                  : "OK",
     });
   }
 
@@ -201,6 +234,8 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
     momCoverage,
     lflCoverage,
     stockAt,
+    velocityDays: vDays,
+    reorderToDays: settings.reorderToDays,
     totals: total,
     categories: [...cats.values()].sort((a, b) => b.net - a.net),
     items: items.sort((a, b) => b.net - a.net),

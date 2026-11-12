@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { flushZohoUsage, zohoCallsLastMinute, zohoConfigured, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { isCarryBag, storeKey } from "@/lib/sales-sync";
+import { loadPerformanceSettings } from "@/lib/performance-settings";
 
 type Obj = Record<string, unknown>;
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v)).trim();
@@ -248,13 +249,14 @@ export const OVERSTOCK_DAYS = 90;
 /** Count of fast movers under 7 days of cover (or out), and items out of stock that sold in 60 days. */
 export async function stockAlertsFor(store: string) {
   const today = todayISO();
+  const vDays = (await loadPerformanceSettings().catch(() => null))?.velocityDays ?? 28;
   const [s28, s60, stock, days28] = await Promise.all([
-    itemSales(store, addDays(today, -27), today),
+    itemSales(store, addDays(today, -(vDays - 1)), today),
     itemSales(store, addDays(today, -59), today),
     stockFor(store),
-    daysWithData(store, addDays(today, -27), today),
+    daysWithData(store, addDays(today, -(vDays - 1)), today),
   ]);
-  const window28 = Math.max(1, Math.min(28, days28));
+  const window28 = Math.max(1, Math.min(vDays, days28));
   const fast = fastMovers(s28);
   let lowFast = 0;
   const out: string[] = [];
