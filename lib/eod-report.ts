@@ -8,7 +8,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
-import { monthReport } from "@/lib/performance";
+import { loadTargets, monthReport } from "@/lib/performance";
 import { closingAt, istNow, isSpecialDay } from "@/lib/business-day";
 import { dailySales } from "@/lib/daily-sales";
 import { storeReportLines } from "@/lib/report-format";
@@ -77,7 +77,9 @@ export async function buildEod(store: string, day: string, s: PerformanceSetting
   const dayOfMonth = Number(day.slice(8, 10));
   // Month to date and month target from the day-wise figures (works for any day, not only today).
   let monthNet: number | null = rows.filter((x) => x.store === store && x.date <= day).reduce((a, x) => a + x.net, 0);
-  let monthTarget: number | null = r && r.target > 0 ? Math.round(r.target * daysInMonth) : null;
+  const targets = await loadTargets(day.slice(0, 7)).catch(() => null);
+  const setTarget = targets?.stores.get(store) ?? s.storeTargets[store] ?? 0;
+  let monthTarget: number | null = setTarget > 0 ? setTarget : r && r.target > 0 ? Math.round(r.target * daysInMonth) : null;
   let daysLeft: number | null = daysInMonth - dayOfMonth;
   let people: EodData["people"] = null;
   let noSales: string[] | null = null;
