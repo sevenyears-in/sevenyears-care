@@ -39,6 +39,20 @@ export type PerformanceSettings = {
   lateGraceMinutes: number;
   /** User ID / PT code → shift name. */
   personShifts: Record<string, string>;
+  /** Opening and closing time of each store ("09:30", "22:00"); "*" is the default for all stores. */
+  storeHours: Record<string, { open: string; close: string }>;
+  /** Days not counted as normal trading days (holidays, special days): "2026-11-14" or "VATAKARA:2026-11-14". */
+  specialDays: string[];
+  /** A closed day counts as lean only if its sales are below this share of the usual day (median). */
+  leanBelowPct: number;
+  /** A closed day with sales below this share of the usual day is treated as a short / incomplete day, not a lean day. */
+  shortDayPct: number;
+  /** Times of the performance alerts (store time), e.g. ["11:00", "14:00", "17:00", "20:00"]. */
+  alertTimes: string[];
+  /** Days of sales used for "average daily sales" (stock cover, fast movers). */
+  velocityDays: number;
+  /** Days of stock a reorder should bring the item up to. */
+  reorderToDays: number;
   lastSyncAt?: string | null;
   returnsError?: string | null;
 };
@@ -60,6 +74,13 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   shifts: [{ name: "Regular", start: "09:30" }],
   lateGraceMinutes: 10,
   personShifts: {},
+  storeHours: { "*": { open: "09:30", close: "22:00" } },
+  specialDays: [],
+  leanBelowPct: 0.85,
+  shortDayPct: 0.25,
+  alertTimes: ["11:00", "14:00", "17:00", "20:00"],
+  velocityDays: 28,
+  reorderToDays: 30,
 };
 
 /** "09:30" → 570 minutes after midnight. */

@@ -28,6 +28,13 @@ export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
       shifts: Array.isArray(v.shifts) && v.shifts.length ? v.shifts : DEFAULT_PERFORMANCE_SETTINGS.shifts,
       lateGraceMinutes: Number.isFinite(Number(v.lateGraceMinutes)) && v.lateGraceMinutes !== undefined ? Number(v.lateGraceMinutes) : DEFAULT_PERFORMANCE_SETTINGS.lateGraceMinutes,
       personShifts: v.personShifts ?? {},
+      storeHours: v.storeHours && typeof v.storeHours === "object" && Object.keys(v.storeHours).length ? v.storeHours : DEFAULT_PERFORMANCE_SETTINGS.storeHours,
+      specialDays: Array.isArray(v.specialDays) ? v.specialDays.map(String) : [],
+      leanBelowPct: Number.isFinite(Number(v.leanBelowPct)) && v.leanBelowPct !== undefined ? Number(v.leanBelowPct) : DEFAULT_PERFORMANCE_SETTINGS.leanBelowPct,
+      shortDayPct: Number.isFinite(Number(v.shortDayPct)) && v.shortDayPct !== undefined ? Number(v.shortDayPct) : DEFAULT_PERFORMANCE_SETTINGS.shortDayPct,
+      alertTimes: Array.isArray(v.alertTimes) && v.alertTimes.length ? v.alertTimes.map(String) : DEFAULT_PERFORMANCE_SETTINGS.alertTimes,
+      velocityDays: Number(v.velocityDays) >= 7 ? Number(v.velocityDays) : DEFAULT_PERFORMANCE_SETTINGS.velocityDays,
+      reorderToDays: Number(v.reorderToDays) >= 7 ? Number(v.reorderToDays) : DEFAULT_PERFORMANCE_SETTINGS.reorderToDays,
     };
   } catch {
     return { ...DEFAULT_PERFORMANCE_SETTINGS };

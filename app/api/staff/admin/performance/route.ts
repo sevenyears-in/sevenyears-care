@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured, zohoRead } from "@/lib/zoho";
-import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDay } from "@/lib/sales-sync";
+import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDayWithRetry, syncStatus } from "@/lib/sales-sync";
+import { changedKeys, logAudit } from "@/lib/audit";
+import type { StaffUser } from "@/lib/auth";
+import { appendSyncLog } from "@/lib/sync-log";
+import { reconcileDay } from "@/lib/reconcile";
 import { loadIncentiveRules, loadPerformanceSettings, saveIncentiveRules, savePerformanceSettings } from "@/lib/performance-settings";
 import { GROUP_LABEL, groupList, isBuiltInGroup, isGroup, isMonth, isPtCode, type IncentiveGroup } from "@/lib/performance-rules";
 import { ruleProblem, type IncentiveRule, type RuleKind } from "@/lib/incentive-rules";
@@ -41,11 +45,38 @@ export async function GET(request: Request) {
   }
 }
 
+// Actions that only read or copy data (not logged as setting changes).
+const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day"]);
+// Actions that change tables (targets, salaries, products …): the request is logged as the change.
+const TABLE_ACTIONS = new Set(["backfill_settings", "targets", "salaries", "copy_targets", "store_target", "promo_add", "promo_remove", "link", "group"]);
+
 export async function POST(request: Request) {
   const auth = await requireStaff("admin");
   if (auth.response) return auth.response;
   const body = (await request.json().catch(() => ({}))) as Body;
-  const by = auth.staff.userId;
+  const action = String(body.action ?? "");
+  if (READ_ONLY.has(action)) return handle(body, auth.staff);
+  // Change history: settings and incentive rules before and after, or the request for table changes.
+  const [sBefore, rBefore] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
+  const res = await handle(body, auth.staff);
+  if (res.ok) {
+    const [sAfter, rAfter] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
+    const s = changedKeys(sBefore as unknown as Body, sAfter as unknown as Body);
+    // lastSyncAt / returnsError change on their own; not a setting change.
+    for (const k of ["lastSyncAt", "returnsError"]) {
+      delete (s.before as Body)[k];
+      delete (s.after as Body)[k];
+    }
+    if (Object.keys(s.after).length) await logAudit(auth.staff, "sales_settings", action, s.before, s.after);
+    if (JSON.stringify(rBefore) !== JSON.stringify(rAfter)) await logAudit(auth.staff, "incentive_rules", action, { rules: rBefore }, { rules: rAfter });
+    if (TABLE_ACTIONS.has(action)) await logAudit(auth.staff, "sales_tables", action, null, body);
+  }
+  return res;
+}
+
+async function handle(body: Body, staff: StaffUser): Promise<Response> {
+  const auth = { staff };
+  const by = staff.userId;
 
   switch (body.action) {
     case "stock_probe": {
@@ -188,6 +219,50 @@ export async function POST(request: Request) {
         // "Copy again": forget which months were complete so they are checked again.
         ...(body.recheck ? { doneMonths: [], progress: null } : {}),
         ...(current.fromMonth !== fromMonth ? { progress: null } : {}),
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "business_day": {
+      // Store hours, holidays / special days, lean-day rules, alert times and stock velocity.
+      const hours: Record<string, { open: string; close: string }> = {};
+      const time = /^([01]?\d|2[0-3]):[0-5]\d$/;
+      for (const [k, v] of Object.entries((body.storeHours ?? {}) as Record<string, Body>)) {
+        const open = String(v?.open ?? "").trim();
+        const close = String(v?.close ?? "").trim();
+        if (!open && !close) continue;
+        if (!time.test(open) || !time.test(close)) return bad(`Check the opening and closing time of ${k === "*" ? "all stores" : k}.`);
+        hours[k === "*" ? "*" : k.toUpperCase()] = { open, close };
+      }
+      if (!hours["*"]) return bad("Give the usual opening and closing time.");
+      const special = String(body.specialDays ?? "")
+        .split(/[\s,]+/)
+        .map((x) => x.trim().toUpperCase())
+        .filter(Boolean);
+      for (const d of special) if (!/^([A-Z][A-Z ]*:)?\d{4}-\d{2}-\d{2}$/.test(d)) return bad(`“${d}” is not a date (use 2026-11-14 or VATAKARA:2026-11-14).`);
+      const pctIn = (v: unknown, lo: number, hi: number) => {
+        const x = Number(v) / 100;
+        return Number.isFinite(x) && x >= lo && x <= hi ? Math.round(x * 100) / 100 : null;
+      };
+      const lean = pctIn(body.leanBelowPct, 0.3, 1);
+      const shortDay = pctIn(body.shortDayPct, 0, 0.6);
+      if (lean === null || shortDay === null) return bad("Lean days: use 30–100%; short days: 0–60%.");
+      const alertTimes = String(body.alertTimes ?? "")
+        .split(/[\s,]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (!alertTimes.length || alertTimes.some((t) => !time.test(t)) || alertTimes.length > 8) return bad("Alert times: up to 8 times like 11:00, 14:00.");
+      const velocity = Math.round(Number(body.velocityDays));
+      const reorderTo = Math.round(Number(body.reorderToDays));
+      if (!(velocity >= 7 && velocity <= 90) || !(reorderTo >= 7 && reorderTo <= 120)) return bad("Sales days 7–90; reorder up to 7–120 days of stock.");
+      await savePerformanceSettings({
+        storeHours: hours,
+        specialDays: [...new Set(special)].sort(),
+        leanBelowPct: lean,
+        shortDayPct: shortDay,
+        alertTimes: [...new Set(alertTimes.map((t) => t.padStart(5, "0")))].sort(),
+        velocityDays: velocity,
+        reorderToDays: reorderTo,
       });
       return NextResponse.json({ ok: true });
     }
@@ -441,14 +516,30 @@ export async function POST(request: Request) {
     case "sync": {
       const date = isDate(body.date) ? body.date : todayISO();
       if (date > todayISO()) return NextResponse.json({ date, bills: 0, billsSaved: 0, returns: 0, returnsSaved: 0, pending: 0 });
+      const started = Date.now();
       try {
-        const result = await syncSalesDay(date, 30);
+        const { result, retried } = await syncSalesDayWithRetry(date, 30);
         if (date === todayISO() || result.pending === 0) {
           await savePerformanceSettings({ lastSyncAt: new Date().toISOString(), returnsError: result.returnsError ?? null });
         }
+        const { date: d, bills, billsSaved, returns, returnsSaved, pending } = result;
+        await appendSyncLog({ at: new Date().toISOString(), kind: "manual", status: syncStatus([result], null), ms: Date.now() - started, days: [{ date: d, bills, billsSaved, returns, returnsSaved, pending }], error: result.error ?? result.returnsError ?? null, retried, by: auth.staff.fullName });
         return NextResponse.json(result);
       } catch (error) {
-        return bad(error instanceof Error ? error.message : "Sync failed.", 502);
+        const msg = error instanceof Error ? error.message : "Sync failed.";
+        await appendSyncLog({ at: new Date().toISOString(), kind: "manual", status: "failed", ms: Date.now() - started, days: [], error: msg, retried: false, by: auth.staff.fullName });
+        return bad(msg, 502);
+      }
+    }
+
+    case "reconcile_day": {
+      // Compare one day with Zoho POS (a few list requests, no bill details).
+      const date = isDate(body.date) ? body.date : null;
+      if (!date || date > todayISO()) return bad("Choose a past or today's date.");
+      try {
+        return NextResponse.json(await reconcileDay(date));
+      } catch (error) {
+        return bad(error instanceof Error ? error.message : "Could not check with Zoho.", 502);
       }
     }
   }

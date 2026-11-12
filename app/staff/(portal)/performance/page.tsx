@@ -5,12 +5,13 @@ import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDate, formatDateTime, todayISO } from "@/lib/helpers";
+import { dayState, hoursOf, peakLeanDays } from "@/lib/business-day";
 import { merchStores } from "@/lib/merch-access";
 import { loadStockState } from "@/lib/stock";
 import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
-import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup } from "@/lib/performance-rules";
+import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
 
 export const dynamic = "force-dynamic";
@@ -54,32 +55,41 @@ function TodayStrip({ day, label, needed, target }: { day: StoreReport["today"];
   const upb = day.bills ? day.units / day.bills : 0;
   const reached = needed > 0 ? day.net / needed : null;
   return (
-    <section className="rounded-3xl bg-[#161616] p-5 text-white soft-card sm:p-6">
+    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#064f5a] via-[#0a6f7f] to-[#0b7f91] p-5 text-white soft-card ring-1 ring-[#11b8d0]/40 sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/55">{label} · today so far</p>
+          <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/75">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2 py-0.5 text-[10px] tracking-[0.18em] text-white">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7ff0ff] opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#7ff0ff]" />
+              </span>
+              LIVE
+            </span>
+            {label} · today so far
+          </p>
           <p className="mt-1 text-4xl font-bold tabular-nums">{rupees(day.net)}</p>
-          <p className="mt-1 text-sm text-white/65">
+          <p className="mt-1 text-sm text-white/80">
             {day.bills} bill(s) · ABV {day.bills ? rupees(abv) : "—"} · UPB {day.bills ? upb.toFixed(1) : "—"}
             {day.returns ? ` · returns ${rupees(day.returns)}` : ""}
           </p>
         </div>
         {needed > 0 && (
           <div className="text-right">
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/55">Needed today{target ? ` for ${target}` : ""}</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/75">Needed today{target ? ` for ${target}` : ""}</p>
             <p className="mt-1 text-2xl font-bold tabular-nums">{rupees(needed)}</p>
-            <p className={`text-sm font-semibold ${reached !== null && reached >= 1 ? "text-green-300" : "text-amber-300"}`}>
+            <p className={`text-sm font-semibold ${reached !== null && reached >= 1 ? "text-[#b9fbc0]" : "text-[#ffe08a]"}`}>
               {reached !== null && reached >= 1 ? "✓ Done for today" : `${rupees(Math.max(0, needed - day.net))} to go`}
             </p>
           </div>
         )}
       </div>
       {needed > 0 && (
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15">
-          <div className={`h-full rounded-full ${reached !== null && reached >= 1 ? "bg-green-400" : "bg-amber-300"}`} style={{ width: `${Math.min(100, Math.round((reached ?? 0) * 100))}%` }} />
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/20">
+          <div className={`h-full rounded-full ${reached !== null && reached >= 1 ? "bg-[#b9fbc0]" : "bg-[#ffe08a]"}`} style={{ width: `${Math.min(100, Math.round((reached ?? 0) * 100))}%` }} />
         </div>
       )}
-      <p className="mt-2 text-[11px] text-white/45">Bills are copied from Zoho POS every 30 minutes.</p>
+      <p className="mt-2 text-[11px] text-white/70">Provisional — the day is not closed yet. Bills are copied from Zoho POS every 30 minutes.</p>
     </section>
   );
 }
@@ -268,6 +278,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         >
           📦 Stock &amp; categories →
         </Link>
+        <Link
+          href={`/staff/performance/daily?store=${encodeURIComponent(store)}`}
+          className="flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-[#5b55c9] soft-card ring-1 ring-black/5 hover:bg-black/[0.02]"
+        >
+          📅 Day-wise sales →
+        </Link>
       </div>
     );
   };
@@ -312,6 +328,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           salesPerSalary={report.settings.salesPerSalary}
           trends={trends}
           asmIsFm={report.settings.asmIsFm}
+          rules={report.settings}
+          lastSyncAt={report.settings.lastSyncAt ?? null}
         />
       </div>
     );
@@ -353,6 +371,9 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         timed={detail.timedBills}
         total={found.person.bills}
         days={detail.daily}
+        store={found.store.store}
+        rules={report.settings}
+        lastSyncAt={report.settings.lastSyncAt ?? null}
       />
       {myPlan.length > 0 && (
         <Panel title={`Action plan — ${planRole === "asm" && asmIsFm ? "ASM / Floor Manager" : PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
@@ -706,7 +727,11 @@ function TeamView({
   salesPerSalary,
   trends,
   asmIsFm,
+  rules,
+  lastSyncAt,
 }: {
+  rules: Pick<PerformanceSettings, "storeHours" | "specialDays" | "leanBelowPct" | "shortDayPct">;
+  lastSyncAt: string | null;
   store: StoreReport;
   base: Search;
   threshold: number;
@@ -734,7 +759,10 @@ function TeamView({
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-black/45">Store net sales (after discounts &amp; returns, with GST)</p>
             <p className="mt-1 text-4xl font-bold tabular-nums sm:text-5xl">{short(store.net)}</p>
             <p className="mt-1 text-sm text-black/55">
-              Target {short(store.target)} · <b className="text-black">{pct(store.achievement)}</b> · {store.bills} bills · returns {short(store.returns)} · discounts {short(store.discount)}
+              Target {short(store.target)} · <b className="text-black">{pct(store.achievement)}</b> · {store.bills} bills · discounts {short(store.discount)}
+            </p>
+            <p className="mt-0.5 text-xs text-black/50">
+              Billed {short(store.invoiceNet)} (the sales figure in Zoho POS) − returns {short(store.returns)} ({store.returnCount}) = net {short(store.net)}
             </p>
           </div>
           <div className="rounded-2xl bg-white/80 px-5 py-4 text-right ring-1 ring-black/5">
@@ -767,6 +795,9 @@ function TeamView({
           timed={trends.timedBills}
           total={trends.totalBills}
           days={trends.daily}
+          store={store.store}
+          rules={rules}
+          lastSyncAt={lastSyncAt}
         />
       )}
 
@@ -1172,6 +1203,9 @@ function PeakLean({
   timed,
   total,
   days,
+  store,
+  rules,
+  lastSyncAt,
 }: {
   title: string;
   intro: string;
@@ -1179,14 +1213,23 @@ function PeakLean({
   timed: number;
   total: number;
   days: { date: string; net: number; bills: number }[];
+  store: string;
+  rules: Pick<PerformanceSettings, "storeHours" | "specialDays" | "leanBelowPct" | "shortDayPct">;
+  lastSyncAt: string | null;
 }) {
+  // Only closed days with complete data count (today is live; days not copied after closing are provisional).
+  const stateOf = (date: string) => dayState(rules, store, date, lastSyncAt);
+  const live = days.filter((d) => stateOf(d.date) === "live" && d.bills > 0);
+  const provisional = days.filter((d) => stateOf(d.date) === "provisional" && d.bills > 0);
+  const special = days.filter((d) => stateOf(d.date) === "special" && d.bills > 0);
+  const pl = peakLeanDays(days, stateOf, rules);
   const hl = peakLeanHours(hours);
   const peakH = new Set(hl?.peak.map((h) => h.hour) ?? []);
   const leanH = new Set(hl?.lean.map((h) => h.hour) ?? []);
   const shown = hours.filter((h) => h.bills > 0);
   const maxH = Math.max(1, ...shown.map((h) => h.net));
 
-  const open = days.filter((d) => d.bills > 0);
+  const open = days.filter((d) => d.bills > 0 && stateOf(d.date) === "closed");
   const wd = WEEKDAYS.map((name, i) => {
     const list = open.filter((d) => new Date(`${d.date}T00:00:00Z`).getUTCDay() === i);
     return { name, i, avg: list.length ? list.reduce((s, d) => s + d.net, 0) / list.length : 0, n: list.length };
@@ -1195,9 +1238,8 @@ function PeakLean({
   const peakW = [...withData].sort((a, b) => b.avg - a.avg)[0];
   const leanW = withData.length > 2 ? [...withData].sort((a, b) => a.avg - b.avg)[0] : null;
   const maxW = Math.max(1, ...wd.map((w) => w.avg));
-  const ranked = [...open].sort((a, b) => b.net - a.net);
-  const peakDays = ranked.slice(0, 3);
-  const leanDays = ranked.length > 5 ? ranked.slice(-3).reverse() : [];
+  const peakDays = pl.peak;
+  const leanDays = pl.lean;
   const total$ = shown.reduce((s, h) => s + h.net, 0) || 1;
 
   return (
@@ -1262,6 +1304,24 @@ function PeakLean({
                 ))}
               </div>
             )}
+          </div>
+          <div className="mt-2 space-y-0.5 text-xs text-black/50">
+            {live.map((d) => (
+              <p key={d.date}>
+                ● Today {formatDate(d.date)} so far {rupees(d.net)} — live, not compared until the store closes.
+              </p>
+            ))}
+            {provisional.length > 0 && <p>Provisional (closed, waiting for the last copy from Zoho): {provisional.map((d) => formatDate(d.date)).join(", ")}.</p>}
+            {pl.short.length > 0 && (
+              <p>
+                Short days (under {Math.round(rules.shortDayPct * 100)}% of a usual day — closed early or data missing, not counted as lean):{" "}
+                {pl.short.map((d) => `${formatDate(d.date)} ${rupees(d.net)}`).join(", ")}.
+              </p>
+            )}
+            {special.length > 0 && <p>Holidays / special days left out: {special.map((d) => formatDate(d.date)).join(", ")}.</p>}
+            <p>
+              Lean = closed days below {Math.round(rules.leanBelowPct * 100)}% of the usual day ({rupees(pl.median)}). Store closes at {hoursOf(rules, store).close}.
+            </p>
           </div>
         </div>
       </div>

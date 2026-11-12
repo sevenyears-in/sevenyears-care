@@ -186,6 +186,8 @@ export async function runNightBackfill(): Promise<string> {
       const bills = await listMonth("invoices", "invoices", month);
       const savedBills = await savedIds("sales_invoices", "invoice_id", "invoice_date", month);
       const links = await assignPtCodes(bills.map((r) => str(r.salesperson_name)));
+      // Oldest days first (the start of last year's month is what LFL needs first).
+      bills.sort((a, b) => str(a.date).localeCompare(str(b.date)));
       const billTodo = bills.filter((r) => {
         const id = str(r.invoice_id);
         return !savedBills.has(id) || (str(r.last_modified_time) && savedBills.get(id) !== str(r.last_modified_time));

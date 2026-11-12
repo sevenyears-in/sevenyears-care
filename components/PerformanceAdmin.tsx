@@ -80,6 +80,7 @@ export function PerformanceAdmin(props: {
   backfill: Backfill;
   stock: StockReadState | null;
   isSuperAdmin: boolean;
+  audit: AuditView[];
 }) {
   const labels = props.settings.groupLabels;
   return (
@@ -96,6 +97,8 @@ export function PerformanceAdmin(props: {
       <PromoCard promos={props.promos} rules={props.rules} today={props.today} />
       <GroupNamesCard settings={props.settings} people={props.people} />
       <SettingsCard settings={props.settings} stores={props.stores} />
+      <BusinessDayCard settings={props.settings} stores={props.stores} />
+      <AuditCard rows={props.audit} />
     </div>
   );
 }
@@ -107,47 +110,93 @@ export function PerformanceAdmin(props: {
 function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; people: Person[] }) {
   const router = useRouter();
   const groups = groupList(settings);
-  const [renaming, setRenaming] = useState<{ key: string; name: string } | null>(null);
-  const [adding, setAdding] = useState<string | null>(null);
+  const modeOf = (key: string) => (settings.noTargetGroups.includes(key) ? "store" : settings.poolOnlyGroups.includes(key) ? "pool" : "own");
+  const MODE_LABEL: Record<string, string> = { own: "Own target", store: "Store target", pool: "No target — pool only" };
+  // View → Edit → change → Save or Cancel. Nothing changes until Save.
+  const [editing, setEditing] = useState(false);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [modes, setModes] = useState<Record<string, string>>({});
+  const [asm, setAsm] = useState(settings.asmIsFm);
+  const [adding, setAdding] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function run(body: Record<string, unknown>) {
+  const count = (key: string) => people.filter((p) => p.group === key).length;
+
+  function start() {
+    setNames(Object.fromEntries(groups.map((g) => [g.key, g.label])));
+    setModes(Object.fromEntries(groups.map((g) => [g.key, modeOf(g.key)])));
+    setAsm(settings.asmIsFm);
+    setAdding([]);
+    setRemoving([]);
+    setError("");
+    setEditing(true);
+  }
+
+  const changes = () => {
+    const list: { body: Record<string, unknown>; text: string }[] = [];
+    for (const g of groups) {
+      if (removing.includes(g.key)) {
+        list.push({ body: { action: "group_delete", key: g.key }, text: `Delete “${g.label}”` });
+        continue;
+      }
+      const name = (names[g.key] ?? g.label).trim();
+      if (name && name !== g.label) list.push({ body: { action: "group_rename", key: g.key, name }, text: `Rename “${g.label}” to “${name}”` });
+      if (g.key !== "none" && modes[g.key] && modes[g.key] !== modeOf(g.key)) list.push({ body: { action: "group_targets", key: g.key, mode: modes[g.key] }, text: `“${name || g.label}”: ${MODE_LABEL[modes[g.key]]}` });
+    }
+    for (const n of adding.map((x) => x.trim()).filter(Boolean)) list.push({ body: { action: "group_add", name: n }, text: `Add group “${n}”` });
+    if (asm !== settings.asmIsFm) list.push({ body: { action: "asm_is_fm", on: asm }, text: asm ? "ASM and Floor Manager become one role" : "ASM and Floor Manager become separate roles" });
+    return list;
+  };
+
+  async function save() {
+    const list = changes();
+    if (!list.length) return setEditing(false);
+    if (!confirm(`Save these changes?\n\n• ${list.map((c) => c.text).join("\n• ")}`)) return;
     setBusy(true);
     setError("");
     try {
-      await post(body);
-      setRenaming(null);
-      setAdding(null);
+      for (const c of list) await post(c.body);
+      setEditing(false);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
+      router.refresh();
     } finally {
       setBusy(false);
     }
   }
-  const count = (key: string) => people.filter((p) => p.group === key).length;
-  const targetMode = (key: string) => (settings.noTargetGroups.includes(key) ? "store" : settings.poolOnlyGroups.includes(key) ? "pool" : "own");
+
   return (
     <Card
       title="Groups"
       intro="The groups decide who shares which part of the store pool and who can earn each incentive."
       actions={
-        adding === null && !renaming ? (
-          <button className={primary} onClick={() => setAdding("")}>
-            + Add group
+        editing ? (
+          <div className="flex gap-2">
+            <button className={primary} disabled={busy} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={start}>
+            ✎ Edit
           </button>
-        ) : undefined
+        )
       }
     >
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       <div className="-mx-2 overflow-x-auto">
-        <table className="w-full min-w-[680px] table-fixed text-sm">
+        <table className="w-full min-w-[640px] table-fixed text-sm">
           <colgroup>
             <col />
             <col className="w-28" />
             <col className="w-52" />
             <col className="w-24" />
-            <col className="w-48" />
+            {editing && <col className="w-24" />}
           </colgroup>
           <thead>
             <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
@@ -155,116 +204,86 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
               <th className="px-2 py-2">Type</th>
               <th className="px-2 py-2">Sales target</th>
               <th className="px-2 py-2 text-right">People</th>
-              <th className="px-2 py-2" />
+              {editing && <th className="px-2 py-2" />}
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) => (
-              <tr key={g.key} className="border-t border-black/5">
-                <td className="px-2 py-2.5">
-                  {renaming?.key === g.key ? (
-                    <input className={`${input} py-1`} maxLength={40} value={renaming.name} onChange={(e) => setRenaming({ key: g.key, name: e.target.value })} autoFocus />
-                  ) : (
-                    <span className={`font-semibold ${g.key === "none" ? "text-black/50" : ""}`}>{g.label}</span>
-                  )}
-                </td>
-                <td className="px-2 py-2.5 text-xs text-black/50">{g.custom ? "Added" : "Standard"}</td>
-                <td className="px-2 py-2.5">
-                  {g.key === "none" ? (
-                    <span className="text-xs text-black/35">—</span>
-                  ) : (
-                    <select
-                      className={`${input} py-1 text-xs`}
-                      disabled={busy || !!renaming || adding !== null}
-                      value={targetMode(g.key)}
-                      onChange={(e) => {
-                        const mode = e.target.value;
-                        const text = mode === "own" ? "its own sales targets" : mode === "store" ? "the store target (measured on the store)" : "no sales target (store pool share only)";
-                        if (confirm(`“${g.label}” will have ${text}. Continue?`)) run({ action: "group_targets", key: g.key, mode });
-                        else e.target.value = targetMode(g.key);
-                      }}
-                    >
-                      <option value="own">Own target</option>
-                      <option value="store">Store target</option>
-                      <option value="pool">No target — pool only</option>
-                    </select>
-                  )}
-                </td>
-                <td className="px-2 py-2.5 text-right tabular-nums">{count(g.key)}</td>
-                <td className="px-2 py-2.5">
-                  <div className="flex justify-end gap-1.5 whitespace-nowrap">
-                    {renaming?.key === g.key ? (
-                      <>
-                        <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy} onClick={() => run({ action: "group_rename", key: g.key, name: renaming.name })}>
-                          Save
-                        </button>
-                        <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setRenaming(null)}>
-                          Cancel
-                        </button>
-                      </>
+            {groups.map((g) => {
+              const gone = removing.includes(g.key);
+              return (
+                <tr key={g.key} className={`border-t border-black/5 ${gone ? "opacity-40 line-through" : ""}`}>
+                  <td className="px-2 py-2.5">
+                    {editing && !gone ? (
+                      <input className={`${input} py-1`} maxLength={40} value={names[g.key] ?? g.label} onChange={(e) => setNames({ ...names, [g.key]: e.target.value })} />
                     ) : (
-                      !renaming &&
-                      adding === null && (
-                        <>
-                          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={() => setRenaming({ key: g.key, name: g.label })}>
-                            ✎ Edit
-                          </button>
-                          {g.custom && (
-                            <button
-                              className={`${sbtn} text-red-700 ring-1 ring-red-200 hover:bg-red-50`}
-                              disabled={busy}
-                              onClick={() => confirm(`Delete the group “${g.label}”?`) && run({ action: "group_delete", key: g.key })}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </>
-                      )
+                      <span className={`font-semibold ${g.key === "none" ? "text-black/50" : ""}`}>{g.label}</span>
                     )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {adding !== null && (
-              <tr className="border-t border-black/5 bg-[#8883d7]/[0.05]">
-                <td className="px-2 py-2.5" colSpan={4}>
-                  <input className={`${input} py-1`} maxLength={40} placeholder="New group name, e.g. Social Media" value={adding} onChange={(e) => setAdding(e.target.value)} autoFocus />
-                </td>
-                <td className="px-2 py-2.5">
-                  <div className="flex justify-end gap-1.5 whitespace-nowrap">
-                    <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy || !adding.trim()} onClick={() => run({ action: "group_add", name: adding })}>
-                      Add
+                  </td>
+                  <td className="px-2 py-2.5 text-xs text-black/50">{g.custom ? "Added" : "Standard"}</td>
+                  <td className="px-2 py-2.5">
+                    {g.key === "none" ? (
+                      <span className="text-xs text-black/35">—</span>
+                    ) : editing && !gone ? (
+                      <select className={`${input} py-1 text-xs`} value={modes[g.key] ?? modeOf(g.key)} onChange={(e) => setModes({ ...modes, [g.key]: e.target.value })}>
+                        <option value="own">{MODE_LABEL.own}</option>
+                        <option value="store">{MODE_LABEL.store}</option>
+                        <option value="pool">{MODE_LABEL.pool}</option>
+                      </select>
+                    ) : (
+                      <span className="text-xs">{MODE_LABEL[modeOf(g.key)]}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{count(g.key)}</td>
+                  {editing && (
+                    <td className="px-2 py-2.5 text-right">
+                      {g.custom &&
+                        (gone ? (
+                          <button className="text-xs font-semibold text-[#5b55c9]" onClick={() => setRemoving(removing.filter((k) => k !== g.key))}>
+                            Undo
+                          </button>
+                        ) : (
+                          <button className="text-xs font-semibold text-red-700" onClick={() => setRemoving([...removing, g.key])}>
+                            Delete
+                          </button>
+                        ))}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+            {editing &&
+              adding.map((n, i) => (
+                <tr key={`new-${i}`} className="border-t border-black/5 bg-[#8883d7]/[0.05]">
+                  <td className="px-2 py-2.5" colSpan={4}>
+                    <input className={`${input} py-1`} maxLength={40} placeholder="New group name, e.g. Social Media" value={n} onChange={(e) => setAdding(adding.map((x, k) => (k === i ? e.target.value : x)))} autoFocus />
+                  </td>
+                  <td className="px-2 py-2.5 text-right">
+                    <button className="text-xs font-semibold text-red-700" onClick={() => setAdding(adding.filter((_, k) => k !== i))}>
+                      Remove
                     </button>
-                    <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setAdding(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            )}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
-      <label className="mt-4 flex items-start gap-2 rounded-2xl bg-black/[0.02] p-3 text-sm ring-1 ring-black/5">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={settings.asmIsFm}
-          disabled={busy}
-          onChange={(e) =>
-            confirm(
-              e.target.checked
-                ? "Treat Assistant Store Manager and Floor Manager as one role? Floor Managers move into the ASM group (unless a group was chosen for them) and get one action plan."
-                : "Separate Assistant Store Manager and Floor Manager? Floor Managers go back to the Sales Team group (unless a group was chosen for them) and get their own action plan."
-            ) && run({ action: "asm_is_fm", on: e.target.checked })
-          }
-        />
+      {editing && (
+        <button className="mt-2 text-sm font-semibold text-[#5b55c9]" onClick={() => setAdding([...adding, ""])}>
+          + Add group
+        </button>
+      )}
+      <div className="mt-4 flex items-start gap-2 rounded-2xl bg-black/[0.02] p-3 text-sm ring-1 ring-black/5">
+        {editing ? (
+          <input type="checkbox" className="mt-1" checked={asm} onChange={(e) => setAsm(e.target.checked)} />
+        ) : (
+          <span className="mt-0.5">{settings.asmIsFm ? "✓" : "✗"}</span>
+        )}
         <span>
           <b>Assistant Store Manager and Floor Manager are one role</b>
-          <span className="block text-xs text-black/55">Untick when the roles are separated. You can then add a “Floor Manager” group with + Add group and give it its own share and targets.</span>
+          <span className="block text-xs text-black/55">Untick when the roles are separated. You can then add a “Floor Manager” group and give it its own share and targets.</span>
         </span>
-      </label>
-      <p className="mt-3 text-xs text-black/50">A new group gets incentives once you tick it in an incentive (✎ Change in the Incentives box). In the store pool it shares its part equally.</p>
+      </div>
+      <p className="mt-3 text-xs text-black/50">Every change is saved in the change history (bottom of this page). A new group gets incentives once you tick it in an incentive.</p>
     </Card>
   );
 }
@@ -274,6 +293,204 @@ function GroupNamesCard({ settings, people }: { settings: PerformanceSettings; p
 // ------------------------------------------------------------------
 
 type Backfill = BackfillState & { pending: string[]; zohoToday: number };
+
+export type AuditView = { id: number; at: string; user_name: string | null; area: string; action: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
+
+const AREA_LABEL: Record<string, string> = { sales_settings: "Settings", incentive_rules: "Incentives", sales_tables: "Targets / products / links" };
+const show = (v: unknown) => {
+  const t = typeof v === "string" ? v : JSON.stringify(v);
+  return t && t.length > 160 ? `${t.slice(0, 160)}…` : t ?? "—";
+};
+
+function AuditCard({ rows }: { rows: AuditView[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card
+      title="Change history"
+      intro="Every change to targets, incentives, groups and settings: who, when, the value before and after."
+      actions={
+        <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={() => setOpen(!open)}>
+          {open ? "Hide" : `Show (${rows.length})`}
+        </button>
+      }
+    >
+      {open && (
+        <div className="-mx-2 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-black/45">
+                <th className="px-2 py-2">When</th>
+                <th className="px-2 py-2">Who</th>
+                <th className="px-2 py-2">What</th>
+                <th className="px-2 py-2">Before</th>
+                <th className="px-2 py-2">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-black/5 align-top">
+                  <td className="whitespace-nowrap px-2 py-2 text-xs">{new Date(r.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}</td>
+                  <td className="px-2 py-2 text-xs">{r.user_name ?? "—"}</td>
+                  <td className="px-2 py-2 text-xs">
+                    {AREA_LABEL[r.area] ?? r.area} · {r.action}
+                  </td>
+                  <td className="max-w-[260px] break-words px-2 py-2 font-mono text-[11px] text-black/60">
+                    {r.before ? Object.entries(r.before).map(([k, v]) => <div key={k}>{k}: {show(v)}</div>) : "—"}
+                  </td>
+                  <td className="max-w-[260px] break-words px-2 py-2 font-mono text-[11px]">
+                    {r.after ? Object.entries(r.after).filter(([k]) => k !== "action").map(([k, v]) => <div key={k}>{k}: {show(v)}</div>) : "—"}
+                  </td>
+                </tr>
+              ))}
+              {!rows.length && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-4 text-sm text-black/50">
+                    No changes recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function BusinessDayCard({ settings, stores }: { settings: PerformanceSettings; stores: string[] }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [hours, setHours] = useState<Record<string, { open: string; close: string }>>({});
+  const [special, setSpecial] = useState("");
+  const [lean, setLean] = useState("");
+  const [shortDay, setShortDay] = useState("");
+  const [alerts, setAlerts] = useState("");
+  const [velocity, setVelocity] = useState("");
+  const [reorderTo, setReorderTo] = useState("");
+  const all = ["*", ...stores];
+  function start() {
+    setHours(Object.fromEntries(all.map((s) => [s, settings.storeHours[s] ?? (s === "*" ? { open: "09:30", close: "22:00" } : { open: "", close: "" })])));
+    setSpecial(settings.specialDays.join(", "));
+    setLean(String(Math.round(settings.leanBelowPct * 100)));
+    setShortDay(String(Math.round(settings.shortDayPct * 100)));
+    setAlerts(settings.alertTimes.join(", "));
+    setVelocity(String(settings.velocityDays));
+    setReorderTo(String(settings.reorderToDays));
+    setError("");
+    setEditing(true);
+  }
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      await post({ action: "business_day", storeHours: hours, specialDays: special, leanBelowPct: lean, shortDayPct: shortDay, alertTimes: alerts, velocityDays: velocity, reorderToDays: reorderTo });
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const h = (s: string) => settings.storeHours[s] ?? settings.storeHours["*"];
+  return (
+    <Card
+      title="Store hours, special days and alerts"
+      intro="A day is compared (peak / lean days, averages, end-of-day report) only after the store closes and the bills are copied after closing. Today is shown as live."
+      actions={
+        editing ? (
+          <div className="flex gap-2">
+            <button className={primary} disabled={busy} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button className={`${sbtn} ring-1 ring-black/10`} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button className={`${sbtn} ring-1 ring-black/10 hover:bg-black/5`} onClick={start}>
+            ✎ Edit
+          </button>
+        )
+      }
+    >
+      {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Opening and closing time</p>
+          {all.map((s) => (
+            <div key={s} className="mt-1 flex flex-wrap items-center gap-2">
+              <span className="w-36 font-semibold">{s === "*" ? "All stores (usual)" : s}</span>
+              {editing ? (
+                <>
+                  <input type="time" className={`${input} w-28 py-1`} value={hours[s]?.open ?? ""} onChange={(e) => setHours({ ...hours, [s]: { ...(hours[s] ?? { open: "", close: "" }), open: e.target.value } })} />
+                  to
+                  <input type="time" className={`${input} w-28 py-1`} value={hours[s]?.close ?? ""} onChange={(e) => setHours({ ...hours, [s]: { ...(hours[s] ?? { open: "", close: "" }), close: e.target.value } })} />
+                </>
+              ) : (
+                <span>
+                  {h(s).open} – {h(s).close}
+                  {s !== "*" && !settings.storeHours[s] ? <span className="text-xs text-black/40"> (usual)</span> : null}
+                </span>
+              )}
+            </div>
+          ))}
+          {editing && <p className="mt-1 text-xs text-black/45">Leave a store empty to use the usual time.</p>}
+        </div>
+        <div className="space-y-3">
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/45">Holidays and special days (not compared)</p>
+            {editing ? (
+              <textarea className={`${input} mt-1`} rows={2} placeholder="2026-12-25, VATAKARA:2026-11-14" value={special} onChange={(e) => setSpecial(e.target.value)} />
+            ) : (
+              <p className="mt-1">{settings.specialDays.length ? settings.specialDays.join(", ") : "None"}</p>
+            )}
+          </div>
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wide text-black/45">Lean days</p>
+            {editing ? (
+              <div className="mt-1 space-y-1">
+                <label className="flex items-center gap-2">
+                  Lean when below <input className={`${input} w-16 py-1`} value={lean} onChange={(e) => setLean(e.target.value.replace(/[^\d]/g, ""))} /> % of a usual day
+                </label>
+                <label className="flex items-center gap-2">
+                  Short day (not lean) below <input className={`${input} w-16 py-1`} value={shortDay} onChange={(e) => setShortDay(e.target.value.replace(/[^\d]/g, ""))} /> %
+                </label>
+              </div>
+            ) : (
+              <p className="mt-1">
+                Lean below <b>{Math.round(settings.leanBelowPct * 100)}%</b> of a usual day; under {Math.round(settings.shortDayPct * 100)}% is a short day (closed early or data missing).
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Performance alerts (store time)</p>
+          {editing ? <input className={`${input} mt-1`} value={alerts} onChange={(e) => setAlerts(e.target.value)} placeholder="11:00, 14:00, 17:00, 20:00" /> : <p className="mt-1">{settings.alertTimes.join(" · ")}</p>}
+        </div>
+        <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+          <p className="text-xs font-bold uppercase tracking-wide text-black/45">Stock velocity</p>
+          {editing ? (
+            <div className="mt-1 space-y-1">
+              <label className="flex items-center gap-2">
+                Average daily sales over the last <input className={`${input} w-16 py-1`} value={velocity} onChange={(e) => setVelocity(e.target.value.replace(/[^\d]/g, ""))} /> days
+              </label>
+              <label className="flex items-center gap-2">
+                Reorder up to <input className={`${input} w-16 py-1`} value={reorderTo} onChange={(e) => setReorderTo(e.target.value.replace(/[^\d]/g, ""))} /> days of stock
+              </label>
+            </div>
+          ) : (
+            <p className="mt-1">
+              Average daily sales over <b>{settings.velocityDays}</b> days · reorder up to <b>{settings.reorderToDays}</b> days of stock
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 function StockCard({ stock, isSuperAdmin, zohoToday, quota }: { stock: StockReadState | null; isSuperAdmin: boolean; zohoToday: number; quota: number }) {
   const router = useRouter();

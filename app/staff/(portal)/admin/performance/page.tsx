@@ -12,6 +12,7 @@ import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
 import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
 import { loadStockState } from "@/lib/stock";
+import { loadAudit } from "@/lib/audit";
 import { zohoCallsToday } from "@/lib/zoho";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   await assignPtCodesForSavedBills().catch(() => undefined);
   const rawSettings = await loadPerformanceSettings();
   const settings = withRoleNames(rawSettings);
-  const [backfill, zohoToday, stockState] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0), loadStockState().catch(() => null)]);
+  const [backfill, zohoToday, stockState, audit] = await Promise.all([loadBackfill(), zohoCallsToday().catch(() => 0), loadStockState().catch(() => null), loadAudit(undefined, 150).catch(() => [])]);
   const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
@@ -62,9 +63,14 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
           <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Sales targets &amp; incentives</h1>
           <p className="mt-1 text-sm text-black/55">Targets, incentives, products, group names, discount limit and copying bills from Zoho POS.</p>
         </div>
-        <Link href="/staff/performance?view=team" className="rounded-full bg-[#8883d7] px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
-          📈 Open the dashboard
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/staff/admin/performance/sales-check" className="rounded-full bg-white px-4 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">
+            ✔ Sales check (Zoho vs dashboard)
+          </Link>
+          <Link href="/staff/performance?view=team" className="rounded-full bg-[#8883d7] px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
+            📈 Open the dashboard
+          </Link>
+        </div>
       </div>
       <PerformanceAdmin
         month={month}
@@ -91,6 +97,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
         backfill={{ ...backfill, pending: monthsToCopy(backfill), zohoToday }}
         stock={stockState}
         isSuperAdmin={staff.role === "super_admin"}
+        audit={audit}
       />
     </div>
   );

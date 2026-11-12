@@ -7,6 +7,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { flushZohoUsage, zohoConfigured, zohoRead } from "@/lib/zoho";
+import { appendSyncLog, isTransient, type SyncLogEntry } from "@/lib/sync-log";
 import { todayISO } from "@/lib/helpers";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
 
@@ -427,23 +428,63 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
   return result;
 }
 
-/** Scheduled run: today and the two days before (catches late edits and returns). */
+/** One day, with one more try after a short wait when Zoho or the network fails for a moment. */
+export async function syncSalesDayWithRetry(date: string, budget: number): Promise<{ result: DaySync; retried: boolean }> {
+  try {
+    return { result: await syncSalesDay(date, budget), retried: false };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!isTransient(msg)) throw error;
+    await new Promise((r) => setTimeout(r, 8000));
+    return { result: await syncSalesDay(date, budget), retried: true };
+  }
+}
+
+/** Status of a copy from its days. */
+export function syncStatus(days: DaySync[], error: string | null): SyncLogEntry["status"] {
+  if (error && !days.length) return "failed";
+  if (error || days.some((d) => d.error || d.pending > 0 || d.returnsError)) return "partial";
+  return "ok";
+}
+
+/** Scheduled run (every 30 minutes): today and the two days before (catches late edits and returns). */
 export async function syncRecentSales() {
   if (!(await zohoConfigured())) return null;
+  const started = Date.now();
   await assignPtCodesForSavedBills().catch(() => undefined);
   const days = [0, 1, 2].map((n) => todayISO(new Date(Date.now() - n * 86_400_000)));
   const out: DaySync[] = [];
   let budget = 60;
+  let retried = false;
+  let error: string | null = null;
   for (const day of days) {
     if (budget <= 0) break;
-    const r = await syncSalesDay(day, budget);
-    budget -= r.billsSaved + r.returnsSaved;
-    out.push(r);
+    try {
+      const { result: r, retried: again } = await syncSalesDayWithRetry(day, budget);
+      retried ||= again;
+      budget -= r.billsSaved + r.returnsSaved;
+      out.push(r);
+    } catch (e) {
+      error = `${day}: ${e instanceof Error ? e.message : String(e)}`;
+      break;
+    }
   }
-  await savePerformanceSettings({
-    lastSyncAt: new Date().toISOString(),
-    returnsError: out.find((r) => r.returnsError)?.returnsError ?? null,
+  if (out.length) {
+    await savePerformanceSettings({
+      lastSyncAt: new Date().toISOString(),
+      returnsError: out.find((r) => r.returnsError)?.returnsError ?? null,
+    });
+  }
+  await appendSyncLog({
+    at: new Date().toISOString(),
+    kind: "scheduled",
+    status: syncStatus(out, error),
+    ms: Date.now() - started,
+    days: out.map(({ date, bills, billsSaved, returns, returnsSaved, pending }) => ({ date, bills, billsSaved, returns, returnsSaved, pending })),
+    error: error ?? out.find((d) => d.error)?.error ?? out.find((d) => d.returnsError)?.returnsError ?? null,
+    retried,
   });
   await flushZohoUsage().catch(() => undefined);
+  if (error && !out.length) throw new Error(error);
   return out;
 }

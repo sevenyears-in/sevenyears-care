@@ -2,6 +2,7 @@
 // Numbers come from the bills and returns copied from Zoho POS (lib/sales-sync.ts).
 // The incentive schemes come from Settings (lib/incentive-rules.ts), each with its own dates.
 
+import { dayState } from "@/lib/business-day";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { asRole, ROLE_LABELS } from "@/lib/roles";
@@ -1143,10 +1144,12 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
   const last7 = sum(daily.slice(-7), "last7");
   const prev7 = sum(daily.slice(-14, -7), "prev7");
 
-  // Weekdays, only days that had sales (closed days / days not copied are left out).
+  // Weekdays, only closed trading days with sales (today, holidays and days not copied after closing are left out).
+  const bizRules = await loadPerformanceSettings().catch(() => null);
   const wd = new Map<number, { total: number; days: number }>();
   for (const d of daily) {
     if (!d.bills) continue;
+    if (bizRules && dayState(bizRules, store, d.date, bizRules.lastSyncAt ?? null) !== "closed") continue;
     const w = new Date(`${d.date}T00:00:00Z`).getUTCDay();
     const x = wd.get(w) ?? { total: 0, days: 0 };
     x.total += d.net;
