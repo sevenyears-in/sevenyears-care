@@ -7,6 +7,8 @@ import { monthReport } from "@/lib/performance";
 import { merchStores } from "@/lib/merch-access";
 import { eodBlock, loadEodReports, type EodRow } from "@/lib/eod-report";
 import { RegenerateEod } from "@/components/RegenerateEod";
+import { ReportBody } from "@/components/ReportBody";
+import { parseReport } from "@/lib/report-parse";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "End-of-day reports" };
@@ -85,7 +87,9 @@ export default async function EodReportsPage({ searchParams }: { searchParams: P
               {pick.status === "failed" && <p className="text-sm text-red-700">Could not be made: {pick.error}</p>}
               {d && (
                 <>
-                  <pre className="whitespace-pre-wrap rounded-2xl bg-[#0b7f91]/5 p-4 font-sans text-sm leading-6 ring-1 ring-[#0b7f91]/15">{eodBlock(d).join("\n")}</pre>
+                  <div className="max-w-md">
+                    <ReportBody segs={parseReport(eodBlock(d).join("\n")) ?? []} />
+                  </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {[
                       ["Net sales", rupees(d.net)],

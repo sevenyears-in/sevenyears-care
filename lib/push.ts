@@ -77,7 +77,8 @@ async function accessToken(sa: ServiceAccount, fresh = false, scope = MESSAGING_
   return data.access_token;
 }
 
-export type PushMessage = { title: string; body: string; url?: string };
+/** channel: the phone's notification channel — "staff_alerts" for staff (own sound, chosen on the phone), "offers" for customers. */
+export type PushMessage = { title: string; body: string; url?: string; channel?: "offers" | "staff_alerts" };
 
 async function send(target: { topic: string } | { token: string }, msg: PushMessage) {
   const sa = await loadServiceAccount();
@@ -89,8 +90,8 @@ async function send(target: { topic: string } | { token: string }, msg: PushMess
       message: {
         ...target,
         notification: { title: msg.title.slice(0, 120), body: msg.body.slice(0, 500) },
-        data: { url: msg.url ?? "" },
-        android: { priority: "high", notification: { channel_id: "offers" } },
+        data: { url: msg.url ?? "", channel: msg.channel ?? "offers" },
+        android: { priority: "high", notification: { channel_id: msg.channel ?? "offers" } },
         webpush: { notification: { icon: "/app-icon-192.png", badge: "/app-icon-192.png" }, fcm_options: msg.url ? { link: msg.url } : undefined },
       },
     }),
@@ -175,7 +176,7 @@ export async function pushToStaff(staffIds: string[], msg: PushMessage): Promise
   let failed = 0;
   for (const t of data ?? []) {
     try {
-      await send({ token: t.token }, msg);
+      await send({ token: t.token }, { ...msg, channel: "staff_alerts" });
       sent++;
     } catch (error) {
       failed++;

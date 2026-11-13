@@ -7,4 +7,6 @@
     <string name="downloading">Downloading…</string>
     <string name="no_app">No app found to open this.</string>
     <string name="channel_offers">Offers and updates</string>
+    <string name="channel_alerts">Staff alerts</string>
+    <string name="channel_alerts_description">Sales updates, closing reports, stock alerts and service / complaint alerts</string>
 </resources>

@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { parseReport } from "@/lib/report-parse";
+import { ReportBody } from "@/components/ReportBody";
 
 /** One unread alert: opening it (or ✓) marks it read, so it disappears from the list. */
 export function AlertItem({
@@ -29,6 +31,7 @@ export function AlertItem({
     }).catch(() => null);
 
   if (gone) return null;
+  const report = parseReport(body);
   return (
     <li className="flex items-start gap-3 px-5 py-4 transition hover:bg-[#f7f9fb]">
       <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-[#ff5e79]" aria-hidden />
@@ -42,7 +45,13 @@ export function AlertItem({
         className="min-w-0 flex-1 text-left"
       >
         <p className="font-bold">{title}</p>
-        {body && <p className="mt-1 whitespace-pre-line text-sm text-black/60">{body}</p>}
+        {report ? (
+          <div className="mt-2">
+            <ReportBody segs={report} />
+          </div>
+        ) : (
+          body && <p className="mt-1 whitespace-pre-line text-sm text-black/60">{body}</p>
+        )}
         <p className="mt-1 text-xs text-black/40">{when}</p>
       </button>
       <button

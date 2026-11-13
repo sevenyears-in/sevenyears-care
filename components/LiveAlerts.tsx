@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseReport, reportSummary } from "@/lib/report-parse";
+
+/** Short text for pop-ups and phone notifications (reports become one line per store). */
+function shortBody(body: string | null) {
+  const segs = parseReport(body);
+  return segs ? reportSummary(segs) : (body ?? "");
+}
 
 // Live in-app alerts: checks for new alerts every 30 seconds, plays a chime,
 // shows a pop-up and (when allowed) a phone / desktop notification.
@@ -30,13 +37,7 @@ function alertHref(a: LiveAlert) {
   return /feedback/i.test(a.title) ? "/staff/feedback" : "/staff/alerts";
 }
 
-function prefs() {
-  try {
-    return { sound: localStorage.getItem("sy_alert_sound") !== "0" };
-  } catch {
-    return { sound: true };
-  }
-}
+// Alert sound is always on in the app (to silence or change it, staff use the phone's own settings).
 
 let audioCtx: AudioContext | null = null;
 function getAudio() {
@@ -112,7 +113,7 @@ export function LiveAlerts() {
 
       const fresh = data.latest ?? [];
       if (fresh.length > 0) {
-        if (prefs().sound) playChime();
+        playChime();
         setToasts((t) => [...fresh, ...t].slice(0, 3));
         if ("vibrate" in navigator) navigator.vibrate?.([120, 60, 120]);
         await showSystemNotification(fresh[0], fresh.length);
@@ -170,7 +171,7 @@ export function LiveAlerts() {
             className="min-w-0 flex-1"
           >
             <p className="text-sm font-bold">{a.title}</p>
-            {a.body && <p className="mt-0.5 line-clamp-2 text-xs text-white/70">{a.body}</p>}
+            {a.body && <p className="mt-0.5 line-clamp-2 text-xs text-white/70">{shortBody(a.body)}</p>}
           </Link>
           <button
             type="button"
@@ -191,7 +192,7 @@ async function showSystemNotification(a: LiveAlert, total: number) {
   if (document.visibilityState === "visible" && document.hasFocus()) return; // the pop-up is enough
   const title = total > 1 ? `${total} new alerts` : a.title;
   const options: NotificationOptions = {
-    body: a.body ?? "",
+    body: shortBody(a.body),
     icon: "/app-icon-192.png",
     badge: "/app-icon-192.png",
     tag: a.id,
@@ -206,44 +207,22 @@ async function showSystemNotification(a: LiveAlert, total: number) {
   }
 }
 
-/** "Sound & notifications" switch for the profile menu. */
+declare global {
+  interface Window {
+    SevenYearsApp?: { pushToken?: () => string; openNotificationSound?: () => void };
+  }
+}
+
+/** Profile menu: turn on notifications, and choose the notification sound from the phone. */
 export function AlertSoundSettings() {
-  const [sound, setSound] = useState(true);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
+  const [inApp, setInApp] = useState(false);
+  const [help, setHelp] = useState(false);
 
   useEffect(() => {
-    const apply = () => {
-      setSound(prefs().sound);
-      setPermission("Notification" in window ? Notification.permission : "unsupported");
-    };
-    apply();
+    setPermission("Notification" in window ? Notification.permission : "unsupported");
+    setInApp(typeof window.SevenYearsApp?.openNotificationSound === "function");
   }, []);
-
-  const toggleSound = () => {
-    const next = !sound;
-    setSound(next);
-    try {
-      localStorage.setItem("sy_alert_sound", next ? "1" : "0");
-    } catch {
-      // ignore
-    }
-    if (next) playChime();
-  };
-
-  const [testing, setTesting] = useState(false);
-  const sendTest = async () => {
-    setTesting(true);
-    playChime(); // also unlocks sound on this device
-    await fetch("/api/staff/alerts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ test: true }),
-    }).catch(() => null);
-    setTimeout(() => {
-      window.dispatchEvent(new Event("sy-alerts-check"));
-      setTesting(false);
-    }, 1500);
-  };
 
   const allow = async () => {
     if (!("Notification" in window)) return;
@@ -252,17 +231,22 @@ export function AlertSoundSettings() {
     playChime();
   };
 
+  const chooseSound = () => {
+    // The Seven Years Care app opens the phone's own sound picker for staff alerts.
+    if (window.SevenYearsApp?.openNotificationSound) {
+      try {
+        window.SevenYearsApp.openNotificationSound();
+        return;
+      } catch {
+        /* fall back to the steps */
+      }
+    }
+    setHelp((h) => !h);
+  };
+
   return (
     <div className="space-y-2">
-      <button
-        type="button"
-        onClick={toggleSound}
-        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-[#f7f9fb]"
-      >
-        <span>{sound ? "🔊" : "🔇"} Alert sound</span>
-        <span className={`text-xs font-bold ${sound ? "text-green-700" : "text-black/40"}`}>{sound ? "On" : "Off"}</span>
-      </button>
-      {permission === "default" && (
+      {permission === "default" && !inApp && (
         <button
           type="button"
           onClick={allow}
@@ -273,13 +257,24 @@ export function AlertSoundSettings() {
       )}
       <button
         type="button"
-        onClick={sendTest}
-        disabled={testing}
-        className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-[#f7f9fb] disabled:opacity-50"
+        onClick={chooseSound}
+        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-[#f7f9fb]"
       >
-        🧪 {testing ? "Sending test alert…" : "Send me a test alert"}
+        <span>🎵 Notification sound</span>
+        <span className="text-xs font-bold text-black/40">{inApp ? "Choose ›" : help ? "Hide" : "How ›"}</span>
       </button>
-      {permission === "denied" && (
+      {help && (
+        <div className="space-y-1 rounded-xl bg-[#f7f9fb] px-3 py-2 text-xs text-black/60">
+          <p className="font-semibold text-black/75">Choose the sound on your phone:</p>
+          <p>
+            <b>Seven Years Care app:</b> phone Settings → Apps → Seven Years Care → Notifications → <b>Staff alerts</b> → Sound.
+          </p>
+          <p>
+            <b>In Chrome:</b> phone Settings → Apps → Chrome → Notifications → <b>care.sevenyears.in</b> → Sound.
+          </p>
+        </div>
+      )}
+      {permission === "denied" && !inApp && (
         <p className="px-3 text-xs text-black/45">Notifications are blocked. Allow them in the browser / phone settings.</p>
       )}
     </div>

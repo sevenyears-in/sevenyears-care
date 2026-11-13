@@ -38,6 +38,8 @@ export type StoreFigures = {
   /** Time-based pace for updates during the day (null in the closing report or before opening). */
   paceShort: number | null;
   walkins: number | null;
+  /** When the walk-ins were last posted ("12:05 pm"), shown for updates during the day. */
+  walkinsAt?: string | null;
 };
 
 export function figuresMath(f: StoreFigures) {
@@ -62,10 +64,13 @@ export function storeReportLines(f: StoreFigures): string[] {
     const b = m.backlog ?? 0;
     lines.push(`MTD: ${inr(f.mtd)} of ${inr(f.monthTarget)} (${pctOf(f.mtd, f.monthTarget)}) | ${b >= 0 ? `Month backlog: ${inr(b)}` : `Ahead of plan by ${inr(-b)}`}`);
   }
+  const posted = f.walkins !== null && f.walkinsAt && !f.closing ? ` (posted ${f.walkinsAt})` : "";
   lines.push(
     f.walkins === null
       ? `Walk-ins: not posted by the CRE | Conversion: —`
-      : `Walk-ins: ${f.walkins} | Conversion: ${m.conversion === null ? "—" : `${Math.round(m.conversion * 100)}%`}`
+      : f.walkins < f.bills
+        ? `Walk-ins: ${f.walkins}${posted} | Conversion: ⚠ check walk-ins (${f.bills} bills)`
+        : `Walk-ins: ${f.walkins}${posted} | Conversion: ${m.conversion === null ? "—" : `${Math.round(m.conversion * 100)}%`}`
   );
   return lines;
 }

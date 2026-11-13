@@ -22,6 +22,7 @@ import { sendEmail, siteUrl } from "@/lib/notify";
 import { pushToStaff } from "@/lib/push";
 import { syncRecentSales } from "@/lib/sales-sync";
 import { clock, storeReportLines } from "@/lib/report-format";
+import { parseReport, reportHtml } from "@/lib/report-parse";
 import { loadWalkinsMany, type Walkins } from "@/lib/walkins";
 
 /** Minutes after a slot during which it may still be sent (late server start, busy tick). */
@@ -60,7 +61,7 @@ function dayGone(s: PerformanceSettings, store: string, minutes: number) {
   return Math.min(1, Math.max(0, (minutes - open) / (close - open)));
 }
 
-function storeLines(st: StoreReport, s: PerformanceSettings, minutes: number, day: string, when: string, walkins: number | null) {
+function storeLines(st: StoreReport, s: PerformanceSettings, minutes: number, day: string, when: string, walkins: number | null, walkinsAt: string | null = null) {
   const daysLeft = Math.max(0, st.daysInMonth - st.daysGone);
   const need = neededToday(st.target, st.net, st.today.net, daysLeft);
   const gone = dayGone(s, st.store, minutes);
@@ -78,6 +79,7 @@ function storeLines(st: StoreReport, s: PerformanceSettings, minutes: number, da
     mtd: st.net,
     paceShort,
     walkins,
+    walkinsAt,
   });
   const summary = `${st.store}: ${rupees(st.today.net)} from ${st.today.bills} bill(s)${st.target > 0 ? ` · MTD ${pct(st.net / st.target)}` : ""}${paceShort ? ` · behind by ${rupees(paceShort)}` : ""}`;
   return { lines, need, summary };
@@ -120,7 +122,10 @@ export async function buildSalesAlerts(at = new Date(), slotTime?: string): Prom
     stores.map((st) => st.store),
     now.date
   ).catch(() => new Map<string, Walkins>());
-  const block = (st: StoreReport) => storeLines(st, s, now.minutes, now.date, slotLabel, walkins.get(st.store)?.count ?? null);
+  const block = (st: StoreReport) => {
+    const w = walkins.get(st.store);
+    return storeLines(st, s, now.minutes, now.date, slotLabel, w?.count ?? null, w ? clock(istNow(new Date(w.updated_at)).minutes) : null);
+  };
   const messages: AlertMessage[] = [];
   const sent = new Set<string>();
   const add = (audience: AlertAudience, r: (typeof staff)[number], title: string, body: string[], summary?: string) => {
@@ -247,7 +252,14 @@ async function deliver(messages: AlertMessage[], emailTo: AlertAudience[], meta:
       out.email.skipped++;
       continue;
     }
-    const r = await sendEmail(m.email, `${m.title} — Seven Years`, `Hello ${m.name},\n\n${m.body}\n\n— Seven Years Care`, { audience: "staff", ticketNumber: `ALERT ${meta.slot}` });
+    const segs = parseReport(m.body);
+    const r = await sendEmail(
+      m.email,
+      `${m.title} — Seven Years`,
+      `Hello ${m.name},\n\n${m.body}\n\n— Seven Years Care`,
+      { audience: "staff", ticketNumber: `ALERT ${meta.slot}` },
+      segs ? reportHtml(segs, `Hello ${m.name},`) : undefined
+    );
     if (r.ok) out.email.sent++;
     else if (/not set up/i.test(r.error ?? "")) out.email.skipped++;
     else out.email.failed++;

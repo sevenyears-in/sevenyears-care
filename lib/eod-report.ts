@@ -12,6 +12,7 @@ import { loadTargets, monthReport } from "@/lib/performance";
 import { closingAt, istNow, isSpecialDay } from "@/lib/business-day";
 import { dailySales } from "@/lib/daily-sales";
 import { storeReportLines } from "@/lib/report-format";
+import { parseReport, reportHtml } from "@/lib/report-parse";
 import { loadWalkins } from "@/lib/walkins";
 import { itemSales, stockAlertsFor } from "@/lib/stock";
 import { isAdmin, asRole } from "@/lib/roles";
@@ -213,7 +214,14 @@ async function deliverEod(d: EodData, status: "provisional" | "final", emailTo: 
       result.skipped++;
       continue;
     }
-    const r = await sendEmail(p.email, `${title} — Seven Years`, `Hello ${p.full_name},\n\n${text}\n\n— Seven Years Care`, { audience: "staff", ticketNumber: `EOD ${d.day} ${d.store}` });
+    const segs = parseReport(text);
+    const r = await sendEmail(
+      p.email,
+      `${title} — Seven Years`,
+      `Hello ${p.full_name},\n\n${text}\n\n— Seven Years Care`,
+      { audience: "staff", ticketNumber: `EOD ${d.day} ${d.store}` },
+      segs ? reportHtml(segs, `Hello ${p.full_name},`) : undefined
+    );
     if (r.ok) {
       result.sent++;
       result.to.push(p.full_name);

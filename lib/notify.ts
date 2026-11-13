@@ -92,7 +92,9 @@ export async function sendEmail(
   to: string,
   subject: string,
   text: string,
-  meta: LogMeta
+  meta: LogMeta,
+  /** Ready-made HTML (e.g. a report card); otherwise the text is turned into simple HTML. */
+  html?: string
 ): Promise<{ ok: boolean; error?: string }> {
   if (!to) return { ok: false, error: "No e-mail address" };
   if (!(await emailConfigured())) {
@@ -104,7 +106,7 @@ export async function sendEmail(
     const s = await emailSettings();
     await sendSmtpMail(
       { host: s.host, port: s.port, user: s.user, pass: s.pass },
-      { from: s.from, fromName: "Seven Years Care", to, subject, text, html: textToHtml(text) }
+      { from: s.from, fromName: "Seven Years Care", to, subject, text, html: html ?? textToHtml(text) }
     );
     await log("email", to, "sent", { ...meta, subject });
     return { ok: true };
