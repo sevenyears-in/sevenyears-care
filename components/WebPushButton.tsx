@@ -7,7 +7,7 @@ const SDK = "https://www.gstatic.com/firebasejs/10.14.1";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const load = new Function("u", "return import(u)") as (u: string) => Promise<any>;
 
-async function registerWebPush() {
+export async function registerWebPush() {
   const res = await fetch("/api/push/web-config");
   if (!res.ok) return false;
   const { config } = await res.json();
@@ -27,7 +27,7 @@ async function registerWebPush() {
   return true;
 }
 
-function supported() {
+export function supported() {
   return typeof window !== "undefined" && "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
 }
 

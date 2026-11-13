@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { AlertSoundSettings, LiveAlerts, useUnreadCount } from "@/components/LiveAlerts";
+import { LiveAlerts, useUnreadCount } from "@/components/LiveAlerts";
 import { isAdmin, type Role } from "@/lib/roles";
 import type { Section } from "@/lib/access";
 import { afterLogout } from "@/lib/in-app";
@@ -172,10 +172,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
                   </p>
                   {storeName && <p className="mt-0.5 text-xs text-black/50">{storeName}</p>}
                 </div>
-                <div className="py-2">
-                  <AlertSoundSettings />
-                </div>
-                <div className="border-t border-black/5 pt-2">
+                <div className="pt-2">
                   <Link
                     href="/staff/password"
                     onClick={() => setMenuOpen(false)}

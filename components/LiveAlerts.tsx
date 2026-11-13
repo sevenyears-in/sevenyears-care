@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseReport, reportSummary } from "@/lib/report-parse";
+import { registerWebPush, supported } from "@/components/WebPushButton";
 
 /** Short text for pop-ups and phone notifications (reports become one line per store). */
 function shortBody(body: string | null) {
@@ -86,12 +87,32 @@ export function LiveAlerts() {
   const lastCount = useRef<number | null>(null);
   const [toasts, setToasts] = useState<LiveAlert[]>([]);
 
-  // Browsers only allow sound after the person has tapped the page once.
+  // Browsers only allow sound (and asking for notifications) after the person has tapped the page once.
+  // Notifications are kept on: on the first tap the browser is asked to allow them, with no menu or switch.
+  // In the Seven Years Care app the phone asks by itself when the app opens.
   useEffect(() => {
     const unlock = () => {
       const ctx = getAudio();
       if (ctx && ctx.state === "suspended") ctx.resume().catch(() => null);
+      try {
+        if (!window.SevenYearsApp && "Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission()
+            .then((p) => (p === "granted" && supported() ? registerWebPush() : null))
+            .catch(() => null);
+        }
+      } catch {
+        /* not supported */
+      }
     };
+    // Already allowed: keep this browser signed up for phone notifications (once per visit).
+    try {
+      if (!window.SevenYearsApp && supported() && Notification.permission === "granted" && !sessionStorage.getItem("sy-webpush")) {
+        sessionStorage.setItem("sy-webpush", "1");
+        registerWebPush().catch(() => null);
+      }
+    } catch {
+      /* ignore */
+    }
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
     return () => {
@@ -211,72 +232,4 @@ declare global {
   interface Window {
     SevenYearsApp?: { pushToken?: () => string; openNotificationSound?: () => void };
   }
-}
-
-/** Profile menu: turn on notifications, and choose the notification sound from the phone. */
-export function AlertSoundSettings() {
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
-  const [inApp, setInApp] = useState(false);
-  const [help, setHelp] = useState(false);
-
-  useEffect(() => {
-    setPermission("Notification" in window ? Notification.permission : "unsupported");
-    setInApp(typeof window.SevenYearsApp?.openNotificationSound === "function");
-  }, []);
-
-  const allow = async () => {
-    if (!("Notification" in window)) return;
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    playChime();
-  };
-
-  const chooseSound = () => {
-    // The Seven Years Care app opens the phone's own sound picker for staff alerts.
-    if (window.SevenYearsApp?.openNotificationSound) {
-      try {
-        window.SevenYearsApp.openNotificationSound();
-        return;
-      } catch {
-        /* fall back to the steps */
-      }
-    }
-    setHelp((h) => !h);
-  };
-
-  return (
-    <div className="space-y-2">
-      {permission === "default" && !inApp && (
-        <button
-          type="button"
-          onClick={allow}
-          className="w-full rounded-xl bg-[#11b8d0]/10 px-3 py-2 text-left text-sm font-semibold text-[#0b7f90]"
-        >
-          📲 Turn on phone notifications
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={chooseSound}
-        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold hover:bg-[#f7f9fb]"
-      >
-        <span>🎵 Notification sound</span>
-        <span className="text-xs font-bold text-black/40">{inApp ? "Choose ›" : help ? "Hide" : "How ›"}</span>
-      </button>
-      {help && (
-        <div className="space-y-1 rounded-xl bg-[#f7f9fb] px-3 py-2 text-xs text-black/60">
-          <p className="font-semibold text-black/75">Choose the sound on your phone:</p>
-          <p>
-            <b>Seven Years Care app:</b> phone Settings → Apps → Seven Years Care → Notifications → <b>Staff alerts</b> (older app: <b>Offers and updates</b>) → Sound.
-          </p>
-          <p>
-            <b>In Chrome:</b> phone Settings → Apps → Chrome → Notifications → <b>care.sevenyears.in</b> → Sound.
-          </p>
-        </div>
-      )}
-      {permission === "denied" && !inApp && (
-        <p className="px-3 text-xs text-black/45">Notifications are blocked. Allow them in the browser / phone settings.</p>
-      )}
-    </div>
-  );
 }
