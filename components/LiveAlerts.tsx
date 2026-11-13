@@ -267,7 +267,7 @@ export function AlertSoundSettings() {
         <div className="space-y-1 rounded-xl bg-[#f7f9fb] px-3 py-2 text-xs text-black/60">
           <p className="font-semibold text-black/75">Choose the sound on your phone:</p>
           <p>
-            <b>Seven Years Care app:</b> phone Settings → Apps → Seven Years Care → Notifications → <b>Staff alerts</b> → Sound.
+            <b>Seven Years Care app:</b> phone Settings → Apps → Seven Years Care → Notifications → <b>Staff alerts</b> (older app: <b>Offers and updates</b>) → Sound.
           </p>
           <p>
             <b>In Chrome:</b> phone Settings → Apps → Chrome → Notifications → <b>care.sevenyears.in</b> → Sound.
