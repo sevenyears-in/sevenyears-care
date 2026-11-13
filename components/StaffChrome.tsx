@@ -28,8 +28,72 @@ type Props = {
   offersWaiting?: number | null;
 };
 
-export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting }: Props) {
+type NavLink = { href: string; label: string; icon: string; badge?: number };
+
+/** The pages a person can open (Roles & Access decides) and the admin settings pages. */
+function staffNav({
+  role,
+  sections,
+  explanationsWaiting,
+  performanceLabel,
+  offersWaiting,
+}: {
+  role: Role;
+  sections: Section[];
+  explanationsWaiting: number;
+  performanceLabel?: string | null;
+  offersWaiting?: number | null;
+}) {
   const can = (s: Section) => sections.includes(s);
+  const links: NavLink[] = [
+    { href: "/staff", label: "Dashboard", icon: "🏠" },
+    ...(performanceLabel ? [{ href: "/staff/performance", label: performanceLabel, icon: "📈" }] : []),
+    // Shown to the offer approver only while something is waiting.
+    ...(offersWaiting ? [{ href: "/staff/offer-approvals", label: `Offer approvals (${offersWaiting})`, icon: "✅", badge: offersWaiting }] : []),
+    ...(can("service") ? [{ href: "/staff/service", label: "Service Requests", icon: "🛠️" }] : []),
+    ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints", icon: "💬" }] : []),
+    ...(can("explanations") || explanationsWaiting > 0
+      ? [
+          {
+            href: "/staff/explanations",
+            label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations",
+            icon: "📝",
+            badge: explanationsWaiting || undefined,
+          },
+        ]
+      : []),
+    ...(can("feedback") ? [{ href: "/staff/feedback", label: "Feedback", icon: "⭐" }] : []),
+    ...(can("register") ? [{ href: "/staff/register", label: "Register Warranty", icon: "🧾" }] : []),
+    ...(can("warranties") ? [{ href: "/staff/warranties", label: "Warranties", icon: "🛡️" }] : []),
+  ];
+
+  // Admin pages live under one "Settings" menu so the top bar stays short.
+  const settings: NavLink[] = [
+    ...(isAdmin(role)
+      ? [
+          { href: "/staff/admin/users", label: "Staff Users", icon: "👥" },
+          { href: "/staff/admin/categories", label: "Warranty Categories", icon: "🗂️" },
+          { href: "/staff/admin/service-setup", label: "Service Setup", icon: "🛠️" },
+          { href: "/staff/admin/offers", label: "Offers & Notifications", icon: "📣" },
+          { href: "/staff/admin/app-usage", label: "App usage", icon: "📊" },
+          { href: "/staff/admin/performance", label: "Sales targets & incentives", icon: "🎯" },
+        ]
+      : []),
+    ...(role === "super_admin"
+      ? [
+          { href: "/staff/admin/roles", label: "Roles & Access", icon: "🔐" },
+          { href: "/staff/admin/attendance", label: "Attendance (eTimeTrackLite)", icon: "🕒" },
+          { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
+          { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
+          { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
+          { href: "/staff/admin/extended-warranty", label: "Extended Warranty & Payments", icon: "💳" },
+        ]
+      : []),
+  ];
+  return { links, settings };
+}
+
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -58,44 +122,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   }, [menuOpen]);
 
   // Roles & Access decides which sections each person sees.
-  const links = [
-    { href: "/staff", label: "Dashboard" },
-    ...(performanceLabel ? [{ href: "/staff/performance", label: performanceLabel }] : []),
-    // Shown to the offer approver only while something is waiting.
-    ...(offersWaiting ? [{ href: "/staff/offer-approvals", label: `Offer approvals (${offersWaiting})` }] : []),
-    ...(can("service") ? [{ href: "/staff/service", label: "Service Requests" }] : []),
-    ...(can("complaints") ? [{ href: "/staff/complaints", label: "Complaints" }] : []),
-    ...(can("explanations") || explanationsWaiting > 0
-      ? [{ href: "/staff/explanations", label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations" }]
-      : []),
-    ...(can("feedback") ? [{ href: "/staff/feedback", label: "Feedback" }] : []),
-    ...(can("register") ? [{ href: "/staff/register", label: "Register Warranty" }] : []),
-    ...(can("warranties") ? [{ href: "/staff/warranties", label: "Warranties" }] : []),
-  ];
-
-  // Admin pages live under one "Settings" menu so the top bar stays short.
-  const settings = [
-    ...(isAdmin(role)
-      ? [
-          { href: "/staff/admin/users", label: "Staff Users", icon: "👥" },
-          { href: "/staff/admin/categories", label: "Warranty Categories", icon: "🗂️" },
-          { href: "/staff/admin/service-setup", label: "Service Setup", icon: "🛠️" },
-          { href: "/staff/admin/offers", label: "Offers & Notifications", icon: "📣" },
-          { href: "/staff/admin/app-usage", label: "App usage", icon: "📊" },
-          { href: "/staff/admin/performance", label: "Sales targets & incentives", icon: "🎯" },
-        ]
-      : []),
-    ...(role === "super_admin"
-      ? [
-          { href: "/staff/admin/roles", label: "Roles & Access", icon: "🔐" },
-          { href: "/staff/admin/attendance", label: "Attendance (eTimeTrackLite)", icon: "🕒" },
-          { href: "/staff/admin/notifications", label: "Alerts Setup", icon: "🔔" },
-          { href: "/staff/admin/channels", label: "Complaint Channels", icon: "💬" },
-          { href: "/staff/admin/zoho", label: "Zoho POS", icon: "🔗" },
-          { href: "/staff/admin/extended-warranty", label: "Extended Warranty & Payments", icon: "💳" },
-        ]
-      : []),
-  ];
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting });
   const settingsActive = settings.some((l) => pathname.startsWith(l.href));
 
   const initials =
@@ -255,77 +282,138 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
           </div>
         )}
       </nav>
-      {/* Phones: the main pages are in the bottom menu; everything else scrolls here. */}
-      <nav className="no-scrollbar flex gap-1.5 overflow-x-auto px-3 pb-2.5 sm:hidden" aria-label="More pages">
-        {[...links, ...settings]
-          .filter((l) => !["/staff", "/staff/service", "/staff/complaints", "/staff/register"].includes(l.href))
-          .map((link, i) => {
-            const active = pathname.startsWith(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                style={navTone(i)}
-                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  active ? "bg-[var(--c)] text-white" : "bg-[#f7f9fb] text-black/60"
-                }`}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
-      </nav>
     </header>
   );
 }
 
-/** Phone-style menu at the bottom of the screen (phones only). */
-export function StaffBottomNav({ sections, unreadAlerts }: { sections: Section[]; unreadAlerts: number }) {
+/** Phone-style menu at the bottom of the screen (phones only): main pages + "More" with everything else. */
+export function StaffBottomNav({
+  role,
+  sections,
+  unreadAlerts,
+  explanationsWaiting = 0,
+  performanceLabel,
+  offersWaiting,
+}: {
+  role: Role;
+  sections: Section[];
+  unreadAlerts: number;
+  explanationsWaiting?: number;
+  performanceLabel?: string | null;
+  offersWaiting?: number | null;
+}) {
   const pathname = usePathname();
   const unread = useUnreadCount(unreadAlerts);
-  const items = [
+  const [moreOpen, setMoreOpen] = useState(false);
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting });
+
+  const main = [
     { href: "/staff", label: "Home", icon: "🏠" },
     ...(sections.includes("service") ? [{ href: "/staff/service", label: "Service", icon: "🛠️" }] : []),
     ...(sections.includes("complaints") ? [{ href: "/staff/complaints", label: "Complaints", icon: "💬" }] : []),
-    ...(sections.includes("register")
-      ? [{ href: "/staff/register", label: "Warranty", icon: "🧾" }]
-      : sections.includes("warranties")
-        ? [{ href: "/staff/warranties", label: "Warranty", icon: "🧾" }]
-        : []),
     { href: "/staff/alerts", label: "Alerts", icon: "🔔", badge: unread },
   ];
+  const inBar = new Set(main.map((m) => m.href));
+  const more = links.filter((l) => !inBar.has(l.href));
+  const moreBadge = more.reduce((a, l) => a + (l.badge ?? 0), 0);
+  const moreActive = [...more, ...settings].some((l) => pathname.startsWith(l.href));
+
+  // Close the sheet when the page changes.
+  useEffect(() => setMoreOpen(false), [pathname]);
+
+  const tile = (l: NavLink, i: number) => {
+    const active = pathname.startsWith(l.href);
+    return (
+      <Link
+        key={l.href}
+        href={l.href}
+        onClick={() => setMoreOpen(false)}
+        style={navTone(i)}
+        className={`relative flex flex-col items-center justify-center gap-1.5 rounded-2xl px-2 py-3 text-center text-xs font-semibold leading-tight ring-1 transition ${
+          active
+            ? "bg-[color-mix(in_srgb,var(--c)_14%,white)] text-[var(--c)] ring-[var(--c)]"
+            : "bg-white text-black/70 ring-black/10 active:bg-[color-mix(in_srgb,var(--c)_10%,white)]"
+        }`}
+      >
+        <span className="text-2xl leading-none" aria-hidden>
+          {l.icon}
+        </span>
+        {l.label.replace(/ \(\d+\)$/, "")}
+        {l.badge ? (
+          <span className="absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[10px] font-bold text-white">
+            {l.badge > 99 ? "99+" : l.badge}
+          </span>
+        ) : null}
+      </Link>
+    );
+  };
 
   return (
-    <nav
-      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-white/95 backdrop-blur sm:hidden"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      aria-label="Main menu"
-    >
-      <div className="grid" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
-        {items.map((item, i) => {
-          const active = item.href === "/staff" ? pathname === "/staff" : pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={navTone(i)}
-              className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold ${
-                active ? "text-[var(--c)]" : "text-black/55"
-              }`}
-            >
-              <span className="text-lg leading-none" aria-hidden>
-                {item.icon}
-              </span>
-              {item.label}
-              {"badge" in item && item.badge ? (
-                <span className="absolute right-[22%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[10px] font-bold text-white">
-                  {item.badge > 99 ? "99+" : item.badge}
+    <>
+      {moreOpen && (
+        <div className="no-print fixed inset-0 z-40 sm:hidden" role="dialog" aria-modal="true" aria-label="More pages">
+          <button type="button" aria-label="Close" onClick={() => setMoreOpen(false)} className="absolute inset-0 bg-black/30" />
+          <div
+            className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-3xl bg-[#f7f9fb] px-4 pt-3 shadow-2xl"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 76px)" }}
+          >
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-black/15" aria-hidden />
+            {more.length > 0 && <div className="grid grid-cols-3 gap-2.5">{more.map(tile)}</div>}
+            {settings.length > 0 && (
+              <>
+                <p className="mb-2 mt-5 text-xs font-bold uppercase tracking-wide text-black/45">⚙️ Settings</p>
+                <div className="grid grid-cols-3 gap-2.5">{settings.map((l, i) => tile(l, i + more.length))}</div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <nav
+        className="no-print fixed inset-x-0 bottom-0 z-50 border-t border-black/10 bg-white/95 backdrop-blur sm:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        aria-label="Main menu"
+      >
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${main.length + 1}, minmax(0, 1fr))` }}>
+          {main.map((item, i) => {
+            const active = !moreOpen && (item.href === "/staff" ? pathname === "/staff" : pathname.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                style={navTone(i)}
+                className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold ${active ? "text-[var(--c)]" : "text-black/55"}`}
+              >
+                <span className="text-lg leading-none" aria-hidden>
+                  {item.icon}
                 </span>
-              ) : null}
-            </Link>
-          );
-        })}
-      </div>
-    </nav>
+                {item.label}
+                {"badge" in item && item.badge ? (
+                  <span className="absolute right-[22%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[10px] font-bold text-white">
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((o) => !o)}
+            aria-expanded={moreOpen}
+            style={navTone(main.length)}
+            className={`relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-semibold ${moreOpen || moreActive ? "text-[var(--c)]" : "text-black/55"}`}
+          >
+            <span className="text-lg leading-none" aria-hidden>
+              {moreOpen ? "✕" : "☰"}
+            </span>
+            More
+            {moreBadge > 0 && !moreOpen ? (
+              <span className="absolute right-[22%] top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff5e79] px-1 text-[10px] font-bold text-white">
+                {moreBadge > 99 ? "99+" : moreBadge}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }

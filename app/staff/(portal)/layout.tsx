@@ -54,7 +54,14 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
       />
       <AppSetup />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-6 sm:py-8">{children}</main>
-      <StaffBottomNav sections={staff.access.sections} unreadAlerts={count ?? 0} />
+      <StaffBottomNav
+        role={staff.role}
+        sections={staff.access.sections}
+        unreadAlerts={count ?? 0}
+        explanationsWaiting={explanationsWaiting}
+        performanceLabel={perf ? performanceMenuLabel(perf) : null}
+        offersWaiting={offersWaiting}
+      />
     </div>
   );
 }
