@@ -1,4 +1,5 @@
 import { hasSection } from "@/lib/access";
+import { canChooseShortWarranty } from "@/lib/normal-warranty";
 import { NextResponse } from "next/server";
 import { extendedSettings } from "@/lib/extended-warranty";
 import { requireStaff } from "@/lib/auth";
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
       rows,
       ineligible,
       categoriesConfigured,
+      canShortWarranty: canChooseShortWarranty(auth.staff),
       extended: await extendedSettings().then((x) => ({ price: x.price, months: x.months })),
     });
   } catch (error) {

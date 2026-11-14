@@ -8,7 +8,7 @@ export type WarrantyFilters = {
   store: string;
   from: string; // bill date from (YYYY-MM-DD) or ""
   to: string;
-  status: "" | "active" | "expired" | "void" | "incomplete" | "gift";
+  status: "" | "active" | "expired" | "void" | "incomplete" | "gift" | "short";
 };
 
 export function readFilters(url: string): WarrantyFilters {
@@ -20,7 +20,7 @@ export function readFilters(url: string): WarrantyFilters {
     store: (p.get("store") ?? "").trim().slice(0, 120),
     from: date(p.get("from")),
     to: date(p.get("to")),
-    status: (["active", "expired", "void", "incomplete", "gift"].includes(status) ? status : "") as WarrantyFilters["status"],
+    status: (["active", "expired", "void", "incomplete", "gift", "short"].includes(status) ? status : "") as WarrantyFilters["status"],
   };
 }
 
@@ -49,11 +49,12 @@ export function applyFilters<T extends { or: any; eq: any; gte: any; lte: any; l
   if (f.status === "void") q = q.eq("status", "void");
   if (f.status === "incomplete") q = q.or("serial_number.eq.Not recorded,customer_address.eq.Not recorded");
   if (f.status === "gift") q = q.not("alternate_mobile", "is", null);
+  if (f.status === "short") q = q.eq("standard_months", 3);
   return q;
 }
 
 export const LIST_COLUMNS =
-  "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, model_number, serial_number, customer_name, customer_mobile, alternate_name, alternate_mobile, warranty_expiry_date, extended_warranty_purchased, status, created_at";
+  "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, model_number, serial_number, customer_name, customer_mobile, alternate_name, alternate_mobile, warranty_expiry_date, extended_warranty_purchased, standard_months, status, created_at";
 
 export const PAGE_SIZE = 50;
 

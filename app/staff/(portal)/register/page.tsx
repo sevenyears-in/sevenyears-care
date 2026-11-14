@@ -8,6 +8,7 @@ import { ErrorBox, inputClass, labelClass, phoneInputClass } from "@/components/
 import { addMonths, formatDate, todayISO } from "@/lib/helpers";
 import { EXTENDED_WARRANTY } from "@/lib/site-config";
 import { SERVICE_COVERAGE, type ServiceCoverage } from "@/lib/warranty-coverage";
+import { SHORT_MONTHS, shortAllowedFor } from "@/lib/normal-warranty";
 
 const extInfo = (l: { extended?: { price: number; months: number } }) => ({
   months: l.extended?.months ?? EXTENDED_WARRANTY.months,
@@ -48,6 +49,8 @@ type Lookup = {
   ineligible: Ineligible[];
   extended?: { price: number; months: number };
   categoriesConfigured: boolean;
+  /** Store Manager: may give a 3-month normal warranty instead of the category's normal period. */
+  canShortWarranty?: boolean;
 };
 
 type Entry = {
@@ -62,6 +65,9 @@ type Entry = {
   extended: boolean;
   /** Warranty service type — must be chosen for every product. */
   coverage: ServiceCoverage | "";
+  /** 3-month normal warranty instead of the usual one (Store Manager only). */
+  short: boolean;
+  shortReason: string;
 };
 
 type Saved = {
@@ -143,6 +149,8 @@ export default function RegisterWarrantyStaffPage() {
           alternateMobile: "",
           extended: false,
           coverage: "",
+          short: false,
+          shortReason: "",
         };
       }
       setEntries(initial);
@@ -196,6 +204,7 @@ export default function RegisterWarrantyStaffPage() {
         problems.push(`${label}: enter a valid 10-digit mobile number.`);
       if (e.customerAddress.trim().length < 5) problems.push(`${label}: enter the customer address.`);
       if (!e.coverage) problems.push(`${label}: choose On-Site or In-Store warranty service.`);
+      if (e.short && e.shortReason.trim().length < 5) problems.push(`${label}: write the reason for the ${SHORT_MONTHS}-month warranty.`);
       if (!e.userSame) {
         const altMobile = e.alternateMobile.replace(/\D/g, "");
         if (!e.alternateName.trim()) problems.push(`${label}: enter the recipient's name.`);
@@ -223,8 +232,13 @@ export default function RegisterWarrantyStaffPage() {
           billDate: lookup.bill.billDate,
           family,
           items: pendingRows.map((row) => {
-            const { userSame, ...e } = entries[row.key];
-            return { key: row.key, ...e, ...(userSame ? { alternateName: "", alternateMobile: "" } : {}) };
+            const { userSame, short, shortReason, ...e } = entries[row.key];
+            return {
+              key: row.key,
+              ...e,
+              ...(short ? { normalMonths: SHORT_MONTHS, shortReason: shortReason.trim() } : {}),
+              ...(userSame ? { alternateName: "", alternateMobile: "" } : {}),
+            };
           }),
         }),
       });
@@ -488,7 +502,9 @@ export default function RegisterWarrantyStaffPage() {
 
               {pendingRows.map((row, index) => {
                 const e = entries[row.key];
-                const standardEnd = addMonths(lookup.bill.billDate, row.standardMonths);
+                const canShort = Boolean(lookup.canShortWarranty) && shortAllowedFor(row.standardMonths);
+                const normalMonths = canShort && e.short ? SHORT_MONTHS : row.standardMonths;
+                const standardEnd = addMonths(lookup.bill.billDate, normalMonths);
                 const extendedEnd = addMonths(standardEnd, extInfo(lookup).months);
 
                 return (
@@ -508,7 +524,7 @@ export default function RegisterWarrantyStaffPage() {
                             )}
                           </p>
                           <p className="text-sm text-black/50">
-                            {[row.categoryName, row.sku].filter(Boolean).join(" • ")} • {row.standardMonths}-month warranty until {formatDate(standardEnd)}
+                            {[row.categoryName, row.sku].filter(Boolean).join(" • ")} • {normalMonths}-month warranty until {formatDate(standardEnd)}
                           </p>
                         </div>
                       </div>
@@ -624,6 +640,53 @@ export default function RegisterWarrantyStaffPage() {
                         </p>
                       )}
                     </fieldset>
+
+                    {canShort && (
+                      <fieldset className="mt-3">
+                        <legend className="mb-2 text-xs font-bold uppercase tracking-wide text-black/50">Normal warranty</legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {[false, true].map((isShort) => {
+                            const chosen = e.short === isShort;
+                            const months = isShort ? SHORT_MONTHS : row.standardMonths;
+                            return (
+                              <label
+                                key={String(isShort)}
+                                className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+                                  chosen ? (isShort ? "border-amber-500 bg-amber-50 ring-1 ring-amber-500" : "border-[#11b8d0] bg-[#11b8d0]/5 ring-1 ring-[#11b8d0]") : "border-black/10"
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`normal-${row.key}`}
+                                  checked={chosen}
+                                  onChange={() => setField(row.key, "short", isShort)}
+                                  className="h-4 w-4 accent-[#11b8d0]"
+                                />
+                                <span>
+                                  <b>{months} months</b>
+                                  {isShort ? "" : " (usual)"}
+                                  <span className="block text-xs text-black/55">until {formatDate(addMonths(lookup.bill.billDate, months))}</span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {e.short && (
+                          <div className="mt-2">
+                            <Field label={`Reason for ${SHORT_MONTHS}-month warranty *`}>
+                              <input
+                                value={e.shortReason}
+                                maxLength={300}
+                                onChange={(ev) => setField(row.key, "shortReason", ev.target.value)}
+                                placeholder="e.g. display piece / clearance sale"
+                                className={smallInput}
+                              />
+                            </Field>
+                            <p className="mt-1 text-xs text-black/50">Only the Super Admin can change this to {row.standardMonths} months later. Extended warranty can still be bought.</p>
+                          </div>
+                        )}
+                      </fieldset>
+                    )}
 
                     <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       {row.extendedAllowed ? (

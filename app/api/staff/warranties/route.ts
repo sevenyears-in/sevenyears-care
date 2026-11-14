@@ -12,6 +12,7 @@ import { buildWarrantyRows } from "@/lib/warranty-rules";
 import { PAGE_SIZE, readFilters, searchWarranties } from "@/lib/warranty-search";
 import { fetchBill, ZohoError } from "@/lib/zoho";
 import { isServiceCoverage } from "@/lib/warranty-coverage";
+import { canChooseShortWarranty, SHORT_MONTHS, shortAllowedFor } from "@/lib/normal-warranty";
 
 type IncomingItem = {
   key?: unknown;
@@ -24,6 +25,8 @@ type IncomingItem = {
   alternateMobile?: unknown;
   extended?: unknown;
   coverage?: unknown;
+  normalMonths?: unknown;
+  shortReason?: unknown;
 };
 
 // The PDF certificate uses standard fonts, which only support English/Western letters.
@@ -84,6 +87,8 @@ export async function POST(request: Request) {
       const alternateName = String(item.alternateName ?? "").trim();
       const alternateMobile = cleanMobile(item.alternateMobile);
       const coverage = isServiceCoverage(item.coverage) ? item.coverage : null;
+      const short = Number(item.normalMonths) === SHORT_MONTHS;
+      const shortReason = short ? String(item.shortReason ?? "").trim().slice(0, 300) : "";
 
       if (!row) errors.push(`${label}: this item is not warranty-eligible on this bill.`);
       else if (row.existing)
@@ -103,9 +108,13 @@ export async function POST(request: Request) {
         errors.push(`${label}: please type details in English letters (needed for the PDF certificate).`);
       if (extended && row && !row.extendedAllowed)
         errors.push(`${label}: extended warranty is not available for ${row.categoryName}.`);
+      if (short && !canChooseShortWarranty(auth.staff)) errors.push(`${label}: only the Store Manager can give a ${SHORT_MONTHS}-month normal warranty.`);
+      else if (short && row && !shortAllowedFor(row.standardMonths))
+        errors.push(`${label}: ${row.categoryName} already has a ${row.standardMonths}-month warranty.`);
+      else if (short && shortReason.length < 5) errors.push(`${label}: write the reason for the ${SHORT_MONTHS}-month warranty.`);
 
 
-      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, coverage, alternateName: alternateMobile ? alternateName : "", alternateMobile };
+      return { row, modelNumber, serialNumber, customerName, customerMobile, customerAddress, extended, coverage, short, shortReason, alternateName: alternateMobile ? alternateName : "", alternateMobile };
     });
 
     if (errors.length > 0) {
@@ -120,7 +129,8 @@ export async function POST(request: Request) {
 
     for (const item of clean) {
       const row = item.row!;
-      const standardExpiry = addMonths(startDate, row.standardMonths);
+      const normalMonths = item.short ? SHORT_MONTHS : row.standardMonths;
+      const standardExpiry = addMonths(startDate, normalMonths);
       const extendedStart = item.extended ? standardExpiry : null;
       const extendedExpiry = item.extended
         ? addMonths(standardExpiry, ext.months)
@@ -163,6 +173,8 @@ export async function POST(request: Request) {
         ...(item.alternateMobile ? { alternate_name: item.alternateName, alternate_mobile: item.alternateMobile } : {}),
         warranty_start_date: startDate,
         standard_warranty_expiry_date: standardExpiry,
+        standard_months: normalMonths,
+        ...(item.short ? { short_warranty_reason: item.shortReason, short_warranty_by: auth.staff.fullName } : {}),
         extended_warranty_purchased: item.extended,
         extended_warranty_fee: item.extended ? ext.price : 0,
         extended_warranty_start_date: extendedStart,

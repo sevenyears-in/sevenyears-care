@@ -10,6 +10,8 @@ import { AdminDangerZone } from "@/components/AdminDangerZone";
 import { EditWarranty } from "@/components/EditWarranty";
 import { ServiceCoverageBlock } from "@/components/ServiceCoverageBlock";
 import { SetServiceCoverage } from "@/components/SetServiceCoverage";
+import { SetNormalMonths } from "@/components/SetNormalMonths";
+import { SHORT_MONTHS } from "@/lib/normal-warranty";
 import { isServiceCoverage } from "@/lib/warranty-coverage";
 import { warrantyEditLevel } from "@/lib/warranty-edit";
 import { loadActiveCategories } from "@/lib/warranty-rules";
@@ -36,6 +38,9 @@ type Row = {
   voided_by: string | null;
   edited_at?: string | null;
   edited_by?: string | null;
+  standard_months?: number | null;
+  short_warranty_reason?: string | null;
+  short_warranty_by?: string | null;
   customer_name: string;
   customer_mobile: string;
   customer_address: string;
@@ -60,7 +65,7 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
 
   const COLS =
     "id, warranty_number, verification_token, bill_number, bill_date, store_name, product_name, sku, category_name, model_number, serial_number, customer_name, customer_mobile, customer_address, alternate_name, alternate_mobile, void_reason, voided_by, warranty_start_date, standard_warranty_expiry_date, extended_warranty_purchased, extended_warranty_fee, extended_warranty_start_date, extended_warranty_expiry_date, warranty_expiry_date, status, created_at, service_coverage, staff_users:registered_by (full_name, user_id)";
-  const first = await supabaseAdmin.from("warranties").select(`${COLS}, edited_at, edited_by`).eq("id", id).maybeSingle();
+  const first = await supabaseAdmin.from("warranties").select(`${COLS}, edited_at, edited_by, standard_months, short_warranty_reason, short_warranty_by`).eq("id", id).maybeSingle();
   const { data, error } = first.error ? await supabaseAdmin.from("warranties").select(COLS).eq("id", id).maybeSingle() : first;
 
   if (error) console.error("Warranty detail error:", error);
@@ -70,7 +75,11 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
   const registeredBy = one(w.staff_users);
   const status = w.status === "active" && w.warranty_expiry_date < todayISO() ? "expired" : w.status;
   const editLevel = await warrantyEditLevel(staff, w.store_name);
-  const categories = editLevel ? [...(await loadActiveCategories().catch(() => new Map())).values()].map((c) => String(c.category_name)).sort() : [];
+  const catMap = await loadActiveCategories().catch(() => new Map());
+  const categories = editLevel ? [...catMap.values()].map((c) => String(c.category_name)).sort() : [];
+  const usualMonths = Number(catMap.get(String(w.category_name ?? "").trim().toLowerCase())?.standard_months ?? 6);
+  const normalMonths = w.standard_months ?? null;
+  const isShort = normalMonths === SHORT_MONTHS;
 
   const sections: { title: string; rows: { label: string; value: string | null }[] }[] = [
     {
@@ -103,6 +112,8 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
       title: "Coverage",
       rows: [
         { label: "Warranty starts", value: formatDate(w.warranty_start_date) },
+        ...(normalMonths ? [{ label: "Normal warranty", value: `${normalMonths} months${isShort ? " (shorter than usual)" : ""}` }] : []),
+        ...(isShort ? [{ label: "Reason", value: `${w.short_warranty_reason ?? "—"}${w.short_warranty_by ? ` — ${w.short_warranty_by}` : ""}` }] : []),
         { label: "Standard warranty until", value: formatDate(w.standard_warranty_expiry_date) },
         {
           label: "Extended warranty",
@@ -205,6 +216,15 @@ export default async function WarrantyDetailPage({ params }: { params: Promise<{
             </dl>
           </div>
         ))}
+        {staff.role === "super_admin" && w.status !== "void" && usualMonths > SHORT_MONTHS && (
+          <div className="rounded-3xl bg-white p-5 soft-card ring-1 ring-black/5">
+            <p className="text-xs font-bold uppercase tracking-wider text-[#ff5e79]">Normal warranty period</p>
+            <p className="mt-2 text-sm text-black/65">
+              Now <b>{normalMonths ?? usualMonths} months</b>. Only the Super Admin can change it.
+            </p>
+            <SetNormalMonths id={w.id} months={normalMonths ?? usualMonths} usual={usualMonths} short={SHORT_MONTHS} />
+          </div>
+        )}
         <ProductUserEditor id={w.id} name={w.alternate_name} mobile={w.alternate_mobile} />
         <ResetCustomerLogin warrantyId={w.id} />
         {staff.role === "super_admin" && (

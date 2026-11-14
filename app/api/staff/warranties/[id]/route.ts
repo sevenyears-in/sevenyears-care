@@ -11,6 +11,8 @@ import { billPassword, ensureCustomerAccount } from "@/lib/customer-auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
 import { notifyCustomer, siteUrl } from "@/lib/notify";
 import { isServiceCoverage } from "@/lib/warranty-coverage";
+import { addMonths } from "@/lib/helpers";
+import { SHORT_MONTHS } from "@/lib/normal-warranty";
 
 // PATCH /api/staff/warranties/:id
 //  { modelNumber, serialNumber, customerAddress } — fill in details on a warranty
@@ -27,6 +29,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json().catch(() => ({}));
   if (body.action === "user") return setProductUser(id, body, auth.staff.fullName);
   if (body.action === "edit") return editWarranty(id, body, auth.staff);
+  if (body.action === "normal_months") {
+    if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can change the normal warranty period." }, { status: 403 });
+    return setNormalMonths(id, body, auth.staff.fullName);
+  }
   if (body.action === "coverage") {
     // Warranty service type (On-Site / In-Store). Super Admin only; "" = not set.
     if (auth.staff.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can do this." }, { status: 403 });
@@ -255,5 +261,58 @@ async function editWarranty(
   if (customerMobile !== w.customer_mobile) {
     after(() => ensureCustomerAccount(customerMobile, customerName, String(w.bill_number)).then(() => undefined).catch(() => undefined));
   }
+  return NextResponse.json({ success: true });
+}
+
+// ------------------------------------------------------------------
+// Super Admin: change the normal warranty between 3 months and the category's
+// normal period. The normal warranty end moves; a bought extended warranty moves
+// with it (same length), so the customer never loses extended months.
+// ------------------------------------------------------------------
+async function setNormalMonths(id: string, body: Record<string, unknown>, staffName: string) {
+  const { data: w } = await supabaseAdmin
+    .from("warranties")
+    .select(
+      "id, warranty_number, category_name, warranty_start_date, standard_months, extended_warranty_purchased, extended_warranty_start_date, extended_warranty_expiry_date"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!w) return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+  const cats = await loadActiveCategories().catch(() => new Map());
+  const usual = Number(cats.get(String(w.category_name ?? "").trim().toLowerCase())?.standard_months ?? 6);
+  const months = Number(body.months);
+  if (months !== SHORT_MONTHS && months !== usual)
+    return NextResponse.json({ error: `Choose ${SHORT_MONTHS} or ${usual} months.` }, { status: 400 });
+  const reason = String(body.reason ?? "").trim().slice(0, 300);
+  if (months === SHORT_MONTHS && reason.length < 5) return NextResponse.json({ error: "Write the reason." }, { status: 400 });
+
+  const standardUntil = addMonths(w.warranty_start_date, months);
+  const update: Record<string, unknown> = {
+    standard_months: months,
+    standard_warranty_expiry_date: standardUntil,
+    warranty_expiry_date: standardUntil,
+    short_warranty_reason: months === SHORT_MONTHS ? reason : null,
+    short_warranty_by: months === SHORT_MONTHS ? staffName : null,
+    edited_at: new Date().toISOString(),
+    edited_by: staffName,
+  };
+  if (w.extended_warranty_purchased && w.extended_warranty_start_date && w.extended_warranty_expiry_date) {
+    let extMonths = 0;
+    for (let n = 1; n <= 120; n++) {
+      if (addMonths(w.extended_warranty_start_date, n) >= w.extended_warranty_expiry_date) {
+        extMonths = n;
+        break;
+      }
+    }
+    const extUntil = extMonths ? addMonths(standardUntil, extMonths) : w.extended_warranty_expiry_date;
+    Object.assign(update, { extended_warranty_start_date: standardUntil, extended_warranty_expiry_date: extUntil, warranty_expiry_date: extUntil });
+  }
+  const { error } = await supabaseAdmin.from("warranties").update(update).eq("id", id);
+  if (error) {
+    console.error("Normal warranty change error:", error);
+    return NextResponse.json({ error: "Unable to save." }, { status: 500 });
+  }
+  console.info(`Normal warranty of ${w.warranty_number} set to ${months} months by ${staffName}`);
   return NextResponse.json({ success: true });
 }

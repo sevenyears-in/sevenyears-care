@@ -22,6 +22,7 @@ type Warranty = {
   alternate_mobile: string | null;
   warranty_expiry_date: string;
   extended_warranty_purchased: boolean;
+  standard_months?: number | null;
   status: string;
 };
 
@@ -33,6 +34,7 @@ const STATUS_OPTIONS = [
   { value: "active", label: "Active" },
   { value: "expired", label: "Expired" },
   { value: "gift", label: "Gifts" },
+  { value: "short", label: "3-month normal warranty" },
   { value: "incomplete", label: "Details to complete" },
   { value: "void", label: "Void" },
 ];
@@ -234,6 +236,7 @@ export default function StaffWarrantiesPage() {
                       </td>
                       <td className="px-4 py-3">
                         {formatDate(w.warranty_expiry_date)}
+                        {w.standard_months === 3 && <p className="text-xs font-bold text-amber-700">3-month normal</p>}
                         {w.extended_warranty_purchased && (
                           <p className="text-xs font-bold text-[#ff5e79]">Extended</p>
                         )}

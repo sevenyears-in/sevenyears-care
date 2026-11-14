@@ -26,6 +26,8 @@ const COLUMNS: [string, string][] = [
   ["alternate_name", "Gift Recipient"],
   ["alternate_mobile", "Recipient Mobile"],
   ["warranty_start_date", "Warranty Start"],
+  ["standard_months", "Normal Warranty (months)"],
+  ["short_warranty_reason", "3-month Reason"],
   ["standard_warranty_expiry_date", "Standard Warranty Until"],
   ["extended_warranty_purchased", "Extended Warranty"],
   ["extended_warranty_fee", "Extended Fee (Rs)"],
