@@ -23,8 +23,8 @@ android {
         minSdk = 24
         targetSdk = 36
         // Increase versionCode by 1 for every new upload to Play (1, 2, 3 …).
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {

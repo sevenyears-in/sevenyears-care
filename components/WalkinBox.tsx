@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 /** Today's walk-ins (running total) — posted by the CRE, shown with conversion = bills ÷ walk-ins. */
@@ -81,9 +82,14 @@ export function WalkinBox({
               </button>
             </>
           ) : (
-            <button type="button" onClick={() => setEditing(true)} className="rounded-full bg-[#0b7f91] px-4 py-2 text-sm font-semibold text-white">
-              {count === null ? "Post walk-ins" : "Update walk-ins"}
-            </button>
+            <>
+              <Link href={`/staff/walkins?store=${encodeURIComponent(store)}`} className="rounded-full bg-[#0b7f91] px-4 py-2 text-sm font-semibold text-white">
+                🔢 Open counter
+              </Link>
+              <button type="button" onClick={() => setEditing(true)} className="rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10">
+                {count === null ? "Type total" : "Correct total"}
+              </button>
+            </>
           )}
           {tooFew && editing && <p className="w-full text-xs text-amber-700">Fewer than today’s {bills} bill(s) — check the count.</p>}
           {error && <p className="w-full text-xs text-red-700">{error}</p>}

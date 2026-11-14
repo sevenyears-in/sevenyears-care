@@ -32,13 +32,16 @@ export default async function DailySalesPage({ searchParams }: { searchParams: P
   const stores = await merchStores(staff, allStores);
   if (!stores.length) redirect("/staff/performance");
   const to = isDay(sp.to) && sp.to! <= today ? sp.to! : today;
-  const from = isDay(sp.from) && sp.from! <= to ? sp.from! : addDays(to, -29);
+  // Opens on this month; "Last 7 days" and the date boxes still choose any range.
+  const from = isDay(sp.from) && sp.from! <= to ? sp.from! : `${to.slice(0, 8)}01`;
   const want = (sp.store ?? "").toUpperCase();
   const consolidated = stores.length > 1 && (want === "ALL" || !want);
   const chosen = consolidated ? stores : stores.includes(want) ? [want] : [stores[0]];
   const rows = await dailySales(from, to, chosen, consolidated);
   const shown = rows;
-  const closed = shown.filter((r) => r.state === "closed");
+  // Days with no sales data yet (not copied from Zoho, nothing uploaded) are left out of the totals.
+  const closed = shown.filter((r) => r.state === "closed" && !r.noData && !r.partial);
+  const missingDays = shown.filter((r) => r.noData || r.partial).length;
   const total = closed.reduce((a, r) => ({ net: a.net + r.net, target: a.target + r.target, bills: a.bills + r.bills }), { net: 0, target: 0, bills: 0 });
   const max = Math.max(1, ...shown.map((r) => Math.max(r.net, r.target)));
   const chart = [...shown].reverse();
@@ -96,7 +99,10 @@ export default async function DailySalesPage({ searchParams }: { searchParams: P
         <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-black/45">Net sales (closed days)</p>
           <p className="mt-1 text-2xl font-bold tabular-nums">{rupees(total.net)}</p>
-          <p className="text-xs text-black/55">{closed.length} closed day(s) · {total.bills} bills</p>
+          <p className="text-xs text-black/55">
+            {closed.length} closed day(s) · {total.bills} bills
+            {missingDays ? ` · ${missingDays} day(s) with no data yet left out` : ""}
+          </p>
         </div>
         <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-black/45">Target (same days)</p>
@@ -119,14 +125,14 @@ export default async function DailySalesPage({ searchParams }: { searchParams: P
 
       <section className="rounded-3xl bg-white p-4 soft-card ring-1 ring-black/5 sm:p-5">
         <h2 className="text-lg font-bold">Trend</h2>
-        <p className="text-xs text-black/50">Bars = net sales a day; line = daily target. Teal = today (live), amber = provisional.</p>
+        <p className="text-xs text-black/50">Bars = net sales a day; line = daily target. Teal = today (live), amber = provisional, grey = no data yet.</p>
         <div className="mt-3 flex h-44 items-end gap-[3px] overflow-x-auto">
           {chart.map((r) => (
             <div key={`${r.date}-${r.store}`} className="relative flex h-full min-w-[10px] flex-1 flex-col justify-end" title={`${formatDate(r.date)}: ${rupees(r.net)} (target ${rupees(r.target)})`}>
               {r.target > 0 && <div className="absolute left-0 right-0 border-t-2 border-dashed border-black/30" style={{ bottom: `${(r.target / max) * 100}%` }} />}
               <div
-                className={`w-full rounded-t ${r.state === "live" ? "bg-[#0b7f91]" : r.state === "provisional" ? "bg-amber-400" : r.achievement !== null && r.achievement >= 1 ? "bg-green-500" : "bg-[#8883d7]"}`}
-                style={{ height: `${Math.max(1, (r.net / max) * 100)}%` }}
+                className={`w-full rounded-t ${r.noData ? "bg-black/10" : r.state === "live" ? "bg-[#0b7f91]" : r.state === "provisional" ? "bg-amber-400" : r.achievement !== null && r.achievement >= 1 ? "bg-green-500" : "bg-[#8883d7]"}`}
+                style={{ height: `${r.noData ? 2 : Math.max(1, (r.net / max) * 100)}%` }}
               />
             </div>
           ))}
@@ -156,7 +162,21 @@ export default async function DailySalesPage({ searchParams }: { searchParams: P
               </tr>
             </thead>
             <tbody>
-              {shown.map((r) => (
+              {shown.map((r) =>
+                r.noData ? (
+                  <tr key={`${r.date}-${r.store}`} className="border-t border-black/5 text-black/40">
+                    <td className={td}>
+                      {formatDate(r.date)} <span className="text-xs">{new Date(`${r.date}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", timeZone: "UTC" })}</span>
+                    </td>
+                    <td className={td}>{r.store === "ALL" ? "All stores" : r.store}</td>
+                    <td className={`${td} text-center`} colSpan={8}>
+                      Not copied from Zoho POS yet — filled in by the nightly copy (or an Excel upload)
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-bold text-black/50">No data yet</span>
+                    </td>
+                  </tr>
+                ) : (
                 <tr key={`${r.date}-${r.store}`} className="border-t border-black/5">
                   <td className={td}>
                     {formatDate(r.date)} <span className="text-xs text-black/40">{new Date(`${r.date}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", timeZone: "UTC" })}</span>
@@ -172,9 +192,12 @@ export default async function DailySalesPage({ searchParams }: { searchParams: P
                   <td className={`${td} text-right`}>{r.change === null ? "—" : <span className={r.change >= 0 ? "text-green-700" : "text-[#d6224a]"}>{r.change >= 0 ? "▲" : "▼"} {Math.abs(Math.round(r.change * 100))}%</span>}</td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${STATE[r.state].cls}`}>{STATE[r.state].text}</span>
+                    {r.partial && <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">Some stores missing</span>}
+                    {r.fromUpload && <span className="ml-1 rounded-full bg-[#8883d7]/15 px-2 py-0.5 text-[11px] font-bold text-[#5b55c4]">Uploaded</span>}
                   </td>
                 </tr>
-              ))}
+                )
+              )}
             </tbody>
           </table>
         </div>

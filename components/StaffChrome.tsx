@@ -26,6 +26,8 @@ type Props = {
   performanceLabel?: string | null;
   /** Offers waiting for this person's approval (null = not the approver). */
   offersWaiting?: number | null;
+  /** CRE of a store: shows the walk-in counter. */
+  walkinCounter?: boolean;
 };
 
 type NavLink = { href: string; label: string; icon: string; badge?: number };
@@ -37,17 +39,21 @@ function staffNav({
   explanationsWaiting,
   performanceLabel,
   offersWaiting,
+  walkinCounter,
 }: {
   role: Role;
   sections: Section[];
   explanationsWaiting: number;
   performanceLabel?: string | null;
   offersWaiting?: number | null;
+  walkinCounter?: boolean;
 }) {
   const can = (s: Section) => sections.includes(s);
   const links: NavLink[] = [
     { href: "/staff", label: "Dashboard", icon: "🏠" },
     ...(performanceLabel ? [{ href: "/staff/performance", label: performanceLabel, icon: "📈" }] : []),
+    // CREs count walk-ins (volume button in the app).
+    ...(walkinCounter ? [{ href: "/staff/walkins", label: "Walk-in counter", icon: "🔢" }] : []),
     // Shown to the offer approver only while something is waiting.
     ...(offersWaiting ? [{ href: "/staff/offer-approvals", label: `Offer approvals (${offersWaiting})`, icon: "✅", badge: offersWaiting }] : []),
     ...(can("service") ? [{ href: "/staff/service", label: "Service Requests", icon: "🛠️" }] : []),
@@ -93,7 +99,7 @@ function staffNav({
   return { links, settings };
 }
 
-export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting }: Props) {
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -122,7 +128,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   }, [menuOpen]);
 
   // Roles & Access decides which sections each person sees.
-  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting });
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter });
   const settingsActive = settings.some((l) => pathname.startsWith(l.href));
 
   const initials =
@@ -294,6 +300,7 @@ export function StaffBottomNav({
   explanationsWaiting = 0,
   performanceLabel,
   offersWaiting,
+  walkinCounter,
 }: {
   role: Role;
   sections: Section[];
@@ -301,11 +308,12 @@ export function StaffBottomNav({
   explanationsWaiting?: number;
   performanceLabel?: string | null;
   offersWaiting?: number | null;
+  walkinCounter?: boolean;
 }) {
   const pathname = usePathname();
   const unread = useUnreadCount(unreadAlerts);
   const [moreOpen, setMoreOpen] = useState(false);
-  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting });
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter });
 
   const main = [
     { href: "/staff", label: "Home", icon: "🏠" },

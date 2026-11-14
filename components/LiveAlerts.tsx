@@ -71,8 +71,28 @@ export function playChime() {
 }
 
 /** Unread count that stays in sync with the live checker (header bell, bottom menu). */
+/** Tell the bell the real number now (e.g. the Alerts page knows it exactly). */
+export function setUnreadCount(n: number) {
+  window.dispatchEvent(new CustomEvent(EVENT, { detail: n }));
+}
+
+/** Ask the bell to check the server again now (after an alert was read). */
+export function recheckAlerts() {
+  window.dispatchEvent(new Event("sy-alerts-check"));
+}
+
+/** Keeps the bell equal to the list shown on the Alerts page. */
+export function SyncUnreadCount({ count }: { count: number }) {
+  useEffect(() => {
+    setUnreadCount(count);
+  }, [count]);
+  return null;
+}
+
 export function useUnreadCount(initial: number) {
   const [count, setCount] = useState(initial);
+  // A new page from the server can bring a newer number.
+  useEffect(() => setCount(initial), [initial]);
   useEffect(() => {
     const on = (e: Event) => setCount((e as CustomEvent<number>).detail);
     window.addEventListener(EVENT, on);
@@ -187,7 +207,9 @@ export function LiveAlerts() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id: a.id }),
                 keepalive: true,
-              }).catch(() => null);
+              })
+                .then(() => recheckAlerts())
+                .catch(() => null);
             }}
             className="min-w-0 flex-1"
           >

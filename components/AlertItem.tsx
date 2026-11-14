@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { parseReport } from "@/lib/report-parse";
 import { ReportBody } from "@/components/ReportBody";
+import { recheckAlerts } from "@/components/LiveAlerts";
 
 /** One unread alert: opening it (or ✓) marks it read, so it disappears from the list. */
 export function AlertItem({
@@ -28,7 +29,9 @@ export function AlertItem({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
       keepalive: true,
-    }).catch(() => null);
+    })
+      .then(() => recheckAlerts())
+      .catch(() => null);
 
   if (gone) return null;
   const report = parseReport(body);

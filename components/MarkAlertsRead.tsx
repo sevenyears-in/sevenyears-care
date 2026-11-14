@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { setUnreadCount } from "@/components/LiveAlerts";
 
 export function MarkAlertsRead() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export function MarkAlertsRead() {
         setBusy(true);
         await fetch("/api/staff/alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null);
         setBusy(false);
+        setUnreadCount(0);
         router.refresh();
       }}
       className="rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-bold transition hover:bg-black hover:text-white disabled:opacity-50"

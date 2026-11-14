@@ -8,6 +8,7 @@ import { AppSetup } from "@/components/InstallApp";
 import { pendingExplanationCount } from "@/lib/explanations";
 import { performanceAccess, performanceMenuLabel } from "@/lib/performance-access";
 import { isOfferApprover } from "@/lib/offers";
+import { creStoreOf } from "@/lib/walkins";
 
 export const metadata: Metadata = {
   title: "Staff",
@@ -21,7 +22,7 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
   if (staff.mustChangePassword) redirect("/staff/password");
 
   const approver = isOfferApprover(staff.userId);
-  const [{ count }, explanationsWaiting, perf, offersWaiting] = await Promise.all([
+  const [{ count }, explanationsWaiting, perf, offersWaiting, creStore] = await Promise.all([
     supabaseAdmin
       .from("staff_notifications")
       .select("id", { count: "exact", head: true })
@@ -36,6 +37,7 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
           .eq("approval_status", "pending")
           .then((r) => r.count ?? 0, () => 0)
       : Promise.resolve(null),
+    creStoreOf(staff).catch(() => null),
   ]);
 
   return (
@@ -51,6 +53,7 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
         explanationsWaiting={explanationsWaiting}
         performanceLabel={perf ? performanceMenuLabel(perf) : null}
         offersWaiting={offersWaiting}
+        walkinCounter={Boolean(creStore)}
       />
       <AppSetup />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-6 sm:py-8">{children}</main>
@@ -61,6 +64,7 @@ export default async function StaffPortalLayout({ children }: { children: ReactN
         explanationsWaiting={explanationsWaiting}
         performanceLabel={perf ? performanceMenuLabel(perf) : null}
         offersWaiting={offersWaiting}
+        walkinCounter={Boolean(creStore)}
       />
     </div>
   );

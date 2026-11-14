@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/helpers";
 import { MarkAlertsRead } from "@/components/MarkAlertsRead";
 import { AlertItem } from "@/components/AlertItem";
+import { SyncUnreadCount } from "@/components/LiveAlerts";
 
 export default async function AlertsPage() {
   const staff = await getCurrentStaff();
@@ -22,6 +23,7 @@ export default async function AlertsPage() {
 
   return (
     <div className="space-y-6">
+      <SyncUnreadCount count={unread} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">Alerts</h1>

@@ -11,7 +11,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.KeyEvent
 import android.view.View
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.URLUtil
@@ -57,6 +59,30 @@ class MainActivity : ComponentActivity() {
 
     private var firstPageLoaded = false
     private var pageFailed = false
+
+    /** Walk-in counter screen is open: volume up = +1, volume down = −1 (instead of changing the volume). */
+    @Volatile
+    private var walkinCounterOn = false
+
+    fun setWalkinCounter(on: Boolean) = runOnUiThread {
+        walkinCounterOn = on
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        val onCounter = walkinCounterOn && (web.url?.contains("/staff/walkins") == true)
+        if (onCounter && (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            // One count per press (holding the button does not repeat).
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val delta = if (code == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
+                web.evaluateJavascript("window.__syWalkin && window.__syWalkin($delta)", null)
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     // Photo picking for <input type="file"> (service request photos)
     private var fileCallback: ValueCallback<Array<Uri>>? = null
