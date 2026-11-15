@@ -32,6 +32,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
@@ -219,6 +220,16 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    /** Opening the app clears its notifications from the phone, so the icon badge does not stay on. */
+    override fun onResume() {
+        super.onResume()
+        try {
+            NotificationManagerCompat.from(this).cancelAll()
+        } catch (e: Exception) {
+            // nothing to clear
+        }
     }
 
     override fun onPause() {
