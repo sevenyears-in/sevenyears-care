@@ -2,7 +2,7 @@
 // Numbers come from the bills and returns copied from Zoho POS (lib/sales-sync.ts).
 // The incentive schemes come from Settings (lib/incentive-rules.ts), each with its own dates.
 
-import { dayState } from "@/lib/business-day";
+import { closingAt, dayState } from "@/lib/business-day";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { asRole, ROLE_LABELS } from "@/lib/roles";
@@ -505,6 +505,8 @@ export type StoreReport = {
   flagged: InvoiceRow[];
   daysInMonth: number;
   daysGone: number;
+  /** Finished days: like daysGone, but today is left out until the store has closed. */
+  daysDone: number;
   /** Today's sales for the store (only in the current month). */
   today: DayFigures;
 };
@@ -871,6 +873,7 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       flagged: bills.filter((b) => discountShare(b) > threshold).sort((x, y) => discountShare(y) - discountShare(x)),
       daysInMonth,
       daysGone,
+      daysDone: daysGone > 0 && today.slice(0, 7) === month && Date.now() < closingAt(settings, store, today) ? daysGone - 1 : daysGone,
       today: (() => {
         const tb = bills.filter((b) => b.invoice_date === today);
         const tr = back.filter((r) => r.return_date === today);
@@ -1141,11 +1144,17 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
       gross: 0,
       discount: 0,
     });
-  const last7 = sum(daily.slice(-7), "last7");
-  const prev7 = sum(daily.slice(-14, -7), "prev7");
+  // Until the store closes, today is not a full day: "last 7 days" ends yesterday, so a morning
+  // is never compared with a full week.
+  const bizRules = await loadPerformanceSettings().catch(() => null);
+  const dayOpen = end === today && (bizRules ? Date.now() < closingAt(bizRules, store, today) : true);
+  const lastFull = dayOpen ? day(end, -1) : end;
+  const last7From = day(lastFull, -6);
+  const prev7From = day(lastFull, -13);
+  const last7 = sum(daily.filter((d) => d.date >= last7From && d.date <= lastFull), "last7");
+  const prev7 = sum(daily.filter((d) => d.date >= prev7From && d.date < last7From), "prev7");
 
   // Weekdays, only closed trading days with sales (today, holidays and days not copied after closing are left out).
-  const bizRules = await loadPerformanceSettings().catch(() => null);
   const wd = new Map<number, { total: number; days: number }>();
   for (const d of daily) {
     if (!d.bills) continue;
@@ -1158,8 +1167,6 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
   }
   const weekdays = [...wd.entries()].map(([w, x]) => ({ day: w, avg: x.total / x.days, days: x.days })).sort((a, b) => b.avg - a.avg);
 
-  const last7From = day(end, -6);
-  const prev7From = day(end, -13);
   const cats = new Map<string, { name: string; last7: number; prev7: number; month: number; units: number }>();
   const unc = new Map<string, { name: string; units: number; net: number }>();
   let uncUnits = 0;
@@ -1182,8 +1189,8 @@ export async function storeTrends(month: string, store: string): Promise<StoreTr
       continue;
     }
     const c = cats.get(raw) ?? { name: raw, last7: 0, prev7: 0, month: 0, units: 0 };
-    if (date >= last7From) c.last7 += gst(l);
-    else if (date >= prev7From) c.prev7 += gst(l);
+    if (date >= last7From && date <= lastFull) c.last7 += gst(l);
+    else if (date >= prev7From && date < last7From) c.prev7 += gst(l);
     if (inMonth) {
       c.month += gst(l);
       c.units += n(l.quantity);

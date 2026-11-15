@@ -13,6 +13,7 @@ import { loadStockState } from "@/lib/stock";
 import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, planView, stockPlanItems, PLAN_ROLE_LABEL, type PlanItem, type PlanRole } from "@/lib/action-plans";
 import { loadFollow, type Follow } from "@/lib/plan-follow";
 import { PlanFollow } from "@/components/PlanFollow";
+import { storePace } from "@/lib/store-pace";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
@@ -335,7 +336,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     // Salary-based view is for management only (not the Store Manager).
     const management = isAdmin(staff.role) || staff.role === "director";
     const [prev, salaries, trends, fl] = await Promise.all([
-      storePreviousPeriod(month, store.store, store.daysGone).catch(() => null),
+      storePreviousPeriod(month, store.store, storePace(store).done).catch(() => null),
       management ? loadSalaries().catch(() => null) : Promise.resolve(null),
       storeTrends(month, store.store).catch(() => null),
       loadFollow(store.store, month, shiftMonth(month, -1)).catch(() => null),
@@ -461,7 +462,7 @@ function PersonView({
   labels: Partial<Record<IncentiveGroup, string>>;
 }) {
   const { days, to: monthEnd } = monthRange(store.month);
-  const daysLeft = Math.max(0, days - store.daysGone);
+  const daysLeft = Math.max(0, days - storePace(store).done);
   const running = daysLeft > 0;
   const inForceAtEnd = rulesOn(rules, monthEnd);
   const achRule = inForceAtEnd.find((r): r is AchievementRule => r.kind === "achievement" && r.groups.includes(p.group));
@@ -790,8 +791,8 @@ function TeamView({
     (t, p) => ({ share: t.share + p.storeShare, bonus: t.bonus + p.bonus, spot: t.spot + p.spotTotal, total: t.total + p.total }),
     { share: 0, bonus: 0, spot: 0, total: 0 }
   );
-  const running = store.daysGone < store.daysInMonth;
-  const perDay = store.nextSlab && running ? store.nextSlab.needed / Math.max(1, store.daysInMonth - store.daysGone) : 0;
+  const { running, daysLeft: slabDaysLeft } = storePace(store);
+  const perDay = store.nextSlab && running ? store.nextSlab.needed / Math.max(1, slabDaysLeft) : 0;
   return (
     <div className="space-y-6">
       <section className="brand-wash soft-card relative overflow-hidden rounded-3xl bg-white p-5 ring-1 ring-black/5 sm:p-7">
@@ -1048,16 +1049,14 @@ function StoreDashboard({
   labels: Partial<Record<IncentiveGroup, string>>;
   trends: StoreTrends | null;
 }) {
-  const running = store.daysGone < store.daysInMonth;
-  const daysLeft = Math.max(0, store.daysInMonth - store.daysGone);
+  const pace = storePace(store);
+  const { running, daysLeft } = pace;
   const abv = store.bills ? store.net / store.bills : 0;
   const upb = store.bills ? store.units / store.bills : 0;
   const discPct = store.gross ? store.discount / store.gross : 0;
   const retPct = store.invoiceNet ? store.returns / store.invoiceNet : 0;
   const othersPct = store.invoiceNet ? store.othersNet / store.invoiceNet : 0;
-  const perDayNow = store.daysGone ? store.net / store.daysGone : 0;
-  const neededPerDay = running && store.target > store.net ? (store.target - store.net) / Math.max(1, daysLeft) : 0;
-  const projected = store.daysGone ? (store.net / store.daysGone) * store.daysInMonth : 0;
+  const { perDay: perDayNow, neededPerDay, projected } = pace;
   const prevAbv = prev && prev.bills ? prev.net / prev.bills : null;
   const prevUpb = prev && prev.bills ? prev.units / prev.bills : null;
 
@@ -1078,8 +1077,9 @@ function StoreDashboard({
     else act.push({ tone: "good", text: `On pace for ${short(projected)} (${pct(projected / store.target)} of target). Keep ${rupees(neededPerDay || perDayNow)} a day.` });
   }
   if (prev) {
-    const c = change(store.net, prev.net);
-    if (c !== null) act.push({ tone: c >= 0 ? "good" : "bad", text: `Sales are ${c >= 0 ? "up" : "down"} ${Math.abs(c * 100).toFixed(0)}% on the same ${store.daysGone} day(s) of last month (${short(prev.net)}).` });
+    const c = change(pace.doneNet, prev.net);
+    if (c !== null && pace.done > 0)
+      act.push({ tone: c >= 0 ? "good" : "bad", text: `Sales are ${c >= 0 ? "up" : "down"} ${Math.abs(c * 100).toFixed(0)}% on the same ${pace.done} day(s) of last month (${short(prev.net)}).` });
   }
   if (othersPct > 0.02) act.push({ tone: "bad", text: `${pct(othersPct, 1)} of sales (${short(store.othersNet)}, ${store.othersBills} bills) are “Others” — no salesperson on the bill. Make sure every bill carries the salesperson.` });
   if (discPct > threshold / 100 / 2 || store.flagged.length)
@@ -1128,7 +1128,7 @@ function StoreDashboard({
         <Tile label="Returns" value={short(store.returns)} note={`${store.returnCount} return(s) · ${pct(retPct, 1)}`} tone={store.returns ? "bad" : "default"} />
         <Tile label="Others" value={short(store.othersNet)} note={`${store.othersBills} bills · ${pct(othersPct, 1)} of sales`} tone={othersPct > 0.02 ? "bad" : "default"} />
       </div>
-      <Panel title="For the Store Manager" intro={`${store.daysGone} of ${store.daysInMonth} days gone${running ? ` · ${daysLeft} day(s) left` : ""}. What to act on now.`}>
+      <Panel title="For the Store Manager" intro={`${pace.done} of ${store.daysInMonth} days done${running ? ` · ${daysLeft} day(s) left${pace.todayOpen ? " (today included)" : ""}` : ""}. What to act on now.`}>
         <ul className="space-y-2 text-sm">
           {act.map((a) => (
             <li key={a.text} className="flex gap-2">

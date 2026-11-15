@@ -1,6 +1,7 @@
 // Action plans from the sales trend, for each role: Store Manager, Assistant Store Manager,
 // Floor Manager, CSA and CRE. Rule-based: every point comes from a number on the page.
 
+import { storePace } from "@/lib/store-pace";
 import type { PeriodTotals, PersonReport, StoreReport, StoreTrends } from "@/lib/performance";
 
 export type PlanRole = "sm" | "asm" | "fm" | "csa" | "cre";
@@ -119,10 +120,7 @@ export function planRoleOf(role: string, roleLabel: string, group: string, asmIs
 type Facts = ReturnType<typeof facts>;
 
 function facts(store: StoreReport, trends: StoreTrends, prev: PeriodTotals | null) {
-  const daysLeft = Math.max(0, store.daysInMonth - store.daysGone);
-  const running = daysLeft > 0;
-  const perDayNow = store.daysGone ? store.net / store.daysGone : 0;
-  const neededPerDay = running && store.target > store.net ? (store.target - store.net) / daysLeft : 0;
+  const { daysLeft, running, perDay: perDayNow, neededPerDay } = storePace(store);
   const sellers = store.people.filter((p) => p.bills > 0 && p.group !== "none");
   const onFloor = store.people.filter((p) => ["sales", "asm", "sm"].includes(p.group));
   const abv = store.bills ? store.net / store.bills : 0;
