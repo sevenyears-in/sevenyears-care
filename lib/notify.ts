@@ -367,6 +367,11 @@ export async function notifyStaff(recipients: Recipient[], alert: StaffAlert, ex
     console.error("staff_notifications insert failed:", error);
   }
 
+  // Phone notification (shows even when the app is closed, like WhatsApp).
+  await import("@/lib/push")
+    .then(({ pushToStaff }) => pushToStaff(list.map((r) => r.id), { title: `${alert.title} · ${alert.ticketNumber}`, body: alert.summary, url: link }))
+    .catch((error) => console.error("Staff push failed:", error));
+
   const meta = { audience: "staff" as const, ticketNumber: alert.ticketNumber };
   const subject = `${alert.title} — ${alert.ticketNumber}`;
   const wa = await whatsappSettings();

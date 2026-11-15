@@ -11,7 +11,7 @@ import {
   type FeedbackFormKind,
 } from "@/lib/feedback-forms";
 import { complaintKind, STAFF_BEHAVIOUR_CATEGORY } from "@/lib/sla";
-import { findDirectors, findRecipients, findStaffByIds, notifyStaff, type Recipient } from "@/lib/notify";
+import { findDirectors, findRecipients, findStaffByIds, notifyStaff, siteUrl, type Recipient } from "@/lib/notify";
 import type { Role } from "@/lib/roles";
 import { afterFeedbackSaved, cleanDisplayName } from "@/lib/reviews";
 
@@ -233,6 +233,10 @@ async function alertFollowUp(subject: FeedbackSubject, title: string, summary: s
   if (subject.kind === "sales") {
     // Sales feedback is not a ticket: dashboard alert only (no ticket link).
     if (people.length === 0) return;
+    const ids = [...new Set(people.map((p) => p.id))];
+    await import("@/lib/push")
+      .then(({ pushToStaff }) => pushToStaff(ids, { title: `${title} · ${subject.number}`, body: summary, url: `${siteUrl()}/staff/alerts` }))
+      .catch((error) => console.error("Staff push failed:", error));
     await supabaseAdmin.from("staff_notifications").insert(
       [...new Map(people.map((p) => [p.id, p])).values()].map((p) => ({
         staff_id: p.id,
