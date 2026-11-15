@@ -52,6 +52,8 @@ export default async function AlertsPage() {
                 ? `/staff/performance/stock?store=${encodeURIComponent(a.title.replace(/^TEST · /, "").replace(/ stock alert$/, ""))}`
               : /^(TEST · )?(Sales update|Your sales|[A-Z][A-Z ]+ sales) \d/.test(a.title)
                 ? "/staff/performance"
+              : /^Store (Opened|Closed( \(updated\))?) · /.test(a.title)
+                ? `/staff/performance?view=team&store=${encodeURIComponent(a.title.replace(/^.* · /, ""))}`
               : a.ticket_id
               ? `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`
               : /feedback/i.test(a.title)

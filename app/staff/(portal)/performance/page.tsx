@@ -14,6 +14,7 @@ import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, planVi
 import { loadFollow, type Follow } from "@/lib/plan-follow";
 import { PlanFollow } from "@/components/PlanFollow";
 import { storePace } from "@/lib/store-pace";
+import { clockIST, loadOpenClose } from "@/lib/store-open-close";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, lateTime, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
@@ -216,6 +217,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const wanted = sp.u && myStores.length ? attendanceCode(sp.u) : me;
   const view = myStores.length && (sp.view === "team" || (!access.eligible && !sp.u)) ? "team" : "person";
   const teamStore = view === "team" ? (myStores.includes((sp.store ?? "").toUpperCase()) ? (sp.store ?? "").toUpperCase() : myStores[0]) : null;
+  // Store opened / closed today (from the punching machine).
+  const openClose = teamStore && month === thisMonth ? await loadOpenClose(teamStore, istNow().date).catch(() => null) : null;
 
   let found: { person: PersonReport; store: StoreReport } | null = null;
   for (const s of report.stores) {
@@ -237,6 +240,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           {monthLabel(month)} · Bills up to {report.lastBillDate ? formatDate(report.lastBillDate) : "—"}
           {report.settings.lastSyncAt ? ` · updated ${formatDateTime(report.settings.lastSyncAt)}` : ""}
         </p>
+        {openClose?.openedAt && (
+          <p className="mt-1 inline-flex flex-wrap gap-x-3 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-800">
+            <span>🟢 Opened today {clockIST(openClose.openedAt)}</span>
+            {openClose.closedAt && <span>🔒 Closed {clockIST(openClose.closedAt)}</span>}
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Link href={qs({ ...sp, ...base }, { m: shiftMonth(month, -1) })} className="rounded-full bg-white px-3 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">

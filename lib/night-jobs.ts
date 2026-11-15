@@ -39,6 +39,9 @@ async function dayTick() {
   const { stockAlertTick } = await import("@/lib/stock-alerts");
   const st = await stockAlertTick().catch((e) => `stock alert error: ${e instanceof Error ? e.message : e}`);
   if (!/off|no slot due|already/.test(st)) console.log("Stock alert:", st);
+  const { openCloseTick } = await import("@/lib/store-open-close");
+  const oc = await openCloseTick().catch((e) => `open/close error: ${e instanceof Error ? e.message : e}`);
+  if (!/nothing due|already running|no store devices/.test(oc)) console.log("Store open/close:", oc);
   const r = await eodTick().catch((e) => `end-of-day error: ${e instanceof Error ? e.message : e}`);
   if (!/off|nothing due|already running/.test(r)) console.log("End-of-day reports:", r);
 }
