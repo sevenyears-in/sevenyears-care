@@ -73,7 +73,7 @@ export function PerformanceAdmin(props: {
   storeMonthTargets: Record<string, number>;
   salaries: Record<string, number>;
   promos: Promo[];
-  unlinked: { name: string; net: number; bills: number }[];
+  unlinked: Unlinked[];
   billsCopied: number;
   lastBillDate: string | null;
   rules: IncentiveRule[];
@@ -1421,7 +1421,9 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
 // Salesperson names without a User ID
 // ------------------------------------------------------------------
 
-function LinksCard({ unlinked, people }: { unlinked: { name: string; net: number; bills: number }[]; people: Person[] }) {
+type Unlinked = { name: string; userId: string; store: string; net: number; bills: number };
+
+function LinksCard({ unlinked, people }: { unlinked: Unlinked[]; people: Person[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -1438,8 +1440,24 @@ function LinksCard({ unlinked, people }: { unlinked: { name: string; net: number
       setBusy("");
     }
   }
+  async function addFormer(u: Unlinked) {
+    if (!confirm(`Add ${u.name} as a former staff member (User ID ${u.userId}${u.store ? `, ${u.store}` : ""})?\n\nThey are added as inactive and cannot log in. You can activate them later in Staff Users if needed.`)) return;
+    setBusy(u.name);
+    setError("");
+    try {
+      await post({ action: "add_former", salesperson: u.name, userId: u.userId, store: u.store });
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add.");
+    } finally {
+      setBusy("");
+    }
+  }
   return (
-    <Card title="Salesperson names to link" intro="These salesperson names on Zoho bills have no User ID, or a User ID that no staff member has. Link each to the right person so their sales count for them.">
+    <Card
+      title="Salesperson names to link"
+      intro="These salesperson names on Zoho bills have no User ID, or a User ID that no staff member has. Link each to the right person so their sales count for them — or, for someone who has left, Add them as former staff (inactive; activate later in Staff Users if needed)."
+    >
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       <ul className="divide-y divide-black/5">
         {unlinked.map((u) => (
@@ -1456,7 +1474,10 @@ function LinksCard({ unlinked, people }: { unlinked: { name: string; net: number
               ))}
             </select>
             <button className={primary} disabled={!choice[u.name] || busy === u.name} onClick={() => link(u.name)}>
-              {busy === u.name ? "Linking…" : "Link"}
+              {busy === u.name ? "Saving…" : "Link"}
+            </button>
+            <button className={ghost} disabled={busy === u.name || !u.userId} onClick={() => addFormer(u)} title="Add as an inactive (former) staff member">
+              ＋ Add as former staff
             </button>
           </li>
         ))}

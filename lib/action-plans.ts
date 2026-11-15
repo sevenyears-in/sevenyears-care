@@ -2,6 +2,7 @@
 // Floor Manager, CSA and CRE. Rule-based: every point comes from a number on the page.
 
 import { storePace } from "@/lib/store-pace";
+import { lateTime } from "@/lib/performance-rules";
 import type { PeriodTotals, PersonReport, StoreReport, StoreTrends } from "@/lib/performance";
 
 export type PlanRole = "sm" | "asm" | "fm" | "csa" | "cre";
@@ -253,7 +254,7 @@ function smPlan(f: Facts): PlanItem[] {
     out.push({
       priority: f.late.some((p) => p.attendance.late >= 3) ? "high" : "medium",
       title: `Late comings: ${names(f.late, 4)}`,
-      detail: `${f.late.reduce((s, p) => s + p.attendance.late, 0)} late arrival(s) this month (${f.late.reduce((s, p) => s + p.attendance.lateMinutes, 0)} min in all). Talk to anyone late 3 times or more; the morning huddle starts on time.`,
+      detail: `${f.late.reduce((s, p) => s + p.attendance.late, 0)} late arrival(s) this month (${lateTime(f.late.reduce((s, p) => s + p.attendance.lateMinutes, 0))} in all). Talk to anyone late 3 times or more; the morning huddle starts on time.`,
     });
   if (f.idle.length) out.push({ priority: "high", title: `On duty but no sales: ${names(f.idle)}`, detail: `Find out why (billing, stock work, training) and put them on the floor in busy hours.` });
   if (f.weak.length) out.push({ priority: "medium", title: `Coach: ${names(f.weak)}`, detail: `Below 60% of the team's middle seller. Pair each with a top seller for two busy days.` });
@@ -302,7 +303,7 @@ function fmPlan(f: Facts): PlanItem[] {
 
 const lateItem = (p?: PersonReport): PlanItem[] =>
   p && p.attendance.late
-    ? [{ priority: p.attendance.late >= 3 ? "high" : "medium", title: `You came late ${p.attendance.late} time(s) this month`, detail: `${p.attendance.lateMinutes} minutes in all. Be on the floor before the shift starts — the morning is when the day's plan is set.` }]
+    ? [{ priority: p.attendance.late >= 3 ? "high" : "medium", title: `You came late ${p.attendance.late} time(s) this month`, detail: `${lateTime(p.attendance.lateMinutes)} in all. Be on the floor before the shift starts — the morning is when the day's plan is set.` }]
     : [];
 
 function csaPlan(f: Facts, p?: PersonReport): PlanItem[] {

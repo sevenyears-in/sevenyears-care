@@ -4,7 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDateTime, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
-import { isMonth, minutesToTime, pct, shiftStartOf } from "@/lib/performance-rules";
+import { isMonth, lateTime, minutesToTime, pct, shiftStartOf } from "@/lib/performance-rules";
 import { dutyAccess, dutyDays, JUSTIFY_KINDS } from "@/lib/duties";
 import { JustifyDay, RemoveJustification } from "@/components/DutyJustify";
 
@@ -95,7 +95,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
             <p className={`mt-1 text-2xl font-bold ${lateDays.length ? "text-amber-700" : ""}`}>{lateDays.length}</p>
             <p className="text-xs text-black/55">
               {shift.name} shift {minutesToTime(shift.start)} · {report.settings.lateGraceMinutes} min grace
-              {lateDays.length ? ` · ${lateDays.reduce((s, d) => s + (d.late ?? 0), 0)} min in all` : ""}
+              {lateDays.length ? ` · ${lateTime(lateDays.reduce((s, d) => s + (d.late ?? 0), 0))} in all` : ""}
             </p>
           </div>
           <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
@@ -126,7 +126,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
                   {d.last ? ` – ${d.last}` : ""}
                 </p>
               )}
-              {d.late ? <p className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Late by {d.late} min</p> : null}
+              {d.late ? <p className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Late by {lateTime(d.late)}</p> : null}
               {d.justification && (
                 <div className="mt-1 text-[11px] text-black/60">
                   <p className="font-semibold text-[#5b55c9]">{kindLabel(d.justification.kind)}</p>

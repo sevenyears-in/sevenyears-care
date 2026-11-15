@@ -124,6 +124,14 @@ export const minutesToTime = (m: number) => {
   const mm = String(m % 60).padStart(2, "0");
   return `${((h + 11) % 12) + 1}:${mm} ${h < 12 ? "am" : "pm"}`;
 };
+/** Late-coming time: "45 min" under an hour, "1 hr 01 min" / "16 hrs 08 min" from an hour up. */
+export function lateTime(minutes: number) {
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h} ${h === 1 ? "hr" : "hrs"} ${String(m % 60).padStart(2, "0")} min`;
+}
+
 /** Start (minutes) of a person's shift. */
 export function shiftStartOf(s: Pick<PerformanceSettings, "shifts" | "personShifts">, userId: string) {
   const list = s.shifts?.length ? s.shifts : DEFAULT_PERFORMANCE_SETTINGS.shifts;

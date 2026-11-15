@@ -280,6 +280,12 @@ export async function loadStaffForPerformance(asmIsFm = true): Promise<StaffRow[
   });
 }
 
+/** User IDs of staff marked inactive (e.g. former staff added from old Zoho bills). */
+async function loadInactiveStaffIds(): Promise<Set<string>> {
+  const { data } = await supabaseAdmin.from("staff_users").select("user_id").eq("is_active", false);
+  return new Set(((data ?? []) as Row[]).map((s) => attendanceCode(s.user_id)));
+}
+
 export async function loadTargets(month: string) {
   const [{ data: staff }, { data: stores }] = await Promise.all([
     supabaseAdmin.from("staff_sales_targets").select("user_id, sales_target, abv_target").eq("month", month),
@@ -518,7 +524,8 @@ export type MonthReport = {
   rules: IncentiveRule[];
   stores: StoreReport[];
   /** Zoho salesperson names whose User ID no active staff member has. */
-  unlinked: { name: string; net: number; bills: number }[];
+  /** Salesperson names whose User ID no staff member has. `userId` is the code on the bills; `store` where most were billed. */
+  unlinked: { name: string; userId: string; store: string; net: number; bills: number }[];
   lastBillDate: string | null;
 };
 
@@ -568,11 +575,12 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
   const poolRule = monthly.find((r): r is StorePoolRule => r.kind === "store_pool") ?? null;
   const lists = [...new Set([...unitRules.map((r) => r.list), ...valueRules.map((r) => r.list)])];
 
-  const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties] = await Promise.all([
+  const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties, formerIds] = await Promise.all([
     loadMonth(month, lists),
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
     loadDuties(month),
+    loadInactiveStaffIds(),
   ]);
   const promoLines = promos.length ? await loadPromoLines(month, promos) : { sold: [], back: [] };
 
@@ -609,16 +617,18 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     return a.per.get(ruleId)!;
   };
 
-  const unlinked = new Map<string, { name: string; net: number; bills: number }>();
+  const unlinked = new Map<string, { name: string; userId: string; stores: Map<string, number>; net: number; bills: number }>();
   const spName = new Map<string, string>();
 
   for (const b of invoices) {
     const id = b.staff_user_id;
-    if (id && !staffById.has(id) && !isPtCode(id) && b.salesperson) {
-      // A User ID on the bill that no active staff member has (e.g. an old code).
-      const u = unlinked.get(b.salesperson) ?? { name: b.salesperson, net: 0, bills: 0 };
+    if (id && !staffById.has(id) && !formerIds.has(id) && !isPtCode(id) && b.salesperson) {
+      // A User ID on the bill that no staff member has (e.g. an old code). Former staff added as
+      // inactive are known: their bills stay in the store total and are not listed here.
+      const u = unlinked.get(b.salesperson) ?? { name: b.salesperson, userId: id, stores: new Map(), net: 0, bills: 0 };
       u.net += b.net;
       u.bills++;
+      u.stores.set(b.store, (u.stores.get(b.store) ?? 0) + 1);
       unlinked.set(b.salesperson, u);
     }
     if (!id) continue;
@@ -890,7 +900,9 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
     settings,
     rules,
     stores,
-    unlinked: [...unlinked.values()].sort((x, y) => y.net - x.net),
+    unlinked: [...unlinked.values()]
+      .map(({ stores, ...u }) => ({ ...u, store: [...stores.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? "" }))
+      .sort((x, y) => y.net - x.net),
     lastBillDate,
   };
   cache = { key: month, at: Date.now(), value };

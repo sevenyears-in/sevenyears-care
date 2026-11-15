@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireStaff } from "@/lib/auth";
+import { hashPassword, normaliseUserId, requireStaff, userIdProblem } from "@/lib/auth";
+import { randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured, zohoRead } from "@/lib/zoho";
 import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDayWithRetry, syncStatus } from "@/lib/sales-sync";
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
 // Actions that only read or copy data (not logged as setting changes).
 const READ_ONLY = new Set(["stock_probe", "sync", "reconcile_day", "alert_test", "eod_regenerate", "stock_alert_test"]);
 // Actions that change tables (targets, salaries, products …): the request is logged as the change.
-const TABLE_ACTIONS = new Set(["backfill_settings", "targets", "salaries", "copy_targets", "store_target", "promo_add", "promo_remove", "link", "group"]);
+const TABLE_ACTIONS = new Set(["backfill_settings", "targets", "salaries", "copy_targets", "store_target", "promo_add", "promo_remove", "link", "group", "add_former"]);
 
 export async function POST(request: Request) {
   const auth = await requireStaff("admin");
@@ -161,6 +162,35 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
       await savePerformanceSettings({ salespersonLinks: links });
       // Bills already copied get the new owner straight away.
       await setSalespersonOwner(name, userId || staffIdFromSalesperson(name, {}));
+      return NextResponse.json({ ok: true });
+    }
+
+    // A salesperson on old Zoho bills who is no longer with us: add them as an inactive staff
+    // member (cannot log in). Their sales then count as known; activate them later if needed.
+    case "add_former": {
+      const salesperson = String(body.salesperson ?? "").replace(/\s+/g, " ").trim();
+      const userId = normaliseUserId(body.userId);
+      const idProblem = userIdProblem(userId);
+      if (idProblem) return bad(`The code on these bills (${userId || "none"}) cannot be used as a User ID.`);
+      const fullName = (salesperson.replace(/^\s*[\w.-]+\s*[-–:]\s*/, "").trim() || salesperson).toUpperCase().slice(0, 80);
+      if (!fullName) return bad("Name missing.");
+      const { data: existing } = await supabaseAdmin.from("staff_users").select("id, full_name, is_active").eq("user_id", userId).maybeSingle();
+      if (existing) return bad(`User ID ${userId} already belongs to ${existing.full_name}${existing.is_active ? "" : " (inactive)"}.`);
+      const store = String(body.store ?? "").trim().toUpperCase();
+      const { error } = await supabaseAdmin.from("staff_users").insert({
+        user_id: userId,
+        full_name: fullName,
+        // Random password nobody knows; the account is inactive, so it cannot log in anyway.
+        password_hash: hashPassword(randomBytes(24).toString("base64url")),
+        role: "csa",
+        store_name: store || null,
+        is_active: false,
+        must_change_password: true,
+      });
+      if (error) {
+        console.error("Add former staff error:", error);
+        return NextResponse.json({ error: "Could not add the staff member." }, { status: 500 });
+      }
       return NextResponse.json({ ok: true });
     }
 

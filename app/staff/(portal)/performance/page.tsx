@@ -16,7 +16,7 @@ import { PlanFollow } from "@/components/PlanFollow";
 import { storePace } from "@/lib/store-pace";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
-import { groupName, isMonth, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { groupName, isMonth, lateTime, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import { nextSlab, rulesOn, type AbvRule, type AchievementRule, type IncentiveRule, type WowRule } from "@/lib/incentive-rules";
 
 export const dynamic = "force-dynamic";
@@ -914,7 +914,7 @@ function TeamView({
                   <td className={`${tdc} text-right ${p.attendance.absences ? "font-semibold text-[#d6224a]" : ""}`}><Link href={dutiesHref(p.userId)} className="underline decoration-dotted underline-offset-2 hover:text-[#5b55c9]">
                       {p.attendance.found || p.attendance.justified ? `${p.attendance.duties + p.attendance.noData}/${p.attendance.required}` : "—"}
                     </Link>
-                    {p.attendance.late ? <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800" title={`${p.attendance.lateMinutes} min late in all`}>{p.attendance.late} late</span> : null}</td>
+                    {p.attendance.late ? <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800" title={`${lateTime(p.attendance.lateMinutes)} late in all`}>{p.attendance.late} late</span> : null}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.storeShare)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.bonus)}</td>
                   <td className={`${tdc} text-right`}>{rupees(p.spotTotal)}</td>
@@ -1101,7 +1101,7 @@ function StoreDashboard({
       tone: lateList.some((p) => p.attendance.late >= 3) ? "bad" : "warn",
       text: `Late comings: ${lateList
         .slice(0, 5)
-        .map((p) => `${p.name.split(" ").slice(0, 2).join(" ")} ${p.attendance.late}× (${p.attendance.lateMinutes} min)`)
+        .map((p) => `${p.name.split(" ").slice(0, 2).join(" ")} ${p.attendance.late}× (${lateTime(p.attendance.lateMinutes)})`)
         .join(", ")}. Open Duties to see the days.`,
     });
   if (noSales.length) act.push({ tone: "bad", text: `${noSales.map((p) => p.name).join(", ")} came to work but have no sales this month.` });
