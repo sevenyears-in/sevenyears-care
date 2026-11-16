@@ -240,11 +240,27 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           {monthLabel(month)} · Bills up to {report.lastBillDate ? formatDate(report.lastBillDate) : "—"}
           {report.settings.lastSyncAt ? ` · updated ${formatDateTime(report.settings.lastSyncAt)}` : ""}
         </p>
-        {openClose?.openedAt && (
-          <p className="mt-1 inline-flex flex-wrap gap-x-3 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-800">
-            <span>🟢 Opened today {clockIST(openClose.openedAt)}</span>
-            {openClose.closedAt && <span>🔒 Closed {clockIST(openClose.closedAt)}</span>}
-          </p>
+        {openClose?.openedAt && teamStore && (
+          <Link
+            href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}
+            className={`mt-1 inline-flex flex-wrap gap-x-3 rounded-full px-3 py-1 text-xs font-semibold hover:opacity-90 ${
+              openClose.openSop === "violation" || openClose.closeSop === "violation" ? "bg-red-50 text-red-800" : "bg-green-50 text-green-800"
+            }`}
+          >
+            <span>
+              🟢 Opened today {clockIST(openClose.openedAt)}
+              {openClose.openedBy ? ` by ${openClose.openedBy}` : ""}
+              {openClose.openSop === "violation" ? " ⚠ SOP violation" : openClose.openSop === "approved" ? " (approved)" : ""}
+            </span>
+            {openClose.closedAt && (
+              <span>
+                🔒 Closed {clockIST(openClose.closedAt)}
+                {openClose.closedBy ? ` by ${openClose.closedBy}` : ""}
+                {openClose.closeSop === "violation" ? " ⚠ SOP violation" : openClose.closeSop === "approved" ? " (approved)" : ""}
+              </span>
+            )}
+            <span className="underline">History →</span>
+          </Link>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">

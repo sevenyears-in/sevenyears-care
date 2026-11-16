@@ -10,7 +10,19 @@ import { DEFAULT_RULES, type IncentiveRule } from "@/lib/incentive-rules";
 const KEY = "sales_performance";
 const RULES_KEY = "incentive_rules";
 
-export async function loadPerformanceSettings(): Promise<PerformanceSettings> {
+// Settings are read on almost every page: kept for 20 seconds (cleared at once when saved here).
+const SETTINGS_TTL = 20_000;
+let settingsCache: { at: number; value: PerformanceSettings } | null = null;
+let rulesCache: { at: number; value: IncentiveRule[] } | null = null;
+
+export async function loadPerformanceSettings(fresh = false): Promise<PerformanceSettings> {
+  if (!fresh && settingsCache && Date.now() - settingsCache.at < SETTINGS_TTL) return settingsCache.value;
+  const value = await readPerformanceSettings();
+  settingsCache = { at: Date.now(), value };
+  return value;
+}
+
+async function readPerformanceSettings(): Promise<PerformanceSettings> {
   try {
     const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", KEY).maybeSingle();
     const v = (data?.value ?? {}) as Partial<PerformanceSettings>;
@@ -59,25 +71,32 @@ export function withRoleNames(s: PerformanceSettings): PerformanceSettings {
 }
 
 export async function savePerformanceSettings(change: Partial<PerformanceSettings>) {
-  const current = await loadPerformanceSettings();
+  const current = await loadPerformanceSettings(true);
   const value = { ...current, ...change };
+  settingsCache = null;
   const { error } = await supabaseAdmin.from("app_settings").upsert({ key: KEY, value, updated_at: new Date().toISOString() });
   if (error) throw error;
+  settingsCache = null;
   return value;
 }
 
 /** Incentive schemes (the policy defaults until something is changed in Settings). */
-export async function loadIncentiveRules(): Promise<IncentiveRule[]> {
+export async function loadIncentiveRules(fresh = false): Promise<IncentiveRule[]> {
+  if (!fresh && rulesCache && Date.now() - rulesCache.at < SETTINGS_TTL) return rulesCache.value;
+  let value: IncentiveRule[];
   try {
     const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", RULES_KEY).maybeSingle();
     const rules = (data?.value as { rules?: IncentiveRule[] } | null)?.rules;
-    return Array.isArray(rules) && rules.length ? rules : DEFAULT_RULES;
+    value = Array.isArray(rules) && rules.length ? rules : DEFAULT_RULES;
   } catch {
     return DEFAULT_RULES;
   }
+  rulesCache = { at: Date.now(), value };
+  return value;
 }
 
 export async function saveIncentiveRules(rules: IncentiveRule[]) {
+  rulesCache = null;
   const { error } = await supabaseAdmin.from("app_settings").upsert({ key: RULES_KEY, value: { rules }, updated_at: new Date().toISOString() });
   if (error) throw error;
 }

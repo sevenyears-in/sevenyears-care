@@ -3,6 +3,12 @@
 // (opening time = first punch − 2 minutes); the last punch closes it. "Store Opened" and
 // "Store Closed" go to the store's Store Manager / ASM and management (app + phone).
 //
+// SOP: only the Store Manager or the ASM / Floor Manager of the store opens and closes it.
+// Opening: the first punch is the opener; if it is someone else but the SM / ASM punches within
+// 60 seconds after it, the SM / ASM opened the store. Closing: the same with the last punch (an
+// SM / ASM punch within 60 seconds before it). Otherwise it is an SOP violation, which the
+// Director (or the Super Admin) can approve with a note.
+//
 // Closing: staff leaving early punch out in the evening, the closers punch around or after
 // closing time. Once a closer has punched and the machine has been quiet for 45 minutes (and
 // the office PC is still sending punches), the last punch is the closing. If no one punches
@@ -16,6 +22,10 @@ import { timeToMinutes } from "@/lib/performance-rules";
 import { CORPORATE_OFFICE } from "@/lib/stores";
 import { siteUrl } from "@/lib/notify";
 import { pushToStaff } from "@/lib/push";
+
+/** Within this many seconds of the first / last punch an SM / ASM punch still counts as theirs. */
+const SOP_WINDOW_SEC = 60;
+export type Sop = "ok" | "violation" | "approved";
 
 const DEVICES_KEY = "store_devices";
 /** Opening shown this many minutes before the first punch. */
@@ -32,7 +42,20 @@ const EARLIEST_OPEN = 5 * 60;
 const NOTIFY_WITHIN_MIN = 60;
 const NOTIFY_CLOSE_WITHIN_MIN = 180;
 
-export type OpenClose = { day: string; store: string; openedAt: string | null; closedAt: string | null; firstPunch: string | null; lastPunch: string | null };
+export type OpenClose = {
+  day: string;
+  store: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  firstPunch: string | null;
+  lastPunch: string | null;
+  openedBy: string | null;
+  openSop: Sop | null;
+  openApproval: string | null;
+  closedBy: string | null;
+  closeSop: Sop | null;
+  closeApproval: string | null;
+};
 
 const g = globalThis as unknown as { __syOpenCloseBusy?: boolean };
 
@@ -84,10 +107,81 @@ export async function deviceStores(): Promise<Record<string, string>> {
 // Reading
 // ------------------------------------------------------------------
 
+const OC_COLS =
+  "day, store, opened_at, closed_at, first_punch, last_punch, opened_by_name, open_sop, open_approved_by, open_approval_note, closed_by_name, close_sop, close_approved_by, close_approval_note";
+type OcRow = Record<string, string | null>;
+const toOpenClose = (d: OcRow): OpenClose => ({
+  day: String(d.day),
+  store: String(d.store),
+  openedAt: d.opened_at,
+  closedAt: d.closed_at,
+  firstPunch: d.first_punch,
+  lastPunch: d.last_punch,
+  openedBy: d.opened_by_name,
+  openSop: (d.open_sop as Sop | null) ?? null,
+  openApproval: d.open_approved_by ? `${d.open_approved_by}${d.open_approval_note ? ` — ${d.open_approval_note}` : ""}` : null,
+  closedBy: d.closed_by_name,
+  closeSop: (d.close_sop as Sop | null) ?? null,
+  closeApproval: d.close_approved_by ? `${d.close_approved_by}${d.close_approval_note ? ` — ${d.close_approval_note}` : ""}` : null,
+});
+
 export async function loadOpenClose(store: string, day: string): Promise<OpenClose | null> {
-  const { data } = await supabaseAdmin.from("store_open_close").select("day, store, opened_at, closed_at, first_punch, last_punch").eq("store", store).eq("day", day).maybeSingle();
-  if (!data) return null;
-  return { day: data.day, store: data.store, openedAt: data.opened_at, closedAt: data.closed_at, firstPunch: data.first_punch, lastPunch: data.last_punch };
+  const { data } = await supabaseAdmin.from("store_open_close").select(OC_COLS).eq("store", store).eq("day", day).maybeSingle();
+  return data ? toOpenClose(data as OcRow) : null;
+}
+
+/** Openings and closings of a store, newest first. */
+export async function loadOpenCloseHistory(store: string, days = 45): Promise<OpenClose[]> {
+  const since = shiftDay(istNow().date, -days);
+  const { data } = await supabaseAdmin.from("store_open_close").select(OC_COLS).eq("store", store).gte("day", since).order("day", { ascending: false });
+  return ((data ?? []) as OcRow[]).map(toOpenClose);
+}
+
+/** Director / Super Admin approves an SOP violation (opening or closing) with a note. */
+export async function approveSop(day: string, store: string, kind: "open" | "close", by: string, note: string) {
+  const col = kind === "open" ? "open" : "close";
+  const { data, error } = await supabaseAdmin
+    .from("store_open_close")
+    .update({ [`${col}_sop`]: "approved", [`${col}_approved_by`]: by, [`${col}_approved_at`]: new Date().toISOString(), [`${col}_approval_note`]: note.slice(0, 300) })
+    .eq("day", day)
+    .eq("store", store)
+    .eq(`${col}_sop`, "violation")
+    .select("store");
+  if (error) throw error;
+  return Boolean(data?.length);
+}
+
+// ------------------------------------------------------------------
+// Who opened / closed (SOP)
+// ------------------------------------------------------------------
+
+type Person = { id: string; name: string; group: string; store: string | null };
+type Punch = { code: string; at: number };
+
+async function staffByCode(): Promise<Map<string, Person>> {
+  const { loadStaffForPerformance } = await import("@/lib/performance");
+  const s = await loadPerformanceSettings();
+  const list = await loadStaffForPerformance(s.asmIsFm);
+  return new Map(list.map((p) => [p.userId, { id: p.id, name: p.name, group: p.group, store: p.store }]));
+}
+
+const roleShort = (p: Person) => (p.group === "sm" ? "SM" : "ASM / FM");
+
+/** Opener (kind "open") or closer ("close") of a store-day, and whether it follows the SOP. */
+function whoAndSop(list: Punch[], store: string, staff: Map<string, Person>, kind: "open" | "close") {
+  const isLead = (code: string) => {
+    const p = staff.get(code);
+    return Boolean(p && (p.group === "sm" || p.group === "asm") && (!p.store || p.store === store));
+  };
+  const label = (code: string) => {
+    const p = staff.get(code);
+    return p ? (isLead(code) ? `${p.name} (${roleShort(p)})` : p.name) : `User ID ${code}`;
+  };
+  const edge = kind === "open" ? list[0] : list[list.length - 1];
+  if (isLead(edge.code)) return { code: edge.code, name: label(edge.code), sop: "ok" as Sop, note: null as string | null };
+  const near = list.find((q) => isLead(q.code) && Math.abs(q.at - edge.at) <= SOP_WINDOW_SEC * 1000 && (kind === "open" ? q.at >= edge.at : q.at <= edge.at));
+  if (near) return { code: near.code, name: label(near.code), sop: "ok" as Sop, note: `${label(edge.code)} punched first, ${label(near.code)} within a minute` };
+  return { code: edge.code, name: label(edge.code), sop: "violation" as Sop, note: null };
 }
 
 // ------------------------------------------------------------------
@@ -99,8 +193,14 @@ async function recipientsOf(store: string) {
   return recipients(store);
 }
 
-async function notify(store: string, title: string, body: string) {
-  const people = await recipientsOf(store);
+async function notify(store: string, title: string, body: string, violation = false) {
+  let people = await recipientsOf(store);
+  if (violation) {
+    const { findDirectors } = await import("@/lib/notify");
+    const directors = await findDirectors(store).catch(() => []);
+    const seen = new Set(people.map((p) => p.id));
+    people = [...people, ...directors.filter((d) => !seen.has(d.id)).map((d) => ({ ...people[0], ...d }))] as typeof people;
+  }
   if (!people.length) return 0;
   await supabaseAdmin.from("staff_notifications").insert(people.map((p) => ({ staff_id: p.id, ticket_type: null, ticket_id: null, ticket_number: null, title, body })));
   await pushToStaff(
@@ -110,7 +210,18 @@ async function notify(store: string, title: string, body: string) {
   return people.length;
 }
 
-type Row = { day: string; store: string; first_punch: string | null; opened_notified_at: string | null; last_punch: string | null; closed_notified_at: string | null };
+type Row = {
+  day: string;
+  store: string;
+  first_punch: string | null;
+  opened_notified_at: string | null;
+  last_punch: string | null;
+  closed_notified_at: string | null;
+  opened_by: string | null;
+  open_sop: Sop | null;
+  closed_by: string | null;
+  close_sop: Sop | null;
+};
 
 export async function openCloseTick(at = new Date()): Promise<string> {
   if (g.__syOpenCloseBusy) return "already running";
@@ -124,29 +235,34 @@ export async function openCloseTick(at = new Date()): Promise<string> {
     const [settings, att] = await Promise.all([loadPerformanceSettings(), attendanceSettings()]);
     const syncFresh = att.lastSyncAt ? at.getTime() - Date.parse(att.lastSyncAt) < 6 * 60_000 : false;
     const notes: string[] = [];
+    const staff = await staffByCode();
 
     for (const day of days) {
       const from = new Date(dayStartUtc(day) + EARLIEST_OPEN * 60_000).toISOString();
       const to = new Date(dayStartUtc(day) + 86_400_000).toISOString();
       const { data: punches } = await supabaseAdmin
         .from("attendance_punches")
-        .select("device, punch_time")
+        .select("device, punch_time, emp_code")
         .gte("punch_time", from)
         .lt("punch_time", to)
         .not("device", "is", null)
         .order("punch_time")
         .limit(5000);
-      const byStore = new Map<string, { device: string; first: string; last: string }>();
-      for (const p of (punches ?? []) as { device: string; punch_time: string }[]) {
+      const byStore = new Map<string, { device: string; first: string; last: string; list: Punch[] }>();
+      for (const p of (punches ?? []) as { device: string; punch_time: string; emp_code: string }[]) {
         const store = devices[String(p.device)];
         if (!store) continue;
+        const punch = { code: attendanceCode(p.emp_code), at: Date.parse(p.punch_time) };
         const cur = byStore.get(store);
-        if (!cur) byStore.set(store, { device: String(p.device), first: p.punch_time, last: p.punch_time });
-        else cur.last = p.punch_time;
+        if (!cur) byStore.set(store, { device: String(p.device), first: p.punch_time, last: p.punch_time, list: [punch] });
+        else {
+          cur.last = p.punch_time;
+          cur.list.push(punch);
+        }
       }
       if (!byStore.size) continue;
 
-      const { data: existing } = await supabaseAdmin.from("store_open_close").select("day, store, first_punch, opened_notified_at, last_punch, closed_notified_at").eq("day", day);
+      const { data: existing } = await supabaseAdmin.from("store_open_close").select("day, store, first_punch, opened_notified_at, last_punch, closed_notified_at, opened_by, open_sop, closed_by, close_sop").eq("day", day);
       const rows = new Map(((existing ?? []) as Row[]).map((r) => [r.store, r]));
 
       for (const [store, p] of byStore) {
@@ -164,6 +280,15 @@ export async function openCloseTick(at = new Date()): Promise<string> {
           // An earlier punch arrived late from the office PC.
           await supabaseAdmin.from("store_open_close").update({ first_punch: p.first, opened_at: new Date(firstMs - OPEN_EARLY_MIN * 60_000).toISOString(), updated_at: at.toISOString() }).eq("day", day).eq("store", store);
         }
+        // Who opened (SOP). Kept up to date while punches arrive; an approval is never undone.
+        const opener = whoAndSop(p.list, store, staff, "open");
+        if (row?.open_sop !== "approved" && (row?.opened_by !== opener.code || row?.open_sop !== opener.sop)) {
+          await supabaseAdmin
+            .from("store_open_close")
+            .update({ opened_by: opener.code, opened_by_name: opener.name, open_sop: opener.sop, open_sop_note: opener.note })
+            .eq("day", day)
+            .eq("store", store);
+        }
         if (!row?.opened_notified_at) {
           const { data: claimed } = await supabaseAdmin
             .from("store_open_close")
@@ -174,7 +299,11 @@ export async function openCloseTick(at = new Date()): Promise<string> {
             .select("store");
           if (claimed?.length && at.getTime() - firstMs <= NOTIFY_WITHIN_MIN * 60_000) {
             const openedAt = clockIST(firstMs - OPEN_EARLY_MIN * 60_000);
-            const n = await notify(store, `Store Opened · ${store}`, `${store} opened at ${openedAt} (first punch ${clockIST(firstMs)}).`);
+            const v = opener.sop === "violation";
+            const body = v
+              ? `⚠ SOP violation: ${store} opened at ${openedAt} by ${opener.name} — not the SM or ASM / FM. Needs the Director's approval.`
+              : `${store} opened at ${openedAt} by ${opener.name}.`;
+            const n = await notify(store, `Store Opened · ${store}`, body, v);
             notes.push(`${store} opened ${openedAt} → ${n}`);
           }
         }
@@ -189,28 +318,78 @@ export async function openCloseTick(at = new Date()): Promise<string> {
           if (row && !row.closed_notified_at && row.last_punch !== p.last) await supabaseAdmin.from("store_open_close").update({ last_punch: p.last, updated_at: at.toISOString() }).eq("day", day).eq("store", store);
           continue;
         }
+        const closer = whoAndSop(p.list, store, staff, "close");
+        const closerCols = row?.close_sop === "approved" ? {} : { closed_by: closer.code, closed_by_name: closer.name, close_sop: closer.sop, close_sop_note: closer.note };
+        const closeBody = (time: string, updated = false) =>
+          closer.sop === "violation"
+            ? `⚠ SOP violation: ${store} closed at ${time} by ${closer.name} — not the SM or ASM / FM. Needs the Director's approval.${updated ? " (later punch than the earlier notice)" : ""}`
+            : `${store} closed at ${time} by ${closer.name}.${updated ? " (later punch than the earlier notice)" : ""}`;
         if (!row?.closed_notified_at) {
           const { data: claimed } = await supabaseAdmin
             .from("store_open_close")
-            .update({ last_punch: p.last, closed_at: p.last, closed_notified_at: at.toISOString(), updated_at: at.toISOString() })
+            .update({ last_punch: p.last, closed_at: p.last, closed_notified_at: at.toISOString(), updated_at: at.toISOString(), ...closerCols })
             .eq("day", day)
             .eq("store", store)
             .is("closed_notified_at", null)
             .select("store");
           if (claimed?.length && at.getTime() - lastMs <= NOTIFY_CLOSE_WITHIN_MIN * 60_000) {
-            const n = await notify(store, `Store Closed · ${store}`, `${store} closed at ${clockIST(lastMs)} (last punch).`);
+            const n = await notify(store, `Store Closed · ${store}`, closeBody(clockIST(lastMs)), closer.sop === "violation");
             notes.push(`${store} closed ${clockIST(lastMs)} → ${n}`);
           }
         } else if (row.last_punch && Date.parse(row.last_punch) < lastMs) {
           // Someone punched after the closing notice: the closing moves to that punch.
-          await supabaseAdmin.from("store_open_close").update({ last_punch: p.last, closed_at: p.last, updated_at: at.toISOString() }).eq("day", day).eq("store", store);
-          const n = await notify(store, `Store Closed (updated) · ${store}`, `${store} closed at ${clockIST(lastMs)} — a later punch than the earlier notice.`);
+          await supabaseAdmin.from("store_open_close").update({ last_punch: p.last, closed_at: p.last, updated_at: at.toISOString(), ...closerCols }).eq("day", day).eq("store", store);
+          const n = await notify(store, `Store Closed (updated) · ${store}`, closeBody(clockIST(lastMs), true), closer.sop === "violation");
           notes.push(`${store} close updated ${clockIST(lastMs)} → ${n}`);
         }
       }
+    }
+    // Earlier days recorded before the SOP check (or still missing who opened / closed): fill in
+    // quietly, without notices. Every 10 minutes is enough.
+    if (now.minutes % 10 === 0) {
+      const filled = await fillPastSop(staff, devices, now.date).catch((e) => `fill error: ${e instanceof Error ? e.message : e}`);
+      if (filled) notes.push(filled);
     }
     return notes.length ? notes.join("; ") : "nothing due";
   } finally {
     g.__syOpenCloseBusy = false;
   }
+}
+
+async function fillPastSop(staff: Map<string, Person>, devices: Record<string, string>, today: string): Promise<string> {
+  const { data } = await supabaseAdmin
+    .from("store_open_close")
+    .select("day, store, closed_at, opened_by, open_sop, closed_by, close_sop")
+    .gte("day", shiftDay(today, -30))
+    .lt("day", today)
+    .or("opened_by.is.null,and(closed_at.not.is.null,closed_by.is.null)");
+  let n = 0;
+  for (const r of (data ?? []) as { day: string; store: string; closed_at: string | null; opened_by: string | null; open_sop: Sop | null; closed_by: string | null; close_sop: Sop | null }[]) {
+    const deviceIds = Object.entries(devices).filter(([, st]) => st === r.store).map(([d]) => d);
+    if (!deviceIds.length) continue;
+    const { data: punches } = await supabaseAdmin
+      .from("attendance_punches")
+      .select("punch_time, emp_code")
+      .in("device", deviceIds)
+      .gte("punch_time", new Date(dayStartUtc(r.day) + EARLIEST_OPEN * 60_000).toISOString())
+      .lt("punch_time", new Date(dayStartUtc(r.day) + 86_400_000).toISOString())
+      .order("punch_time")
+      .limit(2000);
+    const list: Punch[] = ((punches ?? []) as { punch_time: string; emp_code: string }[]).map((p) => ({ code: attendanceCode(p.emp_code), at: Date.parse(p.punch_time) }));
+    if (!list.length) continue;
+    const update: Record<string, unknown> = {};
+    if (!r.opened_by && r.open_sop !== "approved") {
+      const o = whoAndSop(list, r.store, staff, "open");
+      Object.assign(update, { opened_by: o.code, opened_by_name: o.name, open_sop: o.sop, open_sop_note: o.note });
+    }
+    if (r.closed_at && !r.closed_by && r.close_sop !== "approved") {
+      const c = whoAndSop(list, r.store, staff, "close");
+      Object.assign(update, { closed_by: c.code, closed_by_name: c.name, close_sop: c.sop, close_sop_note: c.note });
+    }
+    if (Object.keys(update).length) {
+      await supabaseAdmin.from("store_open_close").update(update).eq("day", r.day).eq("store", r.store);
+      n++;
+    }
+  }
+  return n ? `filled who opened / closed for ${n} earlier day(s)` : "";
 }

@@ -6,7 +6,7 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { StaffUser } from "@/lib/auth";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
-import { loadStaffForPerformance } from "@/lib/performance";
+import { defaultGroup, isGroup, type IncentiveGroup } from "@/lib/performance-rules";
 import { merchStores } from "@/lib/merch-access";
 
 export type Walkins = { store: string; day: string; count: number; updated_by_name: string | null; updated_at: string };
@@ -24,10 +24,14 @@ export async function loadWalkinsMany(stores: string[], day: string): Promise<Ma
 
 /** The store whose walk-ins this person posts as CRE (their own store), or null. */
 export async function creStoreOf(staff: StaffUser): Promise<string | null> {
-  const s = await loadPerformanceSettings();
-  const rows = await loadStaffForPerformance(s.asmIsFm);
-  const me = rows.find((r) => r.id === staff.id);
-  return me && me.group === "cashier_cre" && me.store ? me.store : null;
+  // Only this person's group (one small read), not the whole staff list — this runs on every page.
+  const [s, { data }] = await Promise.all([
+    loadPerformanceSettings(),
+    supabaseAdmin.from("staff_users").select("incentive_group").eq("id", staff.id).maybeSingle(),
+  ]);
+  const group = isGroup(data?.incentive_group) ? (data!.incentive_group as IncentiveGroup) : defaultGroup(staff.role, staff.access.roleLabel, s.asmIsFm);
+  const store = (staff.storeName ?? "").toUpperCase();
+  return group === "cashier_cre" && store ? store : null;
 }
 
 /** Can this person post walk-ins for the store? CRE of the store, or SM / ASM / Floor Manager / management. */

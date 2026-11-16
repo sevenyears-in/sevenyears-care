@@ -14,3 +14,19 @@ create table if not exists public.store_open_close (
   primary key (day, store)
 );
 alter table public.store_open_close enable row level security;
+
+-- Who opened / closed and the SOP check (SM or ASM / FM only; Director approves deviations).
+alter table public.store_open_close add column if not exists opened_by text;
+alter table public.store_open_close add column if not exists opened_by_name text;
+alter table public.store_open_close add column if not exists open_sop text check (open_sop in ('ok','violation','approved'));
+alter table public.store_open_close add column if not exists open_sop_note text;
+alter table public.store_open_close add column if not exists open_approved_by text;
+alter table public.store_open_close add column if not exists open_approved_at timestamptz;
+alter table public.store_open_close add column if not exists open_approval_note text;
+alter table public.store_open_close add column if not exists closed_by text;
+alter table public.store_open_close add column if not exists closed_by_name text;
+alter table public.store_open_close add column if not exists close_sop text check (close_sop in ('ok','violation','approved'));
+alter table public.store_open_close add column if not exists close_sop_note text;
+alter table public.store_open_close add column if not exists close_approved_by text;
+alter table public.store_open_close add column if not exists close_approved_at timestamptz;
+alter table public.store_open_close add column if not exists close_approval_note text;
