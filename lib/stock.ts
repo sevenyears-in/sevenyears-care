@@ -84,7 +84,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
   const stores = new Set<string>();
   try {
     // 1. Active items with their total stock, 200 a request.
-    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; tracked: boolean }>();
+    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; cost: number | null; tracked: boolean }>();
     for (let page = 1; page <= 400; page++) {
       if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests while listing items (Zoho limit).`);
       await pace();
@@ -94,7 +94,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         const id = str(i.item_id);
         if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
         const mrp = num(i.label_rate) > 0 ? num(i.label_rate) : num(i.rate);
-        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, tracked: i.track_inventory !== false });
+        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, cost: num(i.purchase_rate) > 0 ? num(i.purchase_rate) : null, tracked: i.track_inventory !== false });
       }
       if (!obj(res.page_context).has_more_page) break;
     }
@@ -106,7 +106,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       for (const r of data ?? []) prev.set(`${r.store}|${r.item_id}`, (r.out_since as string | null) ?? null);
       if (!data || data.length < 1000) break;
     }
-    type Row = { store: string; item_id: string; sku: string | null; name: string; category: string | null; rate: number; stock: number };
+    type Row = { store: string; item_id: string; sku: string | null; name: string; category: string | null; rate: number; cost: number | null; stock: number };
     let pending: Row[] = [];
     const flush = async () => {
       if (!pending.length) return;
@@ -149,9 +149,10 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         if (!m) continue;
         seen.add(id);
         const mrp = num(it.label_rate) > 0 ? num(it.label_rate) : m.rate;
+        const cost = num(it.purchase_rate) > 0 ? num(it.purchase_rate) : m.cost;
         for (const [store, stock] of stockByStore(it)) {
           stores.add(store);
-          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: mrp, stock });
+          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: mrp, cost, stock });
         }
       }
       i += chunk.length;
@@ -172,7 +173,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       if (seen.has(id)) continue;
       for (const store of stores) {
         if (!prev.has(`${store}|${id}`) && !sold60.get(store)?.has(id)) continue;
-        pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, stock: 0 });
+        pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, cost: m.cost, stock: 0 });
       }
       if (pending.length >= 2000) await flush();
     }
@@ -223,14 +224,14 @@ export async function daysWithData(store: string, from: string, to: string): Pro
   return num(data);
 }
 
-export type StockRow = { item_id: string; sku: string | null; name: string | null; category: string | null; rate: number | null; stock: number; out_since: string | null; updated_at: string };
+export type StockRow = { item_id: string; sku: string | null; name: string | null; category: string | null; rate: number | null; cost: number | null; stock: number; out_since: string | null; updated_at: string };
 
 export async function stockFor(store: string): Promise<StockRow[]> {
   const out: StockRow[] = [];
   for (let start = 0; start < 200_000; start += 1000) {
     const { data, error } = await supabaseAdmin
       .from("stock_levels")
-      .select("item_id, sku, name, category, rate, stock, out_since, updated_at")
+      .select("item_id, sku, name, category, rate, cost, stock, out_since, updated_at")
       .eq("store", store)
       .order("item_id")
       .range(start, start + 999);

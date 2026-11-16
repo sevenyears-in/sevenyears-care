@@ -22,6 +22,8 @@ export type MerchItem = {
   units28: number;
   stock: number | null;
   rate: number | null;
+  /** Purchase cost (Zoho purchase rate), when Zoho has one. */
+  cost: number | null;
   sellThrough: number | null;
   cover: number | null;
   outSince: string | null;
@@ -45,6 +47,10 @@ export type MerchCategory = {
   lflNet: number | null;
   stock: number;
   stockValue: number;
+  /** Stock at purchase cost (items without a cost in Zoho are left out — see stockNoCost). */
+  stockCost: number;
+  /** Units in stock with no purchase cost in Zoho. */
+  stockNoCost: number;
   units28: number;
   sellThrough: number | null;
   cover: number | null;
@@ -160,6 +166,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
       units28,
       stock: stockQty,
       rate: st?.rate ?? null,
+      cost: st?.cost ?? null,
       sellThrough: stockQty === null ? null : units + Math.max(0, stockQty) > 0 ? units / (units + Math.max(0, stockQty)) : null,
       cover,
       outSince: st && st.stock <= 0 ? st.out_since : null,
@@ -186,7 +193,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
   }
 
   const blank = (name: string): MerchCategory => ({
-    name, net: 0, units: 0, momNet: momOk ? 0 : null, lflNet: lflOk ? 0 : null, stock: 0, stockValue: 0, units28: 0, sellThrough: null, cover: null, stockOuts: 0, lowFast: 0, overstock: 0, items: 0,
+    name, net: 0, units: 0, momNet: momOk ? 0 : null, lflNet: lflOk ? 0 : null, stock: 0, stockValue: 0, stockCost: 0, stockNoCost: 0, units28: 0, sellThrough: null, cover: null, stockOuts: 0, lowFast: 0, overstock: 0, items: 0,
   });
   const cats = new Map<string, MerchCategory>();
   const total = blank("All categories");
@@ -200,6 +207,8 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
       if (x.lflNet !== null) x.lflNet += it.lflNet ?? 0;
       x.stock += Math.max(0, it.stock ?? 0);
       x.stockValue += Math.max(0, it.stock ?? 0) * (it.rate ?? 0);
+      if (it.cost !== null) x.stockCost += Math.max(0, it.stock ?? 0) * it.cost;
+      else x.stockNoCost += Math.max(0, it.stock ?? 0);
       x.units28 += it.units28;
       if (it.status === "out") x.stockOuts++;
       if (it.fast && (it.status === "out" || it.status === "low")) x.lowFast++;

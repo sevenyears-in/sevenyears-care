@@ -183,19 +183,31 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         </p>
       )}
 
-      {m.stockAt && (
-        <div className="flex flex-wrap items-end justify-between gap-3 rounded-3xl bg-[#161616] px-5 py-4 text-white soft-card">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">
-              Current stock value at MRP · {cat ? cat.name : store}
+      {m.stockAt && (() => {
+        const v = cat ?? t;
+        const margin = v.stockCost > 0 && v.stockValue > 0 && v.stockNoCost === 0 ? 1 - v.stockCost / v.stockValue : null;
+        return (
+          <div className="rounded-3xl bg-gradient-to-r from-[#5b55c9] to-[#8883d7] px-5 py-4 text-white soft-card">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/75">Current stock value · {cat ? cat.name : store}</p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold text-white/75">At MRP</p>
+                <p className="text-3xl font-extrabold tabular-nums sm:text-4xl">{rupees(Math.round(v.stockValue))}</p>
+              </div>
+              <div className="sm:border-l sm:border-white/25 sm:pl-5">
+                <p className="text-xs font-semibold text-white/75">At cost (purchase rate)</p>
+                <p className="text-3xl font-extrabold tabular-nums sm:text-4xl">{v.stockCost > 0 ? rupees(Math.round(v.stockCost)) : "—"}</p>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-white/80">
+              {Math.round(v.stock).toLocaleString("en-IN")} units in stock
+              {margin !== null ? ` · margin at MRP ${Math.round(margin * 100)}%` : ""}
+              {v.stockCost > 0 && v.stockNoCost > 0 ? ` · ${Math.round(v.stockNoCost).toLocaleString("en-IN")} unit(s) have no purchase rate in Zoho (not in the cost figure)` : ""}
+              {v.stockCost === 0 ? " · cost is filled in at the next stock read" : ""} · read {formatDateTime(m.stockAt)}
             </p>
-            <p className="mt-1 text-3xl font-extrabold tabular-nums sm:text-4xl">{rupees(Math.round((cat ?? t).stockValue))}</p>
           </div>
-          <p className="text-xs text-white/70">
-            {Math.round((cat ?? t).stock).toLocaleString("en-IN")} units in stock · read {formatDateTime(m.stockAt)}
-          </p>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Tile label="Net sales MTD" value={short(t.net)} note={`${Math.round(t.units)} units`} />
