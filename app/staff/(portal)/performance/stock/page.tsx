@@ -82,6 +82,13 @@ const SHOW: Record<string, { title: string; test: (i: MerchItem) => boolean; ton
     advice: (n) => `${n} item(s) overstocked — display better, bundle, run an offer or transfer.`,
     sort: (a, b) => (b.excessUnits ?? 0) * (b.rate ?? 0) - (a.excessUnits ?? 0) * (a.rate ?? 0),
   },
+  nocost: {
+    title: "No purchase rate in Zoho",
+    test: (i) => (i.stock ?? 0) > 0 && i.cost === null,
+    tone: "border-amber-200 bg-amber-50/50",
+    advice: (n) => `${n} item(s) in stock with no purchase rate in Zoho — add the purchase rate in Zoho so the stock value at cost is complete.`,
+    sort: (a, b) => (b.stock ?? 0) * (b.rate ?? 0) - (a.stock ?? 0) * (a.rate ?? 0),
+  },
   fast: {
     title: "Fast movers",
     test: (i) => i.fast,
@@ -205,6 +212,14 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
               {v.stockCost > 0 && v.stockNoCost > 0 ? ` · ${Math.round(v.stockNoCost).toLocaleString("en-IN")} unit(s) have no purchase rate in Zoho (not in the cost figure)` : ""}
               {v.stockCost === 0 ? " · cost is filled in at the next stock read" : ""} · read {formatDateTime(m.stockAt)}
             </p>
+            {v.stockCost > 0 && v.stockNoCost > 0 && show !== "nocost" && (
+              <Link
+                href={qs(base, { show: "nocost", cat: sp.cat })}
+                className="mt-3 inline-flex rounded-full bg-white px-4 py-1.5 text-xs font-bold text-[#5b55c9] hover:bg-white/90"
+              >
+                See the items with no purchase rate →
+              </Link>
+            )}
           </div>
         );
       })()}
