@@ -91,12 +91,29 @@ export function SyncUnreadCount({ count }: { count: number }) {
   return null;
 }
 
+/** In the app (1.3+): once every alert is read, clear the phone notifications so the icon number goes. */
+function clearPhoneBadgeWhenAllRead(n: number) {
+  if (n !== 0) return;
+  try {
+    (window as unknown as { SevenYearsApp?: { clearNotifications?: () => void } }).SevenYearsApp?.clearNotifications?.();
+  } catch {
+    /* older app */
+  }
+}
+
 export function useUnreadCount(initial: number) {
   const [count, setCount] = useState(initial);
   // A new page from the server can bring a newer number.
-  useEffect(() => setCount(initial), [initial]);
   useEffect(() => {
-    const on = (e: Event) => setCount((e as CustomEvent<number>).detail);
+    setCount(initial);
+    clearPhoneBadgeWhenAllRead(initial);
+  }, [initial]);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const n = (e as CustomEvent<number>).detail;
+      setCount(n);
+      clearPhoneBadgeWhenAllRead(n);
+    };
     window.addEventListener(EVENT, on);
     return () => window.removeEventListener(EVENT, on);
   }, []);

@@ -183,12 +183,26 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         </p>
       )}
 
+      {m.stockAt && (
+        <div className="flex flex-wrap items-end justify-between gap-3 rounded-3xl bg-[#161616] px-5 py-4 text-white soft-card">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">
+              Current stock value at MRP · {cat ? cat.name : store}
+            </p>
+            <p className="mt-1 text-3xl font-extrabold tabular-nums sm:text-4xl">{rupees(Math.round((cat ?? t).stockValue))}</p>
+          </div>
+          <p className="text-xs text-white/70">
+            {Math.round((cat ?? t).stock).toLocaleString("en-IN")} units in stock · read {formatDateTime(m.stockAt)}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Tile label="Net sales MTD" value={short(t.net)} note={`${Math.round(t.units)} units`} />
         <Tile label="MoM" value={<Growth now={t.net} before={t.momNet} />} note={t.momNet !== null ? `${short(t.momNet)} · ${fmtRange(m.periods.mom)}` : "Last month not copied yet"} />
         <Tile label="LFL" value={<Growth now={t.net} before={t.lflNet} />} note={t.lflNet !== null ? `${short(t.lflNet)} · ${fmtRange(m.periods.lfl)}` : `Last year not copied yet (${Math.round(m.lflCoverage * 100)}% of days)`} />
         <Tile label="Sell-through" value={pc(t.sellThrough)} note="Sold ÷ (sold + stock)" />
-        <Tile label="Stock cover" value={`${days(t.cover)} days`} note={`${Math.round(t.stock)} units · ${short(t.stockValue)} at MRP`} tone={t.cover !== null && t.cover > OVERSTOCK_DAYS ? "warn" : "default"} />
+        <Tile label="Stock cover" value={`${days(t.cover)} days`} note={`${Math.round(t.stock)} units in stock`} tone={t.cover !== null && t.cover > OVERSTOCK_DAYS ? "warn" : "default"} />
         <Link href={qs(base, { show: "out" })} className="block">
           <Tile label="Stock-outs ›" value={t.stockOuts} note={`${t.lowFast} fast mover(s) low · ${t.overstock} overstock`} tone={t.stockOuts ? "bad" : "default"} />
         </Link>

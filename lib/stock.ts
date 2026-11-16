@@ -69,8 +69,9 @@ export const isStockReading = () => running;
 
 /**
  * Reads stock for every active item and store, keeping inside `maxReads` requests.
- * Items whose total stock is 0 are 0 in every store, so only items with stock need the
- * per-store details (100 items a request). Progress is saved as it goes.
+ * Zoho's item list does not carry stock, so every active item that tracks stock is read from
+ * the item details (100 items a request), which give the stock per store. Progress is saved as
+ * it goes. The value uses the label price (MRP) when Zoho has one, otherwise the selling rate.
  */
 export async function readStockFromZoho(maxReads = 600): Promise<string> {
   if (running) return "already running";
@@ -83,7 +84,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
   const stores = new Set<string>();
   try {
     // 1. Active items with their total stock, 200 a request.
-    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; total: number }>();
+    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; tracked: boolean }>();
     for (let page = 1; page <= 400; page++) {
       if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests while listing items (Zoho limit).`);
       await pace();
@@ -92,7 +93,8 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       for (const i of arr(res.items)) {
         const id = str(i.item_id);
         if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
-        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: num(i.rate), total: num(i.stock_on_hand) });
+        const mrp = num(i.label_rate) > 0 ? num(i.label_rate) : num(i.rate);
+        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, tracked: i.track_inventory !== false });
       }
       if (!obj(res.page_context).has_more_page) break;
     }
@@ -117,8 +119,9 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       saved += rows.length;
     };
 
-    // 2. Stock per store for items that have stock somewhere (100 a request; 50 if Zoho refuses 100).
-    const withStock = [...meta.entries()].filter(([, m]) => m.total !== 0).map(([id]) => id);
+    // 2. Stock per store from the item details (100 a request; 50 if Zoho refuses 100).
+    const withStock = [...meta.entries()].filter(([, m]) => m.tracked).map(([id]) => id);
+    const seen = new Set<string>();
     let size = 100;
     let done = 0;
     for (let i = 0; i < withStock.length; ) {
@@ -144,9 +147,11 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         const id = str(it.item_id);
         const m = meta.get(id);
         if (!m) continue;
+        seen.add(id);
+        const mrp = num(it.label_rate) > 0 ? num(it.label_rate) : m.rate;
         for (const [store, stock] of stockByStore(it)) {
           stores.add(store);
-          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: m.rate, stock });
+          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: mrp, stock });
         }
       }
       i += chunk.length;
@@ -155,7 +160,8 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
     }
     await flush();
 
-    // 3. Items with no stock anywhere: 0 in each store where we keep them or where they sold in 60 days.
+    // 3. Items with no stock details (not tracked, or not returned): 0 in each store where we keep
+    //    them or where they sold in 60 days.
     if (!stores.size) {
       const { data } = await supabaseAdmin.from("sales_invoices").select("store").gte("invoice_date", addDays(today, -30)).limit(1000);
       for (const r of data ?? []) if (r.store) stores.add(String(r.store));
@@ -163,7 +169,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
     const sold60 = new Map<string, Set<string>>();
     for (const store of stores) sold60.set(store, new Set((await itemSales(store, addDays(today, -59), today).catch(() => new Map())).keys()));
     for (const [id, m] of meta) {
-      if (m.total !== 0) continue;
+      if (seen.has(id)) continue;
       for (const store of stores) {
         if (!prev.has(`${store}|${id}`) && !sold60.get(store)?.has(id)) continue;
         pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, stock: 0 });
@@ -188,7 +194,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       for (let i = 0; i < out.length; i += 500) await supabaseAdmin.from("stock_out_days").upsert(out.slice(i, i + 500).map((item_id) => ({ day: today, store, item_id })));
     }
     await saveStockState({ lastAt: now, items: meta.size, rows: saved, reads, stores: [...stores].sort(), note: null, alerts });
-    return `read ${meta.size} items (${withStock.length} with stock) in ${stores.size} store(s) with ${reads} request(s)`;
+    return `read ${meta.size} items (${seen.size} with stock details) in ${stores.size} store(s) with ${reads} request(s)`;
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
     await saveStockState({ note: `${note}${saved ? ` (${saved} rows saved)` : ""}`, reads }).catch(() => undefined);

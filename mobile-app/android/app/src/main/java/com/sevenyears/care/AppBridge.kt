@@ -19,6 +19,19 @@ class AppBridge(private val context: Context) {
     @JavascriptInterface
     fun platform(): String = "android"
 
+    /**
+     * All alerts read in the app: remove the app's notifications from the phone, so the number
+     * on the app icon (one per alert notification, like Gmail) goes away. Unread alerts keep it.
+     */
+    @JavascriptInterface
+    fun clearNotifications() {
+        try {
+            androidx.core.app.NotificationManagerCompat.from(context).cancelAll()
+        } catch (e: Exception) {
+            // nothing to clear
+        }
+    }
+
     /** Walk-in counter screen open / closed: volume buttons count walk-ins and the screen stays on. */
     @JavascriptInterface
     fun setWalkinCounter(on: Boolean) {

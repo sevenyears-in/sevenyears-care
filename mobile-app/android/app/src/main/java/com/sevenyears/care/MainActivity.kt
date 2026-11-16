@@ -3,6 +3,7 @@ package com.sevenyears.care
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.app.AlertDialog
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -11,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -90,18 +92,62 @@ class MainActivity : ComponentActivity() {
     private var cameraPhoto: Uri? = null
 
     private val askStartupPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    /** First time the app opens: ask for notifications and location together. */
+    /**
+     * First time the app opens: ask for notifications and location together.
+     * After that, every time it opens: if notifications are still off, ask again (Android allows a
+     * second ask) or explain and open the phone's notification settings — at most twice a day.
+     */
     private fun askStartupPermissions() {
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
-        if (prefs.getBoolean("asked_permissions", false)) return
-        val wanted = buildList {
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        prefs.edit().putBoolean("asked_permissions", true).apply()
-        if (wanted.isNotEmpty()) askStartupPermissions.launch(wanted.toTypedArray())
+        if (!prefs.getBoolean("asked_permissions", false)) {
+            val wanted = buildList {
+                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+            prefs.edit().putBoolean("asked_permissions", true).putLong("notif_asked_at", System.currentTimeMillis()).apply()
+            if (wanted.isNotEmpty()) {
+                askStartupPermissions.launch(wanted.toTypedArray())
+                return
+            }
+        }
+        checkNotificationsOn()
+    }
+
+    private fun checkNotificationsOn() {
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) return
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong("notif_asked_at", 0L) < 12 * 60 * 60 * 1000L) return
+        prefs.edit().putLong("notif_asked_at", now).apply()
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Turn on notifications")
+            .setMessage("Notifications are off for Seven Years Care, so you will miss new service requests, complaints, sales updates and store alerts.")
+            .setPositiveButton("Turn on") { _, _ -> openAppNotificationSettings() }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    private fun openAppNotificationSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= 26) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     // Location for the website's "use my current location" button
@@ -220,16 +266,6 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
-    }
-
-    /** Opening the app clears its notifications from the phone, so the icon badge does not stay on. */
-    override fun onResume() {
-        super.onResume()
-        try {
-            NotificationManagerCompat.from(this).cancelAll()
-        } catch (e: Exception) {
-            // nothing to clear
-        }
     }
 
     override fun onPause() {
