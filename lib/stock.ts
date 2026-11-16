@@ -119,6 +119,17 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       saved += rows.length;
     };
 
+    // Items sold in the last 60 days per store: only these are kept at 0 stock (to show stock-outs);
+    // other items are kept only while they have stock, so the table stays small and pages stay fast.
+    for (const k of prev.keys()) stores.add(k.split("|")[0]);
+    {
+      const { data } = await supabaseAdmin.from("sales_invoices").select("store").gte("invoice_date", addDays(today, -30)).limit(1000);
+      for (const r of data ?? []) if (r.store) stores.add(String(r.store));
+    }
+    const sold60 = new Map<string, Set<string>>();
+    for (const store of stores) sold60.set(store, new Set((await itemSales(store, addDays(today, -59), today).catch(() => new Map())).keys()));
+    const keep = (store: string, id: string, stock: number) => stock !== 0 || Boolean(sold60.get(store)?.has(id));
+
     // 2. Stock per store from the item details (100 a request; 50 if Zoho refuses 100).
     const withStock = [...meta.entries()].filter(([, m]) => m.tracked).map(([id]) => id);
     const seen = new Set<string>();
@@ -152,6 +163,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         const cost = num(it.purchase_rate) > 0 ? num(it.purchase_rate) : m.cost;
         for (const [store, stock] of stockByStore(it)) {
           stores.add(store);
+          if (!keep(store, id, stock)) continue;
           pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: mrp, cost, stock });
         }
       }
@@ -161,23 +173,28 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
     }
     await flush();
 
-    // 3. Items with no stock details (not tracked, or not returned): 0 in each store where we keep
-    //    them or where they sold in 60 days.
-    if (!stores.size) {
-      const { data } = await supabaseAdmin.from("sales_invoices").select("store").gte("invoice_date", addDays(today, -30)).limit(1000);
-      for (const r of data ?? []) if (r.store) stores.add(String(r.store));
-    }
-    const sold60 = new Map<string, Set<string>>();
-    for (const store of stores) sold60.set(store, new Set((await itemSales(store, addDays(today, -59), today).catch(() => new Map())).keys()));
+    // 3. Items with no stock details (not tracked, or not returned): 0 in each store where they sold in 60 days.
     for (const [id, m] of meta) {
       if (seen.has(id)) continue;
       for (const store of stores) {
-        if (!prev.has(`${store}|${id}`) && !sold60.get(store)?.has(id)) continue;
+        if (!sold60.get(store)?.has(id)) continue;
         pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, cost: m.cost, stock: 0 });
       }
       if (pending.length >= 2000) await flush();
     }
     await flush();
+
+    // 3b. The read was complete: rows from Zoho that this read did not write (no stock and no sales
+    //     in 60 days, or items no longer active) are old and are removed. Excel-uploaded rows stay.
+    //     Safety: only when Zoho returned (almost) every item — otherwise nothing is removed.
+    if (withStock.length && seen.size >= withStock.length * 0.95) {
+      for (const store of stores) {
+        const { error } = await supabaseAdmin.from("stock_levels").delete().eq("store", store).eq("source", "zoho").lt("updated_at", now);
+        if (error) console.error("Old stock rows not removed:", error);
+      }
+    } else {
+      console.warn(`Stock read: Zoho returned ${seen.size} of ${withStock.length} items — old rows kept.`);
+    }
 
     // 4. Month-opening stock (first read of the month) and today's stock-outs.
     const month = today.slice(0, 7);
@@ -227,17 +244,26 @@ export async function daysWithData(store: string, from: string, to: string): Pro
 export type StockRow = { item_id: string; sku: string | null; name: string | null; category: string | null; rate: number | null; cost: number | null; stock: number; out_since: string | null; updated_at: string };
 
 export async function stockFor(store: string): Promise<StockRow[]> {
+  // Pages of 1000 read side by side (a few at a time) instead of one after another.
+  const { count, error: countError } = await supabaseAdmin.from("stock_levels").select("item_id", { count: "exact", head: true }).eq("store", store);
+  if (countError) throw countError;
+  const pages = Math.ceil((count ?? 0) / 1000);
   const out: StockRow[] = [];
-  for (let start = 0; start < 200_000; start += 1000) {
-    const { data, error } = await supabaseAdmin
-      .from("stock_levels")
-      .select("item_id, sku, name, category, rate, cost, stock, out_since, updated_at")
-      .eq("store", store)
-      .order("item_id")
-      .range(start, start + 999);
-    if (error) throw error;
-    out.push(...((data ?? []) as StockRow[]).map((r) => ({ ...r, stock: num(r.stock) })));
-    if (!data || data.length < 1000) break;
+  for (let p = 0; p < pages; p += 6) {
+    const batch = await Promise.all(
+      Array.from({ length: Math.min(6, pages - p) }, (_, k) =>
+        supabaseAdmin
+          .from("stock_levels")
+          .select("item_id, sku, name, category, rate, cost, stock, out_since, updated_at")
+          .eq("store", store)
+          .order("item_id")
+          .range((p + k) * 1000, (p + k) * 1000 + 999)
+      )
+    );
+    for (const { data, error } of batch) {
+      if (error) throw error;
+      out.push(...((data ?? []) as StockRow[]).map((r) => ({ ...r, stock: num(r.stock) })));
+    }
   }
   return out;
 }
