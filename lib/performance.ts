@@ -550,16 +550,33 @@ type Acc = {
 export type DayFigures = { bills: number; units: number; invoiceNet: number; returns: number; net: number };
 const emptyDay = (): DayFigures => ({ bills: 0, units: 0, invoiceNet: 0, returns: 0, net: 0 });
 
-let cache: { key: string; at: number; value: MonthReport } | null = null;
+// Month reports are kept for a few minutes (per month) so pages open quickly; several pages
+// asking at once share one calculation. Changes (duties, targets, the sales copy) clear them.
+const REPORT_TTL = 3 * 60_000;
+const reportCache = new Map<string, { at: number; value: MonthReport }>();
+const reportInFlight = new Map<string, Promise<MonthReport>>();
 
 /** After a change (e.g. a duty justified) the next report is worked out again. */
 export function forgetMonthReport() {
-  cache = null;
+  reportCache.clear();
 }
 
 export async function monthReport(month: string, fresh = false): Promise<MonthReport> {
-  if (!fresh && cache && cache.key === month && Date.now() - cache.at < 60_000) return cache.value;
+  const hit = reportCache.get(month);
+  if (!fresh && hit && Date.now() - hit.at < REPORT_TTL) return hit.value;
+  const running = reportInFlight.get(month);
+  if (running) return running;
+  const job = buildMonthReport(month)
+    .then((value) => {
+      reportCache.set(month, { at: Date.now(), value });
+      return value;
+    })
+    .finally(() => reportInFlight.delete(month));
+  reportInFlight.set(month, job);
+  return job;
+}
 
+async function buildMonthReport(month: string): Promise<MonthReport> {
   const { from: mFrom, to: mTo, days: daysInMonth } = monthRange(month);
   const [rawSettings, allRules] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
   const settings = withRoleNames(rawSettings);
@@ -905,7 +922,6 @@ export async function monthReport(month: string, fresh = false): Promise<MonthRe
       .sort((x, y) => y.net - x.net),
     lastBillDate,
   };
-  cache = { key: month, at: Date.now(), value };
   return value;
 }
 

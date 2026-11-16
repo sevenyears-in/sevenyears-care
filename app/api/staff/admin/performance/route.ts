@@ -62,6 +62,9 @@ export async function POST(request: Request) {
   const [sBefore, rBefore] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
   const res = await handle(body, auth.staff);
   if (res.ok) {
+    // Targets, groups, rules or links changed: dashboards are worked out again on the next visit.
+    const { forgetMonthReport } = await import("@/lib/performance");
+    forgetMonthReport();
     const [sAfter, rAfter] = await Promise.all([loadPerformanceSettings(), loadIncentiveRules()]);
     const s = changedKeys(sBefore as unknown as Body, sAfter as unknown as Body);
     // lastSyncAt / returnsError change on their own; not a setting change.
