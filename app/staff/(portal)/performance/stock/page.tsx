@@ -131,7 +131,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const q = (sp.q ?? "").trim().toLowerCase();
   const lowFast = m.items.filter(SHOW.low.test);
   let list: MerchItem[] | null = null;
-  if (cat || q) {
+  if (cat || q || show === "nocost") {
     list = m.items.filter((i) => (!cat || i.category === cat.name) && (!show || SHOW[show].test(i)) && (!q || i.name.toLowerCase().includes(q) || (i.sku ?? "").toLowerCase().includes(q)));
     if (show) list.sort(SHOW[show].sort);
   }
