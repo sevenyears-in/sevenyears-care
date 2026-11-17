@@ -92,10 +92,13 @@ export function SyncUnreadCount({ count }: { count: number }) {
 }
 
 /** In the app (1.3+): once every alert is read, clear the phone notifications so the icon number goes. */
+/** Phone app: keep the number on the app icon equal to unread alerts (app 1.4+); older apps only clear it at 0. */
 function clearPhoneBadgeWhenAllRead(n: number) {
-  if (n !== 0) return;
   try {
-    (window as unknown as { SevenYearsApp?: { clearNotifications?: () => void } }).SevenYearsApp?.clearNotifications?.();
+    const app = (window as unknown as { SevenYearsApp?: { clearNotifications?: () => void; setUnreadCount?: (n: number) => void } }).SevenYearsApp;
+    if (!app) return;
+    if (app.setUnreadCount) app.setUnreadCount(Math.max(0, n));
+    else if (n === 0) app.clearNotifications?.();
   } catch {
     /* older app */
   }

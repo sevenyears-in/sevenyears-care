@@ -32,6 +32,12 @@ class AppBridge(private val context: Context) {
         }
     }
 
+    /** Unread alerts in the app → the number on the app icon (Gmail-style); 0 clears it. */
+    @JavascriptInterface
+    fun setUnreadCount(n: Int) {
+        PushService.setUnread(context, n)
+    }
+
     /** Walk-in counter screen open / closed: volume buttons count walk-ins and the screen stays on. */
     @JavascriptInterface
     fun setWalkinCounter(on: Boolean) {
