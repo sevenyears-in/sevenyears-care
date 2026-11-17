@@ -20,6 +20,8 @@ type Status = {
   backfillDoneAt: string | null;
   backfillDoneFrom: string | null;
   backfillSent: number;
+  devices?: { device: string; store: string | null; punches: number; people: number; lastPunch: string | null; guess: string | null }[];
+  stores?: string[];
 };
 
 /** First day of last month (YYYY-MM-DD). */
@@ -61,6 +63,26 @@ export default function AttendanceSetupPage() {
       setOlderError(e instanceof Error ? e.message : "Could not ask for the punches.");
     } finally {
       setOlderBusy(false);
+    }
+  };
+
+  const [deviceBusy, setDeviceBusy] = useState("");
+  const [deviceError, setDeviceError] = useState("");
+  const setDevice = async (device: string, store: string) => {
+    setDeviceBusy(device);
+    setDeviceError("");
+    try {
+      const r = await fetch("/api/staff/admin/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deviceStore", device, store }),
+      }).then((x) => x.json());
+      if (r.error) throw new Error(r.error);
+      await load();
+    } catch (e) {
+      setDeviceError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setDeviceBusy("");
     }
   };
 
@@ -157,6 +179,64 @@ export default function AttendanceSetupPage() {
               eTimeTrackLite employee code.
             </p>
           )}
+        </div>
+      )}
+
+      {status?.devices && (
+        <div className={card}>
+          <h2 className="text-lg font-bold">Punching machines → store</h2>
+          <p className="mt-1 max-w-3xl text-sm text-black/60">
+            Store opening and closing come from each store&apos;s punching machine. A machine is matched to a store by itself when
+            staff of that store punch on it; if a store is missing (or wrong), choose it here. The last 30 days are filled in at once.
+          </p>
+          {status.devices.length === 0 ? (
+            <p className="mt-3 text-sm text-black/50">No punches from any machine in the last 14 days.</p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wider text-black/45">
+                    <th className="px-2 py-2">Machine</th>
+                    <th className="px-2 py-2">Punches (14 days)</th>
+                    <th className="px-2 py-2">Last punch</th>
+                    <th className="px-2 py-2">Store</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {status.devices.map((d) => {
+                    const options = [...new Set([...(status.stores ?? []), ...(d.store ? [d.store] : [])])].filter((x) => x.toUpperCase() !== "CORPORATE OFFICE");
+                    return (
+                      <tr key={d.device} className="border-t border-black/5">
+                        <td className="px-2 py-2 font-mono font-semibold">{d.device}</td>
+                        <td className="px-2 py-2 tabular-nums">
+                          {d.punches} <span className="text-xs text-black/45">· {d.people} people</span>
+                        </td>
+                        <td className="px-2 py-2 text-xs text-black/60">{d.lastPunch ? formatDateTime(d.lastPunch) : "—"}</td>
+                        <td className="px-2 py-2">
+                          <select
+                            value={d.store ?? ""}
+                            disabled={deviceBusy === d.device}
+                            onChange={(e) => setDevice(d.device, e.target.value)}
+                            className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-black/10"
+                          >
+                            <option value="">{d.store === null ? "— not set —" : "Not a store machine"}</option>
+                            {options.map((o) => (
+                              <option key={o} value={o.toUpperCase()}>
+                                {o.toUpperCase()}
+                              </option>
+                            ))}
+                          </select>
+                          {!d.store && d.guess && <p className="mt-1 text-xs text-black/45">Most punches by {d.guess} staff</p>}
+                          {deviceBusy === d.device && <p className="mt-1 text-xs text-black/45">Saving and filling earlier days…</p>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <ErrorBox message={deviceError} />
         </div>
       )}
 

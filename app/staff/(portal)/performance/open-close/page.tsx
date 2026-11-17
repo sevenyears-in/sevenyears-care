@@ -4,7 +4,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { formatDate, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
 import { merchStores } from "@/lib/merch-access";
-import { clockIST, loadOpenCloseHistory, type OpenClose, type Sop } from "@/lib/store-open-close";
+import { clockIST, loadOpenCloseHistory, openCloseStores, type OpenClose, type Sop } from "@/lib/store-open-close";
 import { ApproveSop } from "@/components/ApproveSop";
 
 export const dynamic = "force-dynamic";
@@ -41,8 +41,9 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
   const sp = await searchParams;
-  const report = await monthReport(todayISO().slice(0, 7)).catch(() => null);
-  const stores = await merchStores(staff, (report?.stores ?? []).map((s) => s.store));
+  const [report, machineStores] = await Promise.all([monthReport(todayISO().slice(0, 7)).catch(() => null), openCloseStores()]);
+  // Stores not tracked for sales targets (e.g. PERINTHALMANNA) still have a punching machine.
+  const stores = await merchStores(staff, [...new Set([...(report?.stores ?? []).map((s) => s.store), ...machineStores])]);
   if (!stores.length) redirect("/staff/performance");
   const want = (sp.store ?? "").toUpperCase();
   const store = stores.includes(want) ? want : stores[0];

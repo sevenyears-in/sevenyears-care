@@ -3,6 +3,8 @@ import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { attendanceCode, attendanceSettings, hashKey, newSyncKey, saveAttendanceSettings } from "@/lib/attendance";
+import { listDevices, setDeviceStore } from "@/lib/store-open-close";
+import { getStores } from "@/lib/stores";
 
 // Settings → Attendance (Super Admin).
 // GET  → status (last sync, punches today, codes not linked to a staff user)
@@ -12,7 +14,7 @@ import { attendanceCode, attendanceSettings, hashKey, newSyncKey, saveAttendance
 export async function GET() {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const [settings, punches, staff] = await Promise.all([
+  const [settings, punches, staff, devices, storeList] = await Promise.all([
     attendanceSettings(),
     supabaseAdmin
       .from("attendance_punches")
@@ -20,6 +22,8 @@ export async function GET() {
       .gte("punch_time", `${todayISO()}T00:00:00+05:30`)
       .limit(5000),
     supabaseAdmin.from("staff_users").select("user_id").eq("is_active", true),
+    listDevices().catch(() => []),
+    getStores().catch(() => null),
   ]);
   const userIds = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
   const codesToday = [...new Set((punches.data ?? []).map((p) => attendanceCode(p.emp_code)))];
@@ -39,13 +43,23 @@ export async function GET() {
     backfillDoneAt: settings.backfillDoneAt ?? null,
     backfillDoneFrom: settings.backfillDoneFrom ?? null,
     backfillSent: settings.backfillSent ?? 0,
+    devices,
+    stores: (storeList?.stores ?? []).map((st) => st.name),
   });
 }
 
 export async function POST(request: Request) {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const body = (await request.json().catch(() => ({}))) as { action?: string; from?: string };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; from?: string; device?: string; store?: string };
+  if (body.action === "deviceStore") {
+    // Which store a punching machine is in (for store opening / closing).
+    const device = String(body.device ?? "").trim();
+    if (!device || device.length > 60) return NextResponse.json({ error: "Unknown machine." }, { status: 400 });
+    const store = String(body.store ?? "").trim().slice(0, 60);
+    await setDeviceStore(device, store || null);
+    return NextResponse.json({ ok: true });
+  }
   if (body.action === "backfill") {
     // Pull older punches: the office PC sends everything from this day at its next run (every 2 minutes).
     const from = String(body.from ?? "");

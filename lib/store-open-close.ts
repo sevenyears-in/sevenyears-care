@@ -80,7 +80,7 @@ export async function deviceStores(): Promise<Record<string, string>> {
   const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const { data: punches } = await supabaseAdmin.from("attendance_punches").select("device, emp_code").gte("punch_time", since).not("device", "is", null).limit(20000);
   const devices = new Set(((punches ?? []) as { device: string }[]).map((p) => String(p.device)));
-  const missing = [...devices].filter((d) => !saved[d]);
+  const missing = [...devices].filter((d) => !(d in saved));
   if (!missing.length) return saved;
 
   const { data: staff } = await supabaseAdmin.from("staff_users").select("user_id, store_name");
@@ -101,6 +101,114 @@ export async function deviceStores(): Promise<Record<string, string>> {
   const map = { ...saved, ...found };
   await supabaseAdmin.from("app_settings").upsert({ key: DEVICES_KEY, value: { map }, updated_at: new Date().toISOString() });
   return map;
+}
+
+export type DeviceInfo = { device: string; store: string | null; punches: number; people: number; lastPunch: string | null; guess: string | null };
+
+/** Every punching machine seen in the last 14 days, its store and who punches on it (Settings → Attendance). */
+export async function listDevices(): Promise<DeviceInfo[]> {
+  const map = await deviceStores();
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const [{ data: punches }, { data: staff }] = await Promise.all([
+    supabaseAdmin.from("attendance_punches").select("device, emp_code, punch_time").gte("punch_time", since).not("device", "is", null).limit(20000),
+    supabaseAdmin.from("staff_users").select("user_id, store_name"),
+  ]);
+  const storeOf = new Map(((staff ?? []) as { user_id: string; store_name: string | null }[]).map((s) => [attendanceCode(s.user_id), String(s.store_name ?? "").toUpperCase()]));
+  const by = new Map<string, { punches: number; people: Set<string>; last: string; votes: Map<string, number> }>();
+  for (const p of (punches ?? []) as { device: string; emp_code: string; punch_time: string }[]) {
+    const d = String(p.device);
+    const cur = by.get(d) ?? { punches: 0, people: new Set<string>(), last: p.punch_time, votes: new Map<string, number>() };
+    cur.punches++;
+    const code = attendanceCode(p.emp_code);
+    cur.people.add(code);
+    if (p.punch_time > cur.last) cur.last = p.punch_time;
+    const st = storeOf.get(code);
+    if (st && st !== CORPORATE_OFFICE.toUpperCase()) cur.votes.set(st, (cur.votes.get(st) ?? 0) + 1);
+    by.set(d, cur);
+  }
+  const ids = new Set([...by.keys(), ...Object.keys(map)]);
+  return [...ids]
+    .map((d) => {
+      const x = by.get(d);
+      const best = x ? [...x.votes.entries()].sort((a, b) => b[1] - a[1])[0] : undefined;
+      return { device: d, store: map[d] ?? null, punches: x?.punches ?? 0, people: x?.people.size ?? 0, lastPunch: x?.last ?? null, guess: best?.[0] ?? null };
+    })
+    .sort((a, b) => b.punches - a.punches);
+}
+
+/** Super Admin says which store a machine is in (empty = not a store machine). Earlier days are filled in quietly. */
+export async function setDeviceStore(device: string, store: string | null) {
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", DEVICES_KEY).maybeSingle();
+  const map = { ...(((data?.value as { map?: Record<string, string> } | null)?.map ?? {}) as Record<string, string>) };
+  const clean = (store ?? "").trim().toUpperCase();
+  // Kept even when cleared ("" = not a store), so the automatic check doesn't put it back.
+  map[device] = clean;
+  const { error } = await supabaseAdmin.from("app_settings").upsert({ key: DEVICES_KEY, value: { map }, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  if (clean) await backfillStore(clean, map).catch((e) => console.error("Open/close backfill failed:", e));
+}
+
+/** Stores that have a punching machine. */
+export async function openCloseStores(): Promise<string[]> {
+  const map = await deviceStores().catch(() => ({}) as Record<string, string>);
+  return [...new Set(Object.values(map).filter(Boolean))].sort();
+}
+
+/** Opening and closing of the last 30 days for a store whose machine was just set (no notices). */
+async function backfillStore(store: string, devices: Record<string, string>, days = 30) {
+  const deviceIds = Object.entries(devices).filter(([, st]) => st === store).map(([d]) => d);
+  if (!deviceIds.length) return 0;
+  const today = istNow().date;
+  const from = shiftDay(today, -days);
+  const { data: have } = await supabaseAdmin.from("store_open_close").select("day").eq("store", store).gte("day", from);
+  const done = new Set(((have ?? []) as { day: string }[]).map((r) => r.day));
+  const staff = await staffByCode();
+  const nowIso = new Date().toISOString();
+  let n = 0;
+  for (let i = days; i >= 1; i--) {
+    const day = shiftDay(today, -i);
+    if (done.has(day)) continue;
+    const { data: punches } = await supabaseAdmin
+      .from("attendance_punches")
+      .select("punch_time, emp_code")
+      .in("device", deviceIds)
+      .gte("punch_time", new Date(dayStartUtc(day) + EARLIEST_OPEN * 60_000).toISOString())
+      .lt("punch_time", new Date(dayStartUtc(day) + 86_400_000).toISOString())
+      .order("punch_time")
+      .limit(2000);
+    const rows = (punches ?? []) as { punch_time: string; emp_code: string }[];
+    if (!rows.length) continue;
+    const list: Punch[] = rows.map((p) => ({ code: attendanceCode(p.emp_code), at: Date.parse(p.punch_time) }));
+    const first = rows[0].punch_time;
+    const last = rows[rows.length - 1].punch_time;
+    const o = whoAndSop(list, store, staff, "open");
+    const c = whoAndSop(list, store, staff, "close");
+    await supabaseAdmin.from("store_open_close").upsert(
+      {
+        day,
+        store,
+        device: deviceIds[0],
+        first_punch: first,
+        opened_at: new Date(Date.parse(first) - OPEN_EARLY_MIN * 60_000).toISOString(),
+        last_punch: last,
+        closed_at: last,
+        opened_notified_at: nowIso,
+        closed_notified_at: nowIso,
+        updated_at: nowIso,
+        opened_by: o.code,
+        opened_by_name: o.name,
+        open_sop: o.sop,
+        open_sop_note: o.note,
+        closed_by: c.code,
+        closed_by_name: c.name,
+        close_sop: c.sop,
+        close_sop_note: c.note,
+      },
+      { onConflict: "day,store", ignoreDuplicates: true }
+    );
+    n++;
+  }
+  return n;
 }
 
 // ------------------------------------------------------------------
@@ -205,7 +313,7 @@ async function notify(store: string, title: string, body: string, violation = fa
   await supabaseAdmin.from("staff_notifications").insert(people.map((p) => ({ staff_id: p.id, ticket_type: null, ticket_id: null, ticket_number: null, title, body })));
   await pushToStaff(
     people.map((p) => p.id),
-    { title, body, url: `${siteUrl()}/staff/performance?view=team&store=${encodeURIComponent(store)}` }
+    { title, body, url: `${siteUrl()}/staff/performance/open-close?store=${encodeURIComponent(store)}` }
   ).catch((e) => console.error("Open/close push failed:", e));
   return people.length;
 }

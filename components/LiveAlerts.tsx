@@ -35,7 +35,7 @@ function alertHref(a: LiveAlert) {
   if (stockStore) return `/staff/performance/stock?store=${encodeURIComponent(stockStore[1])}`;
   if (/^(TEST · )?(Sales update|Your sales|[A-Z][A-Z ]+ sales) \d/.test(a.title)) return "/staff/performance";
   const oc = /^Store (?:Opened|Closed(?: \(updated\))?) · (.+)$/.exec(a.title);
-  if (oc) return `/staff/performance?view=team&store=${encodeURIComponent(oc[1])}`;
+  if (oc) return `/staff/performance/open-close?store=${encodeURIComponent(oc[1])}`;
   if (a.ticket_id) return `/staff/${a.ticket_type === "service" ? "service" : "complaints"}/${a.ticket_id}`;
   return /feedback/i.test(a.title) ? "/staff/feedback" : "/staff/alerts";
 }
