@@ -6,6 +6,8 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 
 export const ATTENDANCE_KEY = "attendance";
+/** Newest office-PC sync script (public/downloads/attendance-sync-template.ps1). Scripts from 3 on update themselves. */
+export const LATEST_SYNC_SCRIPT = 3;
 
 export type Presence = { status: "in" | "out"; firstIn: string; lastPunch: string; punches: number };
 export type AttendanceSettings = {

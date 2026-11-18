@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { attendanceSettings, hashKey, saveAttendanceSettings } from "@/lib/attendance";
+import { attendanceSettings, hashKey, LATEST_SYNC_SCRIPT, saveAttendanceSettings } from "@/lib/attendance";
 
 // POST /api/attendance/push — called every 2 minutes by the sync script on the
 // office PC (eTimeTrackLite). Header "x-sync-key" must match the key created in
@@ -52,5 +52,6 @@ export async function POST(request: Request) {
   }
   const after = await saveAttendanceSettings(change);
   // Ask the script (version 2 and later) to send older punches from this day.
-  return NextResponse.json({ ok: true, received: rows.length, saved, backfillFrom: after.backfillFrom ?? null });
+  // latestScript: scripts from version 3 update themselves when this is higher.
+  return NextResponse.json({ ok: true, received: rows.length, saved, backfillFrom: after.backfillFrom ?? null, latestScript: LATEST_SYNC_SCRIPT });
 }

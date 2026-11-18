@@ -68,9 +68,13 @@ export default function AttendanceSetupPage() {
 
   const [deviceBusy, setDeviceBusy] = useState("");
   const [deviceError, setDeviceError] = useState("");
+  const [editing, setEditing] = useState("");
+  const [draft, setDraft] = useState("");
+  const [saved, setSaved] = useState("");
   const setDevice = async (device: string, store: string) => {
     setDeviceBusy(device);
     setDeviceError("");
+    setSaved("");
     try {
       const r = await fetch("/api/staff/admin/attendance", {
         method: "POST",
@@ -79,6 +83,8 @@ export default function AttendanceSetupPage() {
       }).then((x) => x.json());
       if (r.error) throw new Error(r.error);
       await load();
+      setEditing("");
+      setSaved(device);
     } catch (e) {
       setDeviceError(e instanceof Error ? e.message : "Could not save.");
     } finally {
@@ -187,7 +193,8 @@ export default function AttendanceSetupPage() {
           <h2 className="text-lg font-bold">Punching machines → store</h2>
           <p className="mt-1 max-w-3xl text-sm text-black/60">
             Store opening and closing come from each store&apos;s punching machine. A machine is matched to a store by itself when
-            staff of that store punch on it; if a store is missing (or wrong), choose it here. The last 30 days are filled in at once.
+            staff of that store punch on it; if a store is missing (or wrong), click Edit, choose it and Save. The last 30 days are
+            filled in at once.
           </p>
           {status.devices.length === 0 ? (
             <p className="mt-3 text-sm text-black/50">No punches from any machine in the last 14 days.</p>
@@ -213,21 +220,60 @@ export default function AttendanceSetupPage() {
                         </td>
                         <td className="px-2 py-2 text-xs text-black/60">{d.lastPunch ? formatDateTime(d.lastPunch) : "—"}</td>
                         <td className="px-2 py-2">
-                          <select
-                            value={d.store ?? ""}
-                            disabled={deviceBusy === d.device}
-                            onChange={(e) => setDevice(d.device, e.target.value)}
-                            className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-black/10"
-                          >
-                            <option value="">{d.store === null ? "— not set —" : "Not a store machine"}</option>
-                            {options.map((o) => (
-                              <option key={o} value={o.toUpperCase()}>
-                                {o.toUpperCase()}
-                              </option>
-                            ))}
-                          </select>
+                          {editing === d.device ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={draft}
+                                disabled={deviceBusy === d.device}
+                                onChange={(e) => setDraft(e.target.value)}
+                                className="rounded-xl bg-white px-3 py-2 text-sm font-semibold ring-1 ring-black/10"
+                              >
+                                <option value="">{d.store === null ? "— not set —" : "Not a store machine"}</option>
+                                {options.map((o) => (
+                                  <option key={o} value={o.toUpperCase()}>
+                                    {o.toUpperCase()}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => setDevice(d.device, draft)}
+                                disabled={deviceBusy === d.device || draft === (d.store ?? "")}
+                                className="rounded-xl bg-[#161616] px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
+                              >
+                                {deviceBusy === d.device ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditing("")}
+                                disabled={deviceBusy === d.device}
+                                className="rounded-xl px-3 py-2 text-sm font-semibold ring-1 ring-black/10"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className={`font-semibold ${d.store ? "" : "text-black/45"}`}>
+                                {d.store ? d.store : d.store === null ? "Not set" : "Not a store machine"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditing(d.device);
+                                  setDraft(d.store ?? "");
+                                  setDeviceError("");
+                                }}
+                                disabled={Boolean(editing)}
+                                className="rounded-xl px-3 py-1.5 text-xs font-bold ring-1 ring-black/10 disabled:opacity-40"
+                              >
+                                ✎ Edit
+                              </button>
+                            </div>
+                          )}
                           {!d.store && d.guess && <p className="mt-1 text-xs text-black/45">Most punches by {d.guess} staff</p>}
                           {deviceBusy === d.device && <p className="mt-1 text-xs text-black/45">Saving and filling earlier days…</p>}
+                          {saved === d.device && <p className="mt-1 text-xs font-semibold text-green-700">✓ Saved</p>}
                         </td>
                       </tr>
                     );
@@ -247,12 +293,18 @@ export default function AttendanceSetupPage() {
             Days before the sync started show “No punching data” on the duties pages. Choose a day and the office PC sends every
             punch from that day onwards at its next run (within 2 minutes). Punches already here are not doubled.
           </p>
-          {status.scriptVersion < 2 && (
-            <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
-              The script on the office PC is the older version and cannot send older punches. Download the new script below
-              (steps 1–2), put it in <b className="font-mono">C:\SevenYearsSync</b> in place of the old one, and run the{" "}
-              <b>-Check</b> command once (step 3). The scheduled sync keeps running — no need to install again.
-            </p>
+          {status.scriptVersion < 3 && (
+            <div className="mt-3 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
+              <p>
+                {status.scriptVersion < 2 ? "The sync script on the office PC is an older version that can't send older punches. " : ""}
+                Update it once: on the office PC, open <b>Windows PowerShell</b>, paste this and press Enter. It keeps the
+                script&apos;s settings and sync key, so nothing else changes. From then on the script updates itself.
+              </p>
+              <code className="mt-2 block break-all rounded-xl bg-[#161616] p-3 font-mono text-xs text-white">
+                {`powershell -ExecutionPolicy Bypass -Command "irm ${typeof window === "undefined" ? "" : window.location.origin}/downloads/update-sync.ps1 | iex"`}
+              </code>
+              <p className="mt-2 text-xs">It should end with “Everything is working”.</p>
+            </div>
           )}
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="block">

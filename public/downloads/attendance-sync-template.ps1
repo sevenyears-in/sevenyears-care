@@ -5,6 +5,9 @@
 #  It never changes anything in eTimeTrackLite.
 #  Version 2: when the website asks for older punches (Settings -> Attendance ->
 #  Pull older punches), it also sends every punch from that day onwards.
+#  Version 3: updates itself. When the website has a newer version, this script
+#  downloads it and keeps its own settings (server, database, login, key) -
+#  nothing to download or copy on this PC again.
 #
 #  Check:     powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Check
 #  Install:   powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Install
@@ -19,7 +22,7 @@ $SqlPassword = '__SQLPASSWORD__'
 $Url         = '__URL__'
 $Key         = '__KEY__'
 $TaskName    = 'SevenYears Attendance Sync'
-$Version     = 2
+$Version     = 3
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -111,6 +114,35 @@ function Send-OlderPunches($conn, $fromText) {
   return $sent
 }
 
+# Newer script on the website: download it, put this PC's own settings into it
+# (they never leave this PC), check it parses, then replace this file. The next
+# run (within 2 minutes) uses the new version.
+function Update-Self($latest) {
+  $base = $Url -replace '/api/attendance/push$', ''
+  $wc = New-Object System.Net.WebClient
+  $wc.Encoding = [Text.Encoding]::UTF8
+  $tpl = $wc.DownloadString($base + '/downloads/attendance-sync-template.ps1')
+  # Placeholder names are built here so this code itself is never filled in.
+  $p = '__'
+  $fill = [ordered]@{ ($p + 'SERVER' + $p) = $ServerName; ($p + 'DATABASE' + $p) = $Database; ($p + 'SQLUSER' + $p) = $SqlUser; ($p + 'SQLPASSWORD' + $p) = $SqlPassword; ($p + 'URL' + $p) = $Url; ($p + 'KEY' + $p) = $Key }
+  foreach ($name in $fill.Keys) {
+    if ($tpl.IndexOf("'" + $name + "'") -lt 0) { throw ('downloaded script has no ' + $name) }
+    $tpl = $tpl.Replace("'" + $name + "'", "'" + ([string]$fill[$name]).Replace("'", "''") + "'")
+  }
+  $new = ($tpl -replace "`r?`n", "`r`n")
+  $me  = $MyInvocation.ScriptName
+  if (-not $me) { $me = $PSCommandPath }
+  $tmp = $me + '.new'
+  Set-Content -Path $tmp -Value $new -Encoding UTF8 -NoNewline
+  $tokens = $null
+  $errs = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($tmp, [ref]$tokens, [ref]$errs)
+  if ($errs -and $errs.Count -gt 0) { Remove-Item $tmp -Force; throw ('new script has errors: ' + $errs[0].Message) }
+  Copy-Item $me ($me + '.old') -Force
+  Move-Item $tmp $me -Force
+  Write-Log ('Updated the sync script to version ' + $latest + '.')
+}
+
 if ($Uninstall) {
   schtasks /Delete /TN $TaskName /F | Out-Null
   Write-Host 'Removed the scheduled sync.'
@@ -175,13 +207,17 @@ try {
   ($newState | ConvertTo-Json) | Set-Content $State
   Write-Log ('Sent ' + $punches.Count + ' punch(es); saved ' + $result.saved + '.')
 
+  if ($result.latestScript -and [int]$result.latestScript -gt $Version) {
+    try { Update-Self ([int]$result.latestScript) } catch { Write-Log ('Script update failed: ' + $_.Exception.Message) }
+  }
+
   if ($result.backfillFrom) {
     Write-Log ('Sending older punches from ' + $result.backfillFrom + ' ...')
     $older = Send-OlderPunches $conn ([string]$result.backfillFrom)
     [void](Send-Punches @() @{ backfillDone = $true; backfillSent = $older })
     Write-Log ('Older punches sent: ' + $older + '.')
   }
-  if ($Check) { Write-Host 'Website OK. Everything is working - now run the same command with -Install.' }
+  if ($Check) { Write-Host 'Website OK. Everything is working. (First setup only: run the same command with -Install.)' }
 } catch {
   Write-Log ('Sync failed: ' + $_.Exception.Message)
   exit 1
