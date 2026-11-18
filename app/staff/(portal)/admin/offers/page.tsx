@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadServiceAccount } from "@/lib/push";
 import { formatDate, formatDateTime } from "@/lib/helpers";
@@ -19,7 +20,7 @@ export default async function OffersAdminPage() {
     loadServiceAccount().catch(() => null),
     loadWishSettings(),
     supabaseAdmin.from("customer_wishes_sent").select("mobile, kind, detail, wish_date, sent, error").order("created_at", { ascending: false }).limit(15),
-    supabaseAdmin.from("offer_views").select("offer_id, tapped_at").limit(50000),
+    fetchAll<{ offer_id: string; tapped_at: string | null }>((a, b) => supabaseAdmin.from("offer_views").select("offer_id, tapped_at").order("offer_id").order("viewer").range(a, b)).then((data) => ({ data })),
   ]);
   const seen = new Map<string, { seen: number; tapped: number }>();
   for (const v of (viewsRes.data ?? []) as { offer_id: string; tapped_at: string | null }[]) {

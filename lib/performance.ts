@@ -166,7 +166,7 @@ async function loadMonth(month: string, lists: string[]) {
         .range(a, b)
     ),
     lists.length
-      ? supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", lists).limit(10000)
+      ? fetchAll<PromoRow>((a, b) => supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", lists).order("id").range(a, b)).then((data) => ({ data }))
       : Promise.resolve({ data: [] as PromoRow[] }),
   ]);
   return {
@@ -343,7 +343,7 @@ async function loadDuties(month: string) {
   }
   // Absent days justified by HR or the Store Manager count as duties.
   const justifiedDays = new Map<string, Set<string>>();
-  const { data: just } = await supabaseAdmin.from("duty_justifications").select("user_id, day").gte("day", from).lte("day", to).limit(10000);
+  const just = await fetchAll<Row>((a, b) => supabaseAdmin.from("duty_justifications").select("user_id, day").gte("day", from).lte("day", to).order("user_id").order("day").range(a, b));
   for (const j of (just ?? []) as Row[]) {
     const code = attendanceCode(j.user_id);
     if (!justifiedDays.has(code)) justifiedDays.set(code, new Set());
@@ -970,7 +970,9 @@ export async function personDetail(month: string, userId: string, threshold: num
       .order("return_date", { ascending: false })
       .limit(500),
     offerRules.length
-      ? supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", offerRules.map((r) => r.list)).limit(10000)
+      ? fetchAll<PromoRow>((a, b) =>
+          supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").in("kind", offerRules.map((r) => r.list)).order("id").range(a, b)
+        ).then((data) => ({ data }))
       : Promise.resolve({ data: [] as PromoRow[] }),
   ]);
 

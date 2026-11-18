@@ -2,6 +2,7 @@
 
 import type { StaffUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { attendanceCode } from "@/lib/attendance";
 import { todayISO } from "@/lib/helpers";
@@ -48,13 +49,16 @@ export async function dutyDays(personId: string, month: string, lateAfter?: numb
   const { from, to, days } = monthRange(month);
   const code = attendanceCode(personId);
   const [punchRes, justRes] = await Promise.all([
-    supabaseAdmin
-      .from("attendance_punches")
-      .select("emp_code, punch_time")
-      .gte("punch_time", `${from}T00:00:00+05:30`)
-      .lte("punch_time", `${to}T23:59:59+05:30`)
-      .order("punch_time")
-      .limit(20000),
+    fetchAll<{ emp_code: string; punch_time: string }>((a, b) =>
+      supabaseAdmin
+        .from("attendance_punches")
+        .select("emp_code, punch_time")
+        .gte("punch_time", `${from}T00:00:00+05:30`)
+        .lte("punch_time", `${to}T23:59:59+05:30`)
+        .order("punch_time")
+        .order("id")
+        .range(a, b)
+    ).then((data) => ({ data })),
     supabaseAdmin.from("duty_justifications").select("day, kind, reason, by_name, created_at").eq("user_id", code).gte("day", from).lte("day", to),
   ]);
   const anyData = new Set<string>();

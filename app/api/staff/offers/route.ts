@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { pushToAll, pushToCustomer, saveServiceAccount } from "@/lib/push";
 import { saveWishSettings } from "@/lib/wishes";
@@ -189,7 +190,9 @@ async function offerWhatsApp(title: string, message: string, audience: "all" | "
       ? ((await supabaseAdmin.from("customer_accounts").select("mobile, full_name").in("mobile", mobiles)).data ?? []).concat(
           mobiles.map((m) => ({ mobile: m, full_name: null }))
         )
-      : (await supabaseAdmin.from("customer_accounts").select("mobile, full_name").limit(20000)).data ?? [];
+      : await fetchAll<{ mobile: string; full_name: string | null }>((a, b) =>
+          supabaseAdmin.from("customer_accounts").select("mobile, full_name").order("mobile").range(a, b)
+        );
   const unique = [...new Map(targets.reverse().map((t) => [t.mobile, t])).values()];
   after(async () => {
     for (const t of unique) {

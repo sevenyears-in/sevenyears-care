@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { readStockFromZoho, isStockReading, loadStockState, saveStockState, stockAlertsFor } from "@/lib/stock";
@@ -16,8 +17,12 @@ async function dayCheck(pairs: { store: string; day: string }[], uploadId: strin
   for (const [store, days] of byStore) {
     days.sort();
     const [h, z] = await Promise.all([
-      supabaseAdmin.from("sales_history_lines").select("day, upload_id").eq("store", store).gte("day", days[0]).lte("day", days[days.length - 1]).limit(20000),
-      supabaseAdmin.from("sales_invoices").select("invoice_date").eq("store", store).gte("invoice_date", days[0]).lte("invoice_date", days[days.length - 1]).limit(50000),
+      fetchAll<{ day: string; upload_id: string | null }>((a, b) =>
+        supabaseAdmin.from("sales_history_lines").select("day, upload_id").eq("store", store).gte("day", days[0]).lte("day", days[days.length - 1]).order("id").range(a, b)
+      ).then((data) => ({ data })),
+      fetchAll<{ invoice_date: string }>((a, b) =>
+        supabaseAdmin.from("sales_invoices").select("invoice_date").eq("store", store).gte("invoice_date", days[0]).lte("invoice_date", days[days.length - 1]).order("invoice_id").range(a, b)
+      ).then((data) => ({ data })),
     ]);
     const want = new Set(days);
     const hd = new Set((h.data ?? []).filter((r) => want.has(String(r.day)) && (!uploadId || r.upload_id !== uploadId)).map((r) => String(r.day)));

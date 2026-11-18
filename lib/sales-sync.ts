@@ -5,6 +5,7 @@
 // Each run handles a limited number of bills so it never holds a request for long and stays
 // well inside Zoho's per-minute limit. Call it again until `pending` is 0.
 
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { flushZohoUsage, zohoConfigured, zohoRead } from "@/lib/zoho";
 import { appendSyncLog, isTransient, type SyncLogEntry } from "@/lib/sync-log";
@@ -41,8 +42,10 @@ const likeExact = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`);
 export async function setSalespersonOwner(name: string, owner: string | null) {
   const pattern = likeExact(name);
   await supabaseAdmin.from("sales_invoices").update({ staff_user_id: owner }).ilike("salesperson", pattern);
-  const { data: bills } = await supabaseAdmin.from("sales_invoices").select("invoice_id").ilike("salesperson", pattern).limit(20000);
-  const list = (bills ?? []).map((b) => b.invoice_id as string);
+  const bills = await fetchAll<{ invoice_id: string }>((a, b) =>
+    supabaseAdmin.from("sales_invoices").select("invoice_id").ilike("salesperson", pattern).order("invoice_id").range(a, b)
+  );
+  const list = bills.map((b) => b.invoice_id as string);
   for (let i = 0; i < list.length; i += 200) {
     await supabaseAdmin.from("sales_invoice_lines").update({ staff_user_id: owner }).in("invoice_id", list.slice(i, i + 200));
     const { data: rets } = await supabaseAdmin.from("sales_returns").update({ staff_user_id: owner }).in("invoice_id", list.slice(i, i + 200)).select("creditnote_id");
@@ -74,8 +77,10 @@ export async function assignPtCodes(names: string[]): Promise<Record<string, str
 
 /** Bills already copied whose salesperson has no code yet. */
 export async function assignPtCodesForSavedBills() {
-  const { data } = await supabaseAdmin.from("sales_invoices").select("salesperson").is("staff_user_id", null).not("salesperson", "is", null).limit(5000);
-  const names = [...new Set((data ?? []).map((r) => cleanName(r.salesperson)).filter(Boolean))];
+  const data = await fetchAll<{ salesperson: string }>((a, b) =>
+    supabaseAdmin.from("sales_invoices").select("salesperson").is("staff_user_id", null).not("salesperson", "is", null).order("invoice_id").range(a, b)
+  );
+  const names = [...new Set(data.map((r) => cleanName(r.salesperson)).filter(Boolean))];
   if (names.length) await assignPtCodes(names);
 }
 

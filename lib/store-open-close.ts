@@ -14,6 +14,7 @@
 // the office PC is still sending punches), the last punch is the closing. If no one punches
 // near closing time, the store closed early: 2 hours after closing time the last punch counts.
 
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { istNow } from "@/lib/business-day";
 import { attendanceCode, attendanceSettings } from "@/lib/attendance";
@@ -78,7 +79,9 @@ export async function deviceStores(): Promise<Record<string, string>> {
   const saved = ((data?.value as { map?: Record<string, string> } | null)?.map ?? {}) as Record<string, string>;
 
   const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
-  const { data: punches } = await supabaseAdmin.from("attendance_punches").select("device, emp_code").gte("punch_time", since).not("device", "is", null).limit(20000);
+  const punches = await fetchAll<{ device: string; emp_code: string }>((a, b) =>
+    supabaseAdmin.from("attendance_punches").select("device, emp_code").gte("punch_time", since).not("device", "is", null).order("id").range(a, b)
+  );
   const devices = new Set(((punches ?? []) as { device: string }[]).map((p) => String(p.device)));
   const missing = [...devices].filter((d) => !(d in saved));
   if (!missing.length) return saved;
@@ -127,7 +130,9 @@ export async function listDevices(): Promise<DeviceInfo[]> {
   const map = await deviceStores();
   const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const [{ data: punches }, { data: staff }] = await Promise.all([
-    supabaseAdmin.from("attendance_punches").select("device, emp_code, punch_time").gte("punch_time", since).not("device", "is", null).limit(20000),
+    fetchAll<{ device: string; emp_code: string; punch_time: string }>((a, b) =>
+      supabaseAdmin.from("attendance_punches").select("device, emp_code, punch_time").gte("punch_time", since).not("device", "is", null).order("id").range(a, b)
+    ).then((data) => ({ data })),
     supabaseAdmin.from("staff_users").select("user_id, store_name"),
   ]);
   const storeOf = new Map(((staff ?? []) as { user_id: string; store_name: string | null }[]).map((s) => [attendanceCode(s.user_id), String(s.store_name ?? "").toUpperCase()]));

@@ -2,6 +2,7 @@
 // First punch of the day = arrival; last punch = leaving; punches in between are breaks.
 
 import { createHash, randomBytes } from "node:crypto";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 
@@ -54,12 +55,15 @@ export async function presenceToday(): Promise<Map<string, Presence>> {
   const result = new Map<string, Presence>();
   const [{ data: staff }, { data: punches }] = await Promise.all([
     supabaseAdmin.from("staff_users").select("id, user_id").eq("is_active", true),
-    supabaseAdmin
-      .from("attendance_punches")
-      .select("emp_code, punch_time")
-      .gte("punch_time", `${todayISO()}T00:00:00+05:30`)
-      .order("punch_time", { ascending: true })
-      .limit(5000),
+    fetchAll<{ emp_code: string; punch_time: string }>((a, b) =>
+      supabaseAdmin
+        .from("attendance_punches")
+        .select("emp_code, punch_time")
+        .gte("punch_time", `${todayISO()}T00:00:00+05:30`)
+        .order("punch_time", { ascending: true })
+        .order("id")
+        .range(a, b)
+    ).then((data) => ({ data })),
   ]);
   if (!staff?.length || !punches) {
     cache = { at: Date.now(), value: result };
@@ -93,6 +97,8 @@ export async function presenceToday(): Promise<Map<string, Presence>> {
 /** User IDs (normalised) that have punched in the last 31 days. */
 export async function recentAttendanceCodes(): Promise<Set<string>> {
   const since = new Date(Date.now() - 31 * 86400_000).toISOString();
-  const { data } = await supabaseAdmin.from("attendance_punches").select("emp_code").gte("punch_time", since).limit(20000);
-  return new Set((data ?? []).map((p) => attendanceCode(p.emp_code)));
+  const data = await fetchAll<{ emp_code: string }>((a, b) =>
+    supabaseAdmin.from("attendance_punches").select("emp_code").gte("punch_time", since).order("id").range(a, b)
+  );
+  return new Set(data.map((p) => attendanceCode(p.emp_code)));
 }

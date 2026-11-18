@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
@@ -45,7 +46,9 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   const [people, targets, promos, storeList, report, counts, rules] = await Promise.all([
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
-    supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").order("name").limit(5000),
+    fetchAll<Record<string, unknown>>((a, b) =>
+      supabaseAdmin.from("promo_products").select("id, kind, item_id, sku, name, from_date, to_date").order("name").order("id").range(a, b)
+    ).then((data) => ({ data })),
     getStores().catch(() => ({ stores: [] as { name: string }[] })),
     monthReport(month, true).catch(() => null),
     supabaseAdmin.from("sales_invoices").select("invoice_id", { count: "exact", head: true }).gte("invoice_date", monthRange(month).from).lte("invoice_date", monthRange(month).to),

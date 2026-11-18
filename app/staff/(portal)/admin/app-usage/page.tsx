@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getCurrentStaff } from "@/lib/auth";
 import { isAdmin, ROLE_LABELS, type Role } from "@/lib/roles";
+import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/helpers";
 
@@ -76,12 +77,17 @@ export default async function AppUsagePage() {
   if (!isAdmin(staff.role)) redirect("/staff");
 
   const [tokensRes, staffRes, custCount, custRecent, offersRes, viewsRes, alertsRes] = await Promise.all([
-    supabaseAdmin.from("push_tokens").select("platform, customer_mobile, staff_id, updated_at").limit(20000),
+    fetchAll<Token>((a, b) => supabaseAdmin.from("push_tokens").select("platform, customer_mobile, staff_id, updated_at").order("token").range(a, b)).then((data) => ({ data })),
     supabaseAdmin.from("staff_users").select("id, user_id, full_name, role, store_name, last_login_at, last_seen_at").eq("is_active", true).order("full_name"),
     supabaseAdmin.from("customer_accounts").select("mobile", { count: "exact", head: true }),
     supabaseAdmin.from("customer_accounts").select("mobile, full_name, last_login_at, last_seen_at").not("last_login_at", "is", null).order("last_login_at", { ascending: false }).limit(5000),
     supabaseAdmin.from("offers").select("id, title, created_at, audience").order("created_at", { ascending: false }).limit(10),
-    supabaseAdmin.from("offer_views").select("offer_id, viewer, customer_mobile, staff_id, first_seen_at, tapped_at").gte("first_seen_at", since(120)).limit(20000),
+    fetchAll((a, b) =>
+      supabaseAdmin.from("offer_views").select("offer_id, viewer, customer_mobile, staff_id, first_seen_at, tapped_at").gte("first_seen_at", since(120)).order("offer_id").order("viewer").range(a, b)
+    ).then(
+      (data) => ({ data, error: null as unknown }),
+      (error: unknown) => ({ data: [] as Record<string, unknown>[], error })
+    ),
     supabaseAdmin.from("staff_notifications").select("staff_id, title, read_at, created_at").gte("created_at", since(30)).order("created_at", { ascending: false }).limit(5000),
   ]);
 
