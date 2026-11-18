@@ -65,7 +65,7 @@ export async function GET(request: Request) {
     grace: settings.lateGraceMinutes,
     stores: [...stores].sort(),
     month: m,
-    can: { manage: scope.manage, delete: scope.canDelete, allStores: scope.stores === null },
+    can: { manage: scope.manage, transfer: scope.transfer, delete: scope.canDelete, allStores: scope.stores === null },
   });
 }
 
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
       const validFrom = String(body.validFrom ?? "");
       const note = String(body.note ?? "").trim().slice(0, 200) || null;
       if (!userId || !kind || !value || !isDay(validFrom)) return NextResponse.json({ error: "Choose the person, the new " + (kind ?? "value") + " and the date." }, { status: 400 });
-      if (kind === "store" && !scope.manage) return NextResponse.json({ error: "Only admins and HR can transfer staff." }, { status: 403 });
+      if (kind === "store" && !scope.transfer) return NextResponse.json({ error: "Only HR and the Super Admin can transfer staff." }, { status: 403 });
       if (!(await allowedFor(userId))) return NextResponse.json({ error: "You can change only your own team." }, { status: 403 });
       if (kind === "shift") {
         const settings = await loadPerformanceSettings();
@@ -203,7 +203,7 @@ export async function POST(request: Request) {
       if (!id || !value || !isDay(validFrom)) return NextResponse.json({ error: "Check the value and the date." }, { status: 400 });
       const { data: before } = await supabaseAdmin.from("staff_assignments").select("*").eq("id", id).maybeSingle();
       if (!before) return NextResponse.json({ error: "Not found." }, { status: 404 });
-      if (before.kind === "store" && !scope.manage) return NextResponse.json({ error: "Only admins and HR can change transfers." }, { status: 403 });
+      if (before.kind === "store" && !scope.transfer) return NextResponse.json({ error: "Only HR and the Super Admin can change transfers." }, { status: 403 });
       if (!(await allowedFor(attendanceCode(before.user_id)))) return NextResponse.json({ error: "You can change only your own team." }, { status: 403 });
       const { error } = await supabaseAdmin
         .from("staff_assignments")
@@ -220,6 +220,7 @@ export async function POST(request: Request) {
       const id = Number(body.id);
       const { data: before } = await supabaseAdmin.from("staff_assignments").select("*").eq("id", id).maybeSingle();
       if (!before) return NextResponse.json({ error: "Not found." }, { status: 404 });
+      if (before.kind === "store" && !scope.transfer) return NextResponse.json({ error: "Only HR and the Super Admin can change transfers." }, { status: 403 });
       const { error } = await supabaseAdmin.from("staff_assignments").delete().eq("id", id);
       if (error) throw error;
       await logAudit(auth.staff, "shifts", "delete", before, null).catch(() => undefined);

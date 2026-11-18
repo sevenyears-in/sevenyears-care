@@ -6,7 +6,7 @@ import { ErrorBox } from "@/components/SiteChrome";
 type Row = { id: number; userId: string; kind: "shift" | "store"; value: string; validFrom: string; note: string | null; createdBy: string | null };
 type Person = { userId: string; name: string; store: string | null; shift: Row[]; stores: Row[]; target: number | null; abvTarget: number | null; editable: boolean };
 type Shift = { name: string; start: string; end?: string };
-type Data = { people: Person[]; shifts: Shift[]; grace: number; stores: string[]; month: string; can: { manage: boolean; delete: boolean; allStores: boolean } };
+type Data = { people: Person[]; shifts: Shift[]; grace: number; stores: string[]; month: string; can: { manage: boolean; transfer: boolean; delete: boolean; allStores: boolean } };
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 const input = "rounded-xl bg-white px-3 py-2 text-sm ring-1 ring-black/10";
@@ -247,7 +247,7 @@ function PeopleCard({ data, reload, month, setMonth }: { data: Data; reload: () 
         <div>
           <h2 className="text-lg font-bold">People</h2>
           <p className="mt-1 text-sm text-black/60">
-            Targets are for the month chosen here. Open a person to change their shift{data.can.manage ? " or transfer them to another store" : ""} from a date.
+            Targets are for the month chosen here. Open a person to change their shift{data.can.transfer ? " or transfer them to another store" : ""} from a date.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -375,7 +375,7 @@ function PersonRows({
           <td colSpan={6} className="px-2 pb-4">
             <div className="grid gap-4 rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5 md:grid-cols-2">
               <History title="Shift" kind="shift" p={p} rows={p.shift} options={data.shifts.map((s) => s.name)} defaultNote={`Before the first change: ${data.shifts[0]?.name}`} reload={reload} canEdit={p.editable} canDelete={p.editable && data.can.delete} />
-              <History title="Store" kind="store" p={p} rows={p.stores} options={data.stores} defaultNote={`No transfers yet: ${p.store ?? "no store"} on every day`} reload={reload} canEdit={p.editable && data.can.manage} canDelete={p.editable && data.can.delete} />
+              <History title="Store" kind="store" p={p} rows={p.stores} options={data.stores} defaultNote={`No transfers yet: ${p.store ?? "no store"} on every day`} reload={reload} canEdit={p.editable && data.can.transfer} canDelete={p.editable && data.can.delete && data.can.transfer} />
             </div>
           </td>
         </tr>
