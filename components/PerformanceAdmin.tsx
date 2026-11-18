@@ -1326,7 +1326,7 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
           <p className="text-xs font-bold uppercase tracking-wide text-black/45">Shifts and late coming</p>
           <p className="mt-1 text-sm">
             {settings.shifts.map((sh) => `${sh.name} ${sh.start}${sh.end ? `–${sh.end}` : ""}`).join(" · ")} — late when the first punch is more than <b>{settings.lateGraceMinutes} min</b> after the start of the person&apos;s shift that day.{" "}
-            <a href="/staff/admin/shifts" className="font-semibold text-[#5b55c9] underline">
+            <a href="/staff/team" className="font-semibold text-[#5b55c9] underline">
               Change shifts, each person&apos;s shift and transfers →
             </a>
           </p>
