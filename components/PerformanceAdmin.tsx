@@ -844,7 +844,6 @@ function TargetsCard(props: {
         if (!r) continue;
         if (r.group !== p.group) await post({ action: "group", staffId: p.id, group: r.group });
         if (isCorporate(p) && (r.store || "") !== (p.chosenStore ?? "")) await post({ action: "incentive_store", userId: p.userId, store: r.store });
-        if ((r.shift || "") !== (settings.personShifts[p.userId] ?? "")) await post({ action: "person_shift", userId: p.userId, shift: r.shift });
       }
       for (const s of props.stores) {
         const was = props.storeMonthTargets[s] ? String(props.storeMonthTargets[s]) : "";
@@ -998,18 +997,6 @@ function TargetsCard(props: {
                         </td>
                         <td className="px-2 py-2">
                           {editing ? groupSelect(p) : <span>{groupName(p.group, settings.groupLabels)}</span>}
-                          {settings.shifts.length > 1 &&
-                            (editing ? (
-                              <select className={`${input} mt-1 py-1 text-xs`} value={r?.shift || settings.shifts[0].name} onChange={(e) => setRow(p.userId, { shift: e.target.value === settings.shifts[0].name ? "" : e.target.value })}>
-                                {settings.shifts.map((sh) => (
-                                  <option key={sh.name} value={sh.name}>
-                                    {sh.name} ({sh.start})
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className="mt-0.5 block text-[11px] text-black/45">Shift: {settings.personShifts[p.userId] && settings.shifts.some((x) => x.name === settings.personShifts[p.userId]) ? settings.personShifts[p.userId] : settings.shifts[0].name}</span>
-                            ))}
                         </td>
                         <td className="px-2 py-2 text-right">
                           {noOwnTarget(groupOf(p)) ? (
@@ -1259,8 +1246,6 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
   const [pct, setPct] = useState(String(settings.highDiscountPct));
   const [duties, setDuties] = useState(String(settings.dutiesRequired));
   const [sps, setSps] = useState(settings.salesPerSalary ? String(settings.salesPerSalary) : "");
-  const [shifts, setShifts] = useState(settings.shifts);
-  const [grace, setGrace] = useState(String(settings.lateGraceMinutes));
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState<string[]>(settings.excludedStores);
   const allStores = [...new Set([...stores, ...Object.keys(settings.storeTargets), ...settings.excludedStores])].sort();
@@ -1269,8 +1254,6 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
     setPct(String(settings.highDiscountPct));
     setDuties(String(settings.dutiesRequired));
     setSps(settings.salesPerSalary ? String(settings.salesPerSalary) : "");
-    setShifts(settings.shifts);
-    setGrace(String(settings.lateGraceMinutes));
     setTargets(Object.fromEntries(allStores.map((s) => [s, settings.storeTargets[s] ? String(settings.storeTargets[s]) : ""])));
     setExcluded(settings.excludedStores);
     setEditing(true);
@@ -1282,7 +1265,7 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
     setError("");
     try {
       const storeTargets = Object.fromEntries(Object.entries(targets).filter(([, v]) => v !== ""));
-      await post({ action: "settings", highDiscountPct: pct, dutiesRequired: duties, storeTargets, excludedStores: excluded, salesPerSalary: sps, shifts, lateGraceMinutes: grace });
+      await post({ action: "settings", highDiscountPct: pct, dutiesRequired: duties, storeTargets, excludedStores: excluded, salesPerSalary: sps });
       setEditing(false);
       router.refresh();
     } catch (e) {
@@ -1341,34 +1324,12 @@ function SettingsCard({ settings, stores }: { settings: PerformanceSettings; sto
         </div>
         <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5 sm:col-span-2">
           <p className="text-xs font-bold uppercase tracking-wide text-black/45">Shifts and late coming</p>
-          {editing ? (
-            <div className="mt-2 space-y-2 text-sm">
-              {shifts.map((sh, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <input className={`${input} w-40`} placeholder="Shift name" value={sh.name} maxLength={30} onChange={(e) => setShifts(shifts.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)))} />
-                  starts at
-                  <input type="time" className={`${input} w-32`} value={sh.start} onChange={(e) => setShifts(shifts.map((x, k) => (k === i ? { ...x, start: e.target.value } : x)))} />
-                  {i === 0 && <span className="text-xs text-black/45">(everyone, unless another shift is chosen)</span>}
-                  {i > 0 && (
-                    <button className="text-xs text-red-700" onClick={() => setShifts(shifts.filter((_, k) => k !== i))}>
-                      remove
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button className="text-sm font-semibold text-[#5b55c9]" onClick={() => setShifts([...shifts, { name: `Shift ${shifts.length + 1}`, start: "12:30" }])}>
-                + Add shift
-              </button>
-              <label className="flex items-center gap-2">
-                Late after <input className={`${input} w-20`} inputMode="numeric" value={grace} onChange={(e) => setGrace(e.target.value.replace(/[^\d]/g, ""))} /> minutes past the start
-              </label>
-            </div>
-          ) : (
-            <p className="mt-1 text-sm">
-              {settings.shifts.map((sh) => `${sh.name} ${sh.start}`).join(" · ")} — late when the first punch is more than <b>{settings.lateGraceMinutes} min</b> after the shift start.
-              {settings.shifts.length > 1 ? " Choose each person's shift under Edit targets." : ""}
-            </p>
-          )}
+          <p className="mt-1 text-sm">
+            {settings.shifts.map((sh) => `${sh.name} ${sh.start}${sh.end ? `–${sh.end}` : ""}`).join(" · ")} — late when the first punch is more than <b>{settings.lateGraceMinutes} min</b> after the start of the person&apos;s shift that day.{" "}
+            <a href="/staff/admin/shifts" className="font-semibold text-[#5b55c9] underline">
+              Change shifts, each person&apos;s shift and transfers →
+            </a>
+          </p>
         </div>
         <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5 sm:col-span-2">
           <p className="text-xs font-bold uppercase tracking-wide text-black/45">Staff worth (management only)</p>

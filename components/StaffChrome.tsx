@@ -83,6 +83,7 @@ function staffNav({
           { href: "/staff/admin/offers", label: "Offers & Notifications", icon: "📣" },
           { href: "/staff/admin/app-usage", label: "App usage", icon: "📊" },
           { href: "/staff/admin/performance", label: "Sales targets & incentives", icon: "🎯" },
+          { href: "/staff/admin/shifts", label: "Shifts & transfers", icon: "⏰" },
         ]
       : []),
     ...(role === "super_admin"

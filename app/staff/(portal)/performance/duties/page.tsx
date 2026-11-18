@@ -4,7 +4,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { attendanceCode } from "@/lib/attendance";
 import { formatDateTime, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
-import { isMonth, lateTime, minutesToTime, pct, shiftStartOf } from "@/lib/performance-rules";
+import { isMonth, lateTime, minutesToTime, pct } from "@/lib/performance-rules";
+import { loadAssignments, shiftOn } from "@/lib/assignments";
 import { dutyAccess, dutyDays, JUSTIFY_KINDS } from "@/lib/duties";
 import { JustifyDay, RemoveJustification } from "@/components/DutyJustify";
 
@@ -24,20 +25,22 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
   const userId = attendanceCode(sp.u || staff.userId);
 
   const report = await monthReport(month);
-  let person = null as null | { name: string; store: string; attendance: (typeof report.stores)[number]["people"][number]["attendance"] };
+  let person = null as null | { name: string; store: string; periodTo: string | null; attendance: (typeof report.stores)[number]["people"][number]["attendance"] };
   for (const s of report.stores) {
     const p = s.people.find((x) => x.userId === userId);
-    if (p) {
-      person = { name: p.name, store: s.store, attendance: p.attendance };
-      break;
+    if (p && (!person || (p.period?.to ?? "9999") > (person.periodTo ?? "9999"))) {
+      person = { name: p.name, store: s.store, attendance: p.attendance, periodTo: p.period?.to ?? null };
     }
   }
   const access = await dutyAccess(staff, userId, person?.store ?? null);
   if (!access.view) redirect("/staff/performance");
   const canJustify = access.justify && attendanceCode(staff.userId) !== userId;
-  const shift = shiftStartOf(report.settings, userId);
-  const lateAfter = shift.start + report.settings.lateGraceMinutes;
-  const days = await dutyDays(userId, month, lateAfter);
+  // Shift of each day (a shift can change during the month, from its "valid from" date).
+  const assignments = await loadAssignments();
+  const monthEnd = `${month}-${String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`;
+  const lastDay = todayISO() < monthEnd ? todayISO() : monthEnd;
+  const shift = shiftOn(report.settings, assignments, userId, lastDay);
+  const days = await dutyDays(userId, month, (day) => shiftOn(report.settings, assignments, userId, day).start + report.settings.lateGraceMinutes);
   const lateDays = days.filter((d) => d.late);
   const a = person?.attendance;
   const absent = days.filter((d) => d.status === "absent").length;
@@ -94,7 +97,8 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Late comings</p>
             <p className={`mt-1 text-2xl font-bold ${lateDays.length ? "text-amber-700" : ""}`}>{lateDays.length}</p>
             <p className="text-xs text-black/55">
-              {shift.name} shift {minutesToTime(shift.start)} · {report.settings.lateGraceMinutes} min grace
+              {shift.name} {minutesToTime(shift.start)}
+              {shift.end !== null ? `–${minutesToTime(shift.end)}` : ""} · {report.settings.lateGraceMinutes} min grace
               {lateDays.length ? ` · ${lateTime(lateDays.reduce((s, d) => s + (d.late ?? 0), 0))} in all` : ""}
             </p>
           </div>

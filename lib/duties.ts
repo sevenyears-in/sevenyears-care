@@ -45,7 +45,7 @@ export type DutyDay = {
   justification?: { kind: string; reason: string | null; by: string; at: string };
 };
 
-export async function dutyDays(personId: string, month: string, lateAfter?: number): Promise<DutyDay[]> {
+export async function dutyDays(personId: string, month: string, lateAfter?: number | ((day: string) => number)): Promise<DutyDay[]> {
   const { from, to, days } = monthRange(month);
   const code = attendanceCode(personId);
   const [punchRes, justRes] = await Promise.all([
@@ -89,7 +89,8 @@ export async function dutyDays(personId: string, month: string, lateAfter?: numb
       if (lateAfter !== undefined) {
         const ist = new Date(p[0].getTime() + 5.5 * 3_600_000);
         const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-        if (mins > lateAfter) day.late = mins - lateAfter;
+        const limit = typeof lateAfter === "function" ? lateAfter(date) : lateAfter;
+        if (mins > limit) day.late = mins - limit;
       }
     } else if (j) day.status = "justified";
     else if (date > today) day.status = "future";

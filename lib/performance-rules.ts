@@ -40,8 +40,8 @@ export type PerformanceSettings = {
   poolOnlyGroups: string[];
   /** Assistant Store Manager and Floor Manager are one role for now. */
   asmIsFm: boolean;
-  /** Duty start times (24-hour "09:30"). The first one is everyone's unless another is chosen. */
-  shifts: { name: string; start: string }[];
+  /** Shifts (24-hour "09:00" / "19:00"). The first one is everyone's unless another is given (Settings → Shifts & transfers). */
+  shifts: { name: string; start: string; end?: string }[];
   /** Minutes after the start before a first punch counts as late. */
   lateGraceMinutes: number;
   /** User ID / PT code → shift name. */

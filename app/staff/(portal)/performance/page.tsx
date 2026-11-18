@@ -220,14 +220,22 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Store opened / closed today (from the punching machine).
   const openClose = teamStore && month === thisMonth ? await loadOpenClose(teamStore, istNow().date).catch(() => null) : null;
 
+  // A person moved stores this month is listed in each store: show the latest one.
   let found: { person: PersonReport; store: StoreReport } | null = null;
   for (const s of report.stores) {
     const p = s.people.find((x) => x.userId === wanted);
     if (p && (wanted === me || myStores.includes(s.store))) {
-      found = { person: p, store: s };
-      break;
+      if (!found || (p.period?.to ?? "9999") > (found.person.period?.to ?? "9999")) found = { person: p, store: s };
     }
   }
+  const movedNote = (() => {
+    if (!found?.person.period) return null;
+    const others = report.stores.flatMap((s) => s.people.filter((x) => x.userId === wanted && x !== found!.person && x.period).map((x) => ({ store: s.store, p: x })));
+    const d = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+    const here = `${found.store.store} ${d(found.person.period.from)}–${d(found.person.period.to)}`;
+    const there = others.map((o) => `${o.store} ${d(o.p.period!.from)}–${d(o.p.period!.to)}: ₹${Math.round(o.p.net).toLocaleString("en-IN")}`).join(" · ");
+    return `Moved stores this month. This page shows ${here} (target split by days).${there ? ` Also: ${there}.` : ""}`;
+  })();
 
   const header = (
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -426,6 +434,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       {switcher}
       {wanted === me && stockBar(found.store.store)}
       {wanted === me && creStore ? await walkinBox(creStore) : null}
+      {movedNote && <p className="rounded-2xl bg-[#8883d7]/10 p-3 text-sm text-[#3d3a7a]">{movedNote}</p>}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
       <PeakLean
         title="Your peak and lean times"

@@ -3,6 +3,7 @@
 // The incentive schemes come from Settings (lib/incentive-rules.ts), each with its own dates.
 
 import { closingAt, dayState } from "@/lib/business-day";
+import { loadAssignments, shiftOn, storePeriods } from "@/lib/assignments";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { asRole, ROLE_LABELS } from "@/lib/roles";
@@ -10,7 +11,7 @@ import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
-import { attendanceShare, shiftStartOf, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
   abvAmount,
   inForce,
@@ -359,16 +360,19 @@ function attendanceFor(
   withData: Set<string>,
   required: number,
   firstIn?: Map<string, number>,
-  lateAfter?: number
+  lateAfter?: number | ((day: string) => number)
 ): Attendance {
   let late = 0;
   let lateMinutes = 0;
   if (firstIn && lateAfter !== undefined)
-    for (const mins of firstIn.values())
-      if (mins > lateAfter) {
+    for (const [day, mins] of firstIn) {
+      // The shift in force on that day (shifts change with "valid from").
+      const limit = typeof lateAfter === "function" ? lateAfter(day) : lateAfter;
+      if (mins > limit) {
         late++;
-        lateMinutes += mins - lateAfter;
+        lateMinutes += mins - limit;
       }
+    }
   const { days: inMonth } = monthRange(month);
   const today = todayISO();
   const days = new Set<string>([...(punched ?? []), ...(justifiedSet ?? [])]);
@@ -442,6 +446,8 @@ export type IncentiveLine = { ruleId: string; name: string; kind: RuleKind; note
 export type PersonReport = {
   staffId: string | null;
   userId: string;
+  /** Days in this store when the person moved stores during the month (else null). */
+  period?: { from: string; to: string; days: number } | null;
   name: string;
   roleLabel: string;
   group: IncentiveGroup;
@@ -592,12 +598,13 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
   const poolRule = monthly.find((r): r is StorePoolRule => r.kind === "store_pool") ?? null;
   const lists = [...new Set([...unitRules.map((r) => r.list), ...valueRules.map((r) => r.list)])];
 
-  const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties, formerIds] = await Promise.all([
+  const [{ invoices: rawInvoices, returns, promos }, staff, targets, duties, formerIds, assignments] = await Promise.all([
     loadMonth(month, lists),
     loadStaffForPerformance(settings.asmIsFm),
     loadTargets(month),
     loadDuties(month),
     loadInactiveStaffIds(),
+    loadAssignments(),
   ]);
   const promoLines = promos.length ? await loadPromoLines(month, promos) : { sold: [], back: [] };
 
@@ -613,6 +620,23 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
   const staffById = new Map(staff.map((s) => [s.userId, s]));
   // Corporate Office staff can be given a store whose pool they share.
   const storeOf = (s: StaffRow) => settings.incentiveStores[s.userId]?.toUpperCase() || s.store;
+  // Store by date (Settings → Shifts & transfers). A person moved during the month is listed in
+  // each store for the days they were there: their bills, returns and products count for the store
+  // of that date, and their personal target and fixed bonuses are split by days.
+  const periodsOf = new Map<string, ReturnType<typeof storePeriods>>();
+  const monthStoreOf = new Map<string, string | null>();
+  for (const s of staff) {
+    const ps = storePeriods(assignments, s.userId, mFrom, mTo, storeOf(s));
+    if (ps.length > 1) periodsOf.set(s.userId, ps);
+    else monthStoreOf.set(s.userId, ps[0]?.store ?? storeOf(s));
+  }
+  const homeStore = (s: StaffRow) => (monthStoreOf.has(s.userId) ? monthStoreOf.get(s.userId) ?? null : storeOf(s));
+  const segKey = (id: string, date: string) => {
+    const ps = periodsOf.get(id);
+    if (!ps) return id;
+    const p = ps.find((x) => date >= x.from && date <= x.to) ?? ps[ps.length - 1];
+    return `${id}@${p.store ?? ""}`;
+  };
   const groupOf = (id: string): IncentiveGroup => staffById.get(id)?.group ?? (isPtCode(id) ? settings.ptPeople[id]?.group ?? "sales" : "sales");
 
   // Bills returned (any time up to now) do not earn per-bill incentives.
@@ -650,7 +674,7 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     }
     if (!id) continue;
     if (b.salesperson && !spName.has(id)) spName.set(id, b.salesperson);
-    const a = get(id);
+    const a = get(segKey(id, b.invoice_date));
     if (b.invoice_date === today) {
       a.today.bills++;
       a.today.units += b.quantity;
@@ -680,7 +704,7 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
   }
   for (const r of returns) {
     if (!r.staff_user_id) continue;
-    const a = get(r.staff_user_id);
+    const a = get(segKey(r.staff_user_id, r.return_date));
     if (r.return_date === today) a.today.returns += r.net;
     a.returns += r.net;
     a.returnCount++;
@@ -692,8 +716,8 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     const date = String(l.invoice_date);
     const inLists = listsOf(promos, l, date);
     const g = groupOf(id);
-    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units += n(l.quantity);
-    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value += gst(l);
+    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(segKey(id, date)), r.id).units += n(l.quantity);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(segKey(id, date)), r.id).value += gst(l);
   }
   for (const l of promoLines.back) {
     const id = l.staff_user_id ? String(l.staff_user_id) : null;
@@ -701,8 +725,8 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     const date = String(l.return_date);
     const inLists = listsOf(promos, l, date);
     const g = groupOf(id);
-    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).units -= n(l.quantity);
-    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(id), r.id).value -= gst(l);
+    for (const r of unitRules) if (inForce(r, date) && r.groups.includes(g) && inLists.has(r.list)) per(get(segKey(id, date)), r.id).units -= n(l.quantity);
+    for (const r of valueRules) if (r.groups.includes(g) && inLists.has(r.list)) per(get(segKey(id, date)), r.id).value -= gst(l);
   }
   for (const a of acc.values()) {
     for (const r of unitRules) {
@@ -738,19 +762,31 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     // People of this store: staff whose (incentive) store is this one, plus anyone (e.g. PT staff)
     // who mostly sold here. People not in incentive are left out; their bills count as "Others".
     const members = new Map<string, StaffRow | null>();
-    for (const s of staff) if (storeOf(s) === store && s.group !== "none") members.set(s.userId, s);
+    for (const s of staff) {
+      if (s.group === "none") continue;
+      const ps = periodsOf.get(s.userId);
+      if (ps) {
+        if (ps.some((p) => p.store === store)) members.set(`${s.userId}@${store}`, s);
+      } else if (homeStore(s) === store) members.set(s.userId, s);
+    }
     for (const [id, a] of acc) {
-      if (members.has(id)) continue;
+      if (members.has(id) || id.includes("@")) continue;
       const s = staffById.get(id);
-      if (s && (s.group === "none" || (storeOf(s) && storeOf(s) !== store && storeNames.has(storeOf(s) as string)))) continue;
+      if (s && (s.group === "none" || (homeStore(s) && homeStore(s) !== store && storeNames.has(homeStore(s) as string)))) continue;
       if (!s && !isPtCode(id)) continue; // unknown codes are listed for linking instead
       const mainStore = [...a.stores.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
       if (mainStore === store) members.set(id, s ?? null);
     }
 
     const people: PersonReport[] = [];
-    for (const [id, s] of members) {
-      const a = acc.get(id) ?? get(id);
+    const keyOf = new Map<PersonReport, { key: string; frac: number }>();
+    for (const [key, s] of members) {
+      const id = key.split("@")[0];
+      const a = acc.get(key) ?? get(key);
+      // Days in this store this month (a transfer splits the month).
+      const mine = periodsOf.get(id)?.filter((p) => p.store === store) ?? [];
+      const segDays = mine.reduce((sum, p) => sum + p.days, 0);
+      const frac = mine.length ? segDays / daysInMonth : 1;
       const group = groupOf(id);
       // Some groups (e.g. Store Manager) have no individual target: they are measured on the store target.
       const poolOnly = poolOnlyGroups.has(group);
@@ -758,9 +794,10 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
       const t = targetApplies ? targets.staff.get(id) : undefined;
       const pnet = a.invoiceNet - a.returns;
       const pt = isPtCode(id);
-      people.push({
+      const person: PersonReport = {
         staffId: s?.id ?? null,
         userId: id,
+        period: mine.length ? { from: mine[0].from, to: mine[mine.length - 1].to, days: segDays } : null,
         targetApplies,
         poolOnly,
         name: s?.name ?? (pt ? settings.ptPeople[id]?.name : undefined) ?? spName.get(id) ?? id,
@@ -779,9 +816,9 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
         abv: a.bills ? pnet / a.bills : 0,
         discountPct: a.gross ? a.discount / a.gross : 0,
         flaggedBills: a.flaggedBills,
-        target: t?.sales || null,
+        target: t?.sales ? Math.round(t.sales * frac) : null,
         abvTarget: t?.abv ?? null,
-        achievement: t?.sales ? pnet / t.sales : null,
+        achievement: t?.sales ? pnet / Math.max(1, Math.round(t.sales * frac)) : null,
         storeShare: 0,
         bonus: 0,
         spotTotal: 0,
@@ -795,13 +832,15 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
           duties.withData,
           settings.dutiesRequired,
           duties.firstIn.get(id),
-          shiftStartOf(settings, id).start + settings.lateGraceMinutes
+          (day: string) => shiftOn(settings, assignments, id, day).start + settings.lateGraceMinutes
         ),
         today: { ...a.today, net: a.today.invoiceNet - a.today.returns },
         earnedBeforeAttendance: 0,
         attendanceCut: 0,
         total: 0,
-      });
+      };
+      people.push(person);
+      keyOf.set(person, { key, frac });
     }
 
     // Store pool split: the Sales Team by sales, every other group equally.
@@ -828,17 +867,19 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     }
 
     for (const p of people) {
-      const a = acc.get(p.userId)!;
+      const { key, frac } = keyOf.get(p) ?? { key: p.userId, frac: 1 };
+      const a = acc.get(key) ?? get(key);
       const pct = (x: number) => `${Math.round(x * 100)}%`;
       for (const r of achRules) {
         if (!r.groups.includes(p.group)) continue;
-        const amount = p.achievement !== null ? slabFor(r.slabs, p.achievement)?.amount ?? 0 : 0;
+        // Fixed bonuses are split by days when the person moved stores this month.
+        const amount = Math.round((p.achievement !== null ? slabFor(r.slabs, p.achievement)?.amount ?? 0 : 0) * frac);
         p.lines.push({ ruleId: r.id, name: r.name, kind: r.kind, note: p.achievement !== null ? `${pct(p.achievement)} of target` : "Needs a target", amount });
         p.bonus += amount;
       }
       for (const r of abvRules) {
         if (!r.groups.includes(p.group) || !p.bills) continue;
-        const amount = abvAmount(r, p.achievement, p.abv);
+        const amount = Math.round(abvAmount(r, p.achievement, p.abv) * frac);
         p.lines.push({
           ruleId: r.id,
           name: r.name,
