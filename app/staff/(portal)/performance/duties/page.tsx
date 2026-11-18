@@ -1,3 +1,4 @@
+import { supabaseAdmin } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
@@ -5,7 +6,7 @@ import { attendanceCode } from "@/lib/attendance";
 import { formatDateTime, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
 import { isMonth, lateTime, minutesToTime, pct } from "@/lib/performance-rules";
-import { loadAssignments, shiftOn } from "@/lib/assignments";
+import { loadAssignments, shiftOn, storeOn } from "@/lib/assignments";
 import { dutyAccess, dutyDays, JUSTIFY_KINDS } from "@/lib/duties";
 import { JustifyDay, RemoveJustification } from "@/components/DutyJustify";
 
@@ -40,7 +41,15 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
   const monthEnd = `${month}-${String(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`;
   const lastDay = todayISO() < monthEnd ? todayISO() : monthEnd;
   const shift = shiftOn(report.settings, assignments, userId, lastDay);
-  const days = await dutyDays(userId, month, (day) => shiftOn(report.settings, assignments, userId, day).start + report.settings.lateGraceMinutes);
+  // People not in the sales report (e.g. a store not tracked for targets): name and store from their account.
+  const { data: acct } = await supabaseAdmin.from("staff_users").select("full_name, store_name").eq("user_id", userId).maybeSingle();
+  const staffStore = acct?.store_name ? String(acct.store_name).toUpperCase() : null;
+  const homeStore = person?.store ?? staffStore;
+  const days = await dutyDays(userId, month, {
+    shift: (day) => shiftOn(report.settings, assignments, userId, day),
+    grace: report.settings.lateGraceMinutes,
+    store: (day) => storeOn(assignments, userId, day) ?? homeStore,
+  });
   const lateDays = days.filter((d) => d.late);
   const a = person?.attendance;
   const absent = days.filter((d) => d.status === "absent").length;
@@ -67,9 +76,9 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">Duties</p>
-          <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{person?.name ?? userId}</h1>
+          <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{person?.name ?? acct?.full_name ?? userId}</h1>
           <p className="mt-1 text-sm text-black/55">
-            {userId} · {person?.store ?? "—"} · {monthLabel(month)}
+            {userId} · {person?.store ?? staffStore ?? "—"} · {monthLabel(month)}
           </p>
         </div>
         <Link href={`/staff/performance${sp.u ? `?u=${encodeURIComponent(userId)}` : ""}`} className="rounded-full bg-white px-4 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">
@@ -131,6 +140,11 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
                 </p>
               )}
               {d.late ? <p className="mt-0.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Late by {lateTime(d.late)}</p> : null}
+              {d.onePunch ? (
+                <p className="mt-0.5 inline-block rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold text-black/60" title="Only one punch, long after the shift start: the in- or out-punch is missing. Not counted as late.">
+                  One punch only
+                </p>
+              ) : null}
               {d.justification && (
                 <div className="mt-1 text-[11px] text-black/60">
                   <p className="font-semibold text-[#5b55c9]">{kindLabel(d.justification.kind)}</p>
@@ -150,7 +164,7 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
           ))}
         </div>
         <p className="mt-4 text-xs text-black/50">
-          Present = punched on the machine. Late = first punch after the shift start plus the grace minutes. Days with no punching data at all are not counted as absent. A justified day counts as a duty. The 26-duty rule: each duty short is
+          Present = punched on the machine. Late = first punch after the start of the shift of that day plus the grace minutes. A day with only one punch long after the start (or only after the shift ended) shows “One punch only” and is not counted as late. Days when the store’s punching machine sent nothing are not counted as absent. A justified day counts as a duty. The 26-duty rule: each duty short is
           one unauthorised absence (1 → 75% of incentive paid, 2 → 50%, 3 or more → nothing).
         </p>
         {staff.role === "super_admin" && days.some((d) => d.status === "no_data") && (

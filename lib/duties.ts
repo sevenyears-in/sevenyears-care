@@ -2,12 +2,12 @@
 
 import type { StaffUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
-import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { attendanceCode } from "@/lib/attendance";
 import { todayISO } from "@/lib/helpers";
 import { monthRange } from "@/lib/performance-rules";
 import { performanceAccess } from "@/lib/performance-access";
+import { hasData, judgeDay, loadMonthPunches } from "@/lib/attendance-days";
 
 export const JUSTIFY_KINDS = [
   { key: "leave", label: "Approved leave" },
@@ -42,43 +42,36 @@ export type DutyDay = {
   punches?: number;
   /** Minutes late (first punch after the shift start + grace). */
   late?: number;
+  /** Only one punch, long after the start (or only after the shift ended): arrival not known, not counted late. */
+  onePunch?: boolean;
   justification?: { kind: string; reason: string | null; by: string; at: string };
 };
 
-export async function dutyDays(personId: string, month: string, lateAfter?: number | ((day: string) => number)): Promise<DutyDay[]> {
+export type DutyOptions = {
+  /** Shift of the person on a day (start / end in minutes after midnight). */
+  shift: (day: string) => { start: number; end: number | null };
+  grace: number;
+  /** Store of the person on a day (for "no punching data" days). */
+  store: (day: string) => string | null;
+};
+
+export async function dutyDays(personId: string, month: string, opts: DutyOptions): Promise<DutyDay[]> {
   const { from, to, days } = monthRange(month);
   const code = attendanceCode(personId);
-  const [punchRes, justRes] = await Promise.all([
-    fetchAll<{ emp_code: string; punch_time: string }>((a, b) =>
-      supabaseAdmin
-        .from("attendance_punches")
-        .select("emp_code, punch_time")
-        .gte("punch_time", `${from}T00:00:00+05:30`)
-        .lte("punch_time", `${to}T23:59:59+05:30`)
-        .order("punch_time")
-        .order("id")
-        .range(a, b)
-    ).then((data) => ({ data })),
+  const [index, justRes] = await Promise.all([
+    loadMonthPunches(month),
     supabaseAdmin.from("duty_justifications").select("day, kind, reason, by_name, created_at").eq("user_id", code).gte("day", from).lte("day", to),
   ]);
-  const anyData = new Set<string>();
-  const mine = new Map<string, Date[]>();
-  for (const r of punchRes.data ?? []) {
-    const t = new Date(String(r.punch_time));
-    const day = todayISO(t);
-    anyData.add(day);
-    if (attendanceCode(r.emp_code) !== code) continue;
-    if (!mine.has(day)) mine.set(day, []);
-    mine.get(day)!.push(t);
-  }
+  const mins = index.byCode.get(code) ?? new Map<string, number[]>();
+  const isos = index.isoByCode.get(code) ?? new Map<string, string[]>();
   const just = new Map((justRes.data ?? []).map((j) => [String(j.day), j]));
   const today = todayISO();
-  const time = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  const time = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
   const out: DutyDay[] = [];
   for (let i = 1; i <= days; i++) {
     const date = `${month}-${String(i).padStart(2, "0")}`;
     const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-    const p = mine.get(date);
+    const p = isos.get(date);
     const j = just.get(date);
     const day: DutyDay = { date, weekday, status: "future" };
     if (p?.length) {
@@ -86,16 +79,13 @@ export async function dutyDays(personId: string, month: string, lateAfter?: numb
       day.first = time(p[0]);
       day.last = p.length > 1 ? time(p[p.length - 1]) : undefined;
       day.punches = p.length;
-      if (lateAfter !== undefined) {
-        const ist = new Date(p[0].getTime() + 5.5 * 3_600_000);
-        const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-        const limit = typeof lateAfter === "function" ? lateAfter(date) : lateAfter;
-        if (mins > limit) day.late = mins - limit;
-      }
+      const judged = judgeDay(mins.get(date) ?? [], opts.shift(date), opts.grace);
+      if (judged.onePunch) day.onePunch = true;
+      else if (judged.late > 0) day.late = judged.late;
     } else if (j) day.status = "justified";
     else if (date > today) day.status = "future";
     else if (date === today) day.status = "today";
-    else if (!anyData.has(date)) day.status = "no_data";
+    else if (!hasData(index, opts.store(date), date)) day.status = "no_data";
     else day.status = "absent";
     if (j) day.justification = { kind: String(j.kind), reason: (j.reason as string) ?? null, by: String(j.by_name), at: String(j.created_at) };
     out.push(day);

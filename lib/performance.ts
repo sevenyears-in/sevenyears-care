@@ -3,7 +3,8 @@
 // The incentive schemes come from Settings (lib/incentive-rules.ts), each with its own dates.
 
 import { closingAt, dayState } from "@/lib/business-day";
-import { loadAssignments, shiftOn, storePeriods } from "@/lib/assignments";
+import { loadAssignments, shiftOn, storeOn, storePeriods } from "@/lib/assignments";
+import { hasData, judgeDay, loadMonthPunches } from "@/lib/attendance-days";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
 import { asRole, ROLE_LABELS } from "@/lib/roles";
@@ -316,32 +317,7 @@ export type Attendance = {
 
 async function loadDuties(month: string) {
   const { from, to } = monthRange(month);
-  const rows = await fetchAll<Row>((a, b) =>
-    supabaseAdmin
-      .from("attendance_punches")
-      .select("emp_code, punch_time")
-      .gte("punch_time", `${from}T00:00:00+05:30`)
-      .lte("punch_time", `${to}T23:59:59+05:30`)
-      .order("id")
-      .range(a, b)
-  );
-  const days = new Map<string, Set<string>>();
-  const withData = new Set<string>();
-  // First punch of each day (minutes after midnight, India time) — for late coming.
-  const firstIn = new Map<string, Map<string, number>>();
-  for (const r of rows) {
-    const code = attendanceCode(r.emp_code);
-    const t = new Date(String(r.punch_time));
-    const day = todayISO(t);
-    if (!days.has(code)) days.set(code, new Set());
-    days.get(code)!.add(day);
-    withData.add(day);
-    const ist = new Date(t.getTime() + 5.5 * 3_600_000);
-    const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-    if (!firstIn.has(code)) firstIn.set(code, new Map());
-    const m = firstIn.get(code)!;
-    if (!m.has(day) || mins < (m.get(day) as number)) m.set(day, mins);
-  }
+  const index = await loadMonthPunches(month);
   // Absent days justified by HR or the Store Manager count as duties.
   const justifiedDays = new Map<string, Set<string>>();
   const just = await fetchAll<Row>((a, b) => supabaseAdmin.from("duty_justifications").select("user_id, day").gte("day", from).lte("day", to).order("user_id").order("day").range(a, b));
@@ -350,29 +326,27 @@ async function loadDuties(month: string) {
     if (!justifiedDays.has(code)) justifiedDays.set(code, new Set());
     justifiedDays.get(code)!.add(String(j.day));
   }
-  return { days, withData, justifiedDays, firstIn };
+  return { index, justifiedDays };
 }
 
 function attendanceFor(
   month: string,
-  punched: Set<string> | undefined,
+  perDay: Map<string, number[]> | undefined,
   justifiedSet: Set<string> | undefined,
-  withData: Set<string>,
+  dataOn: (day: string) => boolean,
   required: number,
-  firstIn?: Map<string, number>,
-  lateAfter?: number | ((day: string) => number)
+  lateOn: (day: string, mins: number[]) => number
 ): Attendance {
   let late = 0;
   let lateMinutes = 0;
-  if (firstIn && lateAfter !== undefined)
-    for (const [day, mins] of firstIn) {
-      // The shift in force on that day (shifts change with "valid from").
-      const limit = typeof lateAfter === "function" ? lateAfter(day) : lateAfter;
-      if (mins > limit) {
-        late++;
-        lateMinutes += mins - limit;
-      }
+  const punched = new Set<string>(perDay?.keys() ?? []);
+  for (const [day, mins] of perDay ?? []) {
+    const m = lateOn(day, mins);
+    if (m > 0) {
+      late++;
+      lateMinutes += m;
     }
+  }
   const { days: inMonth } = monthRange(month);
   const today = todayISO();
   const days = new Set<string>([...(punched ?? []), ...(justifiedSet ?? [])]);
@@ -394,7 +368,7 @@ function attendanceFor(
   let noData = 0;
   for (let d = 1; d <= past; d++) {
     const iso = `${month}-${String(d).padStart(2, "0")}`;
-    if (!withData.has(iso) && !days?.has(iso)) noData++;
+    if (!dataOn(iso) && !days?.has(iso)) noData++;
   }
   // Absences that can no longer be made up (the 26-duty rule).
   const absences = Math.max(0, required - duties - noData - remaining);
@@ -827,12 +801,12 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
         lostNotes: [],
         attendance: attendanceFor(
           month,
-          duties.days.get(id),
+          duties.index.byCode.get(id),
           duties.justifiedDays.get(id),
-          duties.withData,
+          // A day counts as "no data" when the machine of the store the person was in sent nothing.
+          (day: string) => hasData(duties.index, storeOn(assignments, id, day) ?? (s ? homeStore(s) : store), day),
           settings.dutiesRequired,
-          duties.firstIn.get(id),
-          (day: string) => shiftOn(settings, assignments, id, day).start + settings.lateGraceMinutes
+          (day: string, mins: number[]) => judgeDay(mins, shiftOn(settings, assignments, id, day), settings.lateGraceMinutes).late
         ),
         today: { ...a.today, net: a.today.invoiceNet - a.today.returns },
         earnedBeforeAttendance: 0,
