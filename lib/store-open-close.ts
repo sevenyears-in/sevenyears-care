@@ -97,10 +97,27 @@ export async function deviceStores(): Promise<Record<string, string>> {
     const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
     if (best && best[1] >= 5) found[d] = best[0];
   }
-  if (!Object.keys(found).length) return saved;
+  // A machine nobody can be matched to (its staff have no accounts with that store yet): tell the
+  // Super Admins once, so a new store's opening and closing don't go missing quietly.
+  const alerted = new Set(((data?.value as { alerted?: string[] } | null)?.alerted ?? []).map(String));
+  const unknown = missing.filter((d) => !found[d] && !alerted.has(d) && (punches ?? []).filter((p) => String((p as { device: string }).device) === d).length >= 10);
+  if (!Object.keys(found).length && !unknown.length) return saved;
   const map = { ...saved, ...found };
-  await supabaseAdmin.from("app_settings").upsert({ key: DEVICES_KEY, value: { map }, updated_at: new Date().toISOString() });
+  await supabaseAdmin
+    .from("app_settings")
+    .upsert({ key: DEVICES_KEY, value: { map, alerted: [...alerted, ...unknown] }, updated_at: new Date().toISOString() });
+  if (unknown.length) await alertNewMachines(unknown).catch((e) => console.error("New machine alert failed:", e));
   return map;
+}
+
+async function alertNewMachines(devices: string[]) {
+  const { data: admins } = await supabaseAdmin.from("staff_users").select("id").eq("is_active", true).eq("role", "super_admin");
+  const ids = ((admins ?? []) as { id: string }[]).map((a) => a.id);
+  if (!ids.length) return;
+  const title = devices.length === 1 ? "New punching machine" : `${devices.length} new punching machines`;
+  const body = `Machine ${devices.join(", ")} is sending punches but its store isn't known yet. Choose its store in Settings → Attendance → Punching machines, and its opening and closing times will show.`;
+  await supabaseAdmin.from("staff_notifications").insert(ids.map((id) => ({ staff_id: id, ticket_type: null, ticket_id: null, ticket_number: null, title, body })));
+  await pushToStaff(ids, { title, body, url: `${siteUrl()}/staff/admin/attendance` }).catch(() => null);
 }
 
 export type DeviceInfo = { device: string; store: string | null; punches: number; people: number; lastPunch: string | null; guess: string | null };
@@ -143,7 +160,8 @@ export async function setDeviceStore(device: string, store: string | null) {
   const clean = (store ?? "").trim().toUpperCase();
   // Kept even when cleared ("" = not a store), so the automatic check doesn't put it back.
   map[device] = clean;
-  const { error } = await supabaseAdmin.from("app_settings").upsert({ key: DEVICES_KEY, value: { map }, updated_at: new Date().toISOString() });
+  const alerted = (data?.value as { alerted?: string[] } | null)?.alerted ?? [];
+  const { error } = await supabaseAdmin.from("app_settings").upsert({ key: DEVICES_KEY, value: { map, alerted }, updated_at: new Date().toISOString() });
   if (error) throw error;
   if (clean) await backfillStore(clean, map).catch((e) => console.error("Open/close backfill failed:", e));
 }
