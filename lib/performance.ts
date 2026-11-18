@@ -476,6 +476,8 @@ export type StoreReport = {
   poolName: string | null;
   poolRate: number;
   pool: number;
+  /** Groups of the pool split with nobody in them this month (their share isn't paid). */
+  poolUnassigned?: { group: IncentiveGroup; share: number }[];
   nextSlab: { from: number; rate: number; needed: number } | null;
   othersNet: number;
   othersBills: number;
@@ -817,17 +819,26 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
       keyOf.set(person, { key, frac });
     }
 
-    // Store pool split: the Sales Team by sales, every other group equally.
-    if (poolRule && pool > 0) {
+    // Store pool split: the Sales Team by sales, every other group equally (a person who moved stores
+    // this month shares by the days they were in this store). A group with nobody in it this month
+    // isn't paid; it is listed on the store page.
+    const poolUnassigned: { group: IncentiveGroup; share: number }[] = [];
+    if (poolRule) {
       for (const [g, share] of Object.entries(poolRule.split) as [IncentiveGroup, number][]) {
         if (!share) continue;
         const list = people.filter((p) => p.group === g);
-        if (!list.length) continue;
+        if (!list.length) {
+          poolUnassigned.push({ group: g, share });
+          continue;
+        }
+        if (pool <= 0) continue;
         if (g === "sales") {
           const total = list.reduce((s, p) => s + Math.max(0, p.net), 0);
           for (const p of list) p.storeShare += total > 0 ? (pool * share * Math.max(0, p.net)) / total : 0;
         } else {
-          for (const p of list) p.storeShare += (pool * share) / list.length;
+          const weight = (p: PersonReport) => keyOf.get(p)?.frac ?? 1;
+          const total = list.reduce((s, p) => s + weight(p), 0);
+          for (const p of list) p.storeShare += total > 0 ? (pool * share * weight(p)) / total : 0;
         }
       }
     }
@@ -900,6 +911,7 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
       poolName: poolRule?.name ?? null,
       poolRate,
       pool,
+      poolUnassigned,
       nextSlab: next ? { from: next.from, rate: next.rate, needed: Math.max(0, next.from * target - net) } : null,
       othersNet: others.reduce((s, b) => s + b.net, 0),
       othersBills: others.length,

@@ -853,6 +853,19 @@ function TeamView({
             🎯 <b>{short(store.nextSlab.needed)}</b> more to reach {Math.round(store.nextSlab.from * 100)}% (pool {pct(store.nextSlab.rate, 1)}) — about <b>{rupees(perDay)}</b> a day.
           </p>
         )}
+        {!!store.poolUnassigned?.length && (
+          <p className="mt-2 rounded-xl bg-black/[0.03] px-3 py-2 text-sm text-black/70">
+            Nobody in{" "}
+            {store.poolUnassigned.map((u, i) => (
+              <span key={u.group}>
+                {i ? ", " : ""}
+                <b>{groupName(u.group, labels)}</b> ({pct(u.share, 1)})
+              </span>
+            ))}{" "}
+            this month — {store.poolUnassigned.length === 1 ? "that part" : "those parts"} of the pool ({pct(store.poolUnassigned.reduce((s, u) => s + u.share, 0), 1)}
+            {store.pool > 0 ? `, ${rupees(store.pool * store.poolUnassigned.reduce((s, u) => s + u.share, 0))}` : ""}) {store.pool > 0 ? "isn't" : "won't be"} paid. Set people&apos;s groups in Sales targets &amp; incentives → Groups.
+          </p>
+        )}
         {store.othersBills > 0 && (
           <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
             ⚑ <b>Others:</b> {store.othersBills} bill(s) worth {short(store.othersNet)} have no salesperson on the bill. They count for the store but for nobody&apos;s
