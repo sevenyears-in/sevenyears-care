@@ -658,3 +658,39 @@ export async function fetchInvoicesForMobile(mobile: string): Promise<{ billNumb
 export async function zohoRead(path: string, query: Record<string, string> = {}) {
   return zohoGet(path, query);
 }
+
+// ------------------------------------------------------------------
+// Organisations (e.g. after the business moved to a new Zoho POS organisation)
+// ------------------------------------------------------------------
+
+/** Organisations the connected Zoho login can open (same login = no new API keys needed). */
+export async function listZohoOrganizations(): Promise<{ id: string; name: string }[]> {
+  const config = await zohoConfig();
+  await waitForSlot();
+  const response = await fetch(`${config.apiUrl}/inventory/v1/organizations`, {
+    headers: { Authorization: `Zoho-oauthtoken ${await accessToken()}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(12_000),
+  });
+  const data = (await response.json().catch(() => ({}))) as { organizations?: { organization_id: string | number; name: string }[]; message?: string };
+  if (!response.ok) throw new ZohoError(`Zoho POS returned an error: ${data.message ?? response.status}`);
+  return (data.organizations ?? []).map((o) => ({ id: String(o.organization_id), name: o.name }));
+}
+
+/** A look at one organisation's bills (read only): how many from a date, first/last date, stores. */
+export async function probeZohoOrganization(organizationId: string, from: string) {
+  const rows: Obj[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const res = await zohoGet("invoices", { organization_id: organizationId, date_start: from, per_page: "200", page: String(page), sort_column: "date", sort_order: "A" });
+    rows.push(...arr(res.invoices));
+    if (!obj(res.page_context).has_more_page) break;
+  }
+  const dates = rows.map((r) => str(r.date)).filter(Boolean).sort();
+  const stores = new Map<string, number>();
+  for (const r of rows) {
+    const s = str(r.location_name) || str(r.branch_name) || "(none)";
+    stores.set(s, (stores.get(s) ?? 0) + 1);
+  }
+  const prefixes = [...new Set(rows.map((r) => str(r.invoice_number).replace(/\d+$/, "")))].slice(0, 10);
+  return { bills: rows.length, more: rows.length >= 1000, first: dates[0] ?? null, last: dates[dates.length - 1] ?? null, stores: Object.fromEntries(stores), numberPrefixes: prefixes };
+}

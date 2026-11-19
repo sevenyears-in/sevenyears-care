@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { publicOrigin } from "@/lib/origin";
-import { loadZohoSettings, saveZohoSettings, zohoConfig } from "@/lib/zoho";
+import { listZohoOrganizations, loadZohoSettings, probeZohoOrganization, saveZohoSettings, zohoConfig } from "@/lib/zoho";
 
 // Super Admin only: Zoho POS connection settings (stored server-side in Supabase).
 // GET    → status (never returns the secret or tokens)
@@ -20,6 +20,23 @@ export async function GET(request: Request) {
   const saved = await loadZohoSettings();
   const config = await zohoConfig();
   const origin = publicOrigin(request);
+
+  // ?check=1 → organisations this login can open, with a look at each one's bills since a date
+  // (read only; nothing is saved). Used when the business moved to a new Zoho organisation.
+  const url = new URL(request.url);
+  if (url.searchParams.get("check")) {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("from") ?? "") ? (url.searchParams.get("from") as string) : "2026-10-25";
+    try {
+      const orgs = await listZohoOrganizations();
+      const result = [];
+      for (const o of orgs) {
+        result.push({ ...o, current: o.id === config.organizationId, bills: await probeZohoOrganization(o.id, from).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })) });
+      }
+      return NextResponse.json({ from, organizations: result });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Could not reach Zoho POS." }, { status: 502 });
+    }
+  }
 
   return NextResponse.json({
     usingEnvFile: Boolean(process.env.ZOHO_REFRESH_TOKEN),
