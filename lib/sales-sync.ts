@@ -7,7 +7,7 @@
 
 import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { flushZohoUsage, zohoConfigured, zohoRead } from "@/lib/zoho";
+import { flushZohoUsage, withZohoOrg, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { appendSyncLog, isTransient, type SyncLogEntry } from "@/lib/sync-log";
 import { todayISO } from "@/lib/helpers";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
@@ -107,6 +107,20 @@ async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<voi
   });
   await Promise.all(runners);
 }
+
+/** The day's list from every Zoho organisation that billed that day; each row remembers its organisation. */
+async function listAllOrgs(path: string, key: string, date: string) {
+  const out: Obj[] = [];
+  // Every organisation must answer: a missing list would look like deleted bills.
+  for (const org of await zohoOrgIdsOn(date)) {
+    const rows = await withZohoOrg(org, () => listAll(path, key, date));
+    out.push(...rows.map((r) => ({ ...r, __org: org })));
+  }
+  return out;
+}
+
+/** Reads a saved row's details from the organisation it came from. */
+const inOrg = <T,>(row: Obj, fn: () => Promise<T>) => withZohoOrg(str(row.__org), fn);
 
 async function listAll(path: string, key: string, date: string) {
   const out: Obj[] = [];
@@ -356,7 +370,7 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
   const result: DaySync = { date, bills: 0, billsSaved: 0, returns: 0, returnsSaved: 0, pending: 0 };
   if (!(await zohoConfigured())) return { ...result, error: "Zoho POS is not connected." };
   // ---- Bills
-  const list = await listAll("invoices", "invoices", date);
+  const list = await listAllOrgs("invoices", "invoices", date);
   const keep = list.filter((r) => !SKIP_STATUS.has(str(r.status).toLowerCase()));
   // New daily-wages names get their PT code before the bills are saved.
   const links = await assignPtCodes(keep.map((r) => str(r.salesperson_name)));
@@ -381,7 +395,7 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
   let failed = 0;
   await pool(now, 3, async (row) => {
     try {
-      await saveInvoice(row, links);
+      await inOrg(row, () => saveInvoice(row, links));
       result.billsSaved++;
     } catch (error) {
       failed++;
@@ -398,7 +412,7 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
     return result;
   }
   try {
-    const cnList = await listAll("creditnotes", "creditnotes", date);
+    const cnList = await listAllOrgs("creditnotes", "creditnotes", date);
     const cnKeep = cnList.filter((r) => !SKIP_STATUS.has(str(r.status).toLowerCase()));
     result.returns = cnKeep.length;
     const { data: cnSaved } = await supabaseAdmin.from("sales_returns").select("creditnote_id, modified_at").eq("return_date", date).limit(2000);
@@ -414,7 +428,7 @@ export async function syncSalesDay(date: string, budget = 40): Promise<DaySync> 
     left = Math.max(0, left - cnNow.length);
     await pool(cnNow, 3, async (row) => {
       try {
-        await saveCreditNote(row, links);
+        await inOrg(row, () => saveCreditNote(row, links));
         result.returnsSaved++;
       } catch (error) {
         console.error("Sales sync: return failed", str(row.creditnote_number), error);

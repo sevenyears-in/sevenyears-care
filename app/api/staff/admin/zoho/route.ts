@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { publicOrigin } from "@/lib/origin";
-import { listZohoOrganizations, loadZohoSettings, probeZohoOrganization, saveZohoSettings, zohoConfig } from "@/lib/zoho";
+import { listZohoOrganizations, loadZohoSettings, previousZohoOrgs, probeZohoOrganization, saveZohoSettings, zohoConfig, zohoDayBills } from "@/lib/zoho";
+import { logAudit } from "@/lib/audit";
 
 // Super Admin only: Zoho POS connection settings (stored server-side in Supabase).
 // GET    → status (never returns the secret or tokens)
 // POST   → save Client ID + Client Secret        { clientId, clientSecret }
-// PATCH  → choose organisation                     { organizationId }
+// PATCH  → choose organisation                     { organizationId, previousOrganizations?: [{ id, until }] }
+//          Earlier organisations are still read for their bills (warranty, history, sales up to `until`).
 // DELETE → disconnect
 
 function mask(value: string) {
@@ -24,6 +26,19 @@ export async function GET(request: Request) {
   // ?check=1 → organisations this login can open, with a look at each one's bills since a date
   // (read only; nothing is saved). Used when the business moved to a new Zoho organisation.
   const url = new URL(request.url);
+  // ?compare=YYYY-MM-DD → that day's bills in every organisation (read only), to see whether two
+  // organisations hold the same bills.
+  const compare = url.searchParams.get("compare") ?? "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(compare)) {
+    try {
+      const orgs = await listZohoOrganizations();
+      const result = [];
+      for (const o of orgs) result.push({ ...o, bills: await zohoDayBills(o.id, compare).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })) });
+      return NextResponse.json({ date: compare, organizations: result });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Could not reach Zoho POS." }, { status: 502 });
+    }
+  }
   if (url.searchParams.get("check")) {
     const from = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("from") ?? "") ? (url.searchParams.get("from") as string) : "2026-10-25";
     try {
@@ -46,6 +61,7 @@ export async function GET(request: Request) {
     organizationId: config.organizationId || null,
     organizationName: (saved.organizationName as string) ?? null,
     organizations: (saved.organizations as { id: string; name: string }[]) ?? [],
+    previousOrganizations: previousZohoOrgs(saved),
     connectedAt: (saved.connectedAt as string) ?? null,
     redirectUri: `${origin}/api/staff/zoho/callback`,
     homepageUrl: origin,
@@ -97,16 +113,40 @@ export async function PATCH(request: Request) {
   if (auth.response) return auth.response;
 
   const body = await request.json().catch(() => ({}));
-  const organizationId = String(body.organizationId ?? "");
+  const organizationId = String(body.organizationId ?? "").trim();
   const saved = await loadZohoSettings();
   const orgs = (saved.organizations as { id: string; name: string }[]) ?? [];
-  const org =
-    orgs.find((o) => o.id === organizationId) ??
-    (/^\d{5,20}$/.test(organizationId) ? { id: organizationId, name: "" } : null);
+  const before = previousZohoOrgs(saved);
+  const nameOf = (id: string) => orgs.find((o) => o.id === id)?.name || before.find((o) => o.id === id)?.name || (id === String(saved.organizationId ?? "") ? String(saved.organizationName ?? "") : "");
+  if (!/^\d{5,20}$/.test(organizationId)) return NextResponse.json({ error: "Enter a valid Organisation ID (numbers only)." }, { status: 400 });
 
-  if (!org) return NextResponse.json({ error: "Enter a valid Organisation ID (numbers only)." }, { status: 400 });
+  // Earlier organisations: as sent, or (when not sent) the old current one is kept as an earlier one,
+  // so its bills can still be found.
+  let previous = before;
+  if (Array.isArray(body.previousOrganizations)) {
+    previous = [];
+    for (const p of body.previousOrganizations as { id?: unknown; until?: unknown }[]) {
+      const id = String(p?.id ?? "").trim();
+      const until = String(p?.until ?? "").trim();
+      if (!/^\d{5,20}$/.test(id)) return NextResponse.json({ error: `"${id}" is not a valid Organisation ID.` }, { status: 400 });
+      if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) return NextResponse.json({ error: "The last billing day must be a date." }, { status: 400 });
+      if (id === organizationId || previous.some((x) => x.id === id)) continue;
+      previous.push({ id, name: nameOf(id), until: until || null });
+    }
+  } else {
+    const old = String(saved.organizationId ?? "");
+    if (old && old !== organizationId && !previous.some((x) => x.id === old)) previous = [...previous, { id: old, name: nameOf(old), until: null }];
+    previous = previous.filter((x) => x.id !== organizationId);
+  }
 
-  await saveZohoSettings({ ...saved, organizationId: org.id, organizationName: org.name || null });
+  await saveZohoSettings({ ...saved, organizationId, organizationName: nameOf(organizationId) || null, previousOrganizations: previous });
+  await logAudit(
+    auth.staff,
+    "zoho",
+    "organisation",
+    { organizationId: saved.organizationId ?? null, previousOrganizations: before },
+    { organizationId, previousOrganizations: previous }
+  ).catch(() => undefined);
   return NextResponse.json({ success: true });
 }
 

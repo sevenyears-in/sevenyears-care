@@ -12,6 +12,7 @@
 // If any of the first four are missing the app runs in DEMO MODE and returns
 // a sample bill, so the registration screens can be tested before Zoho is set up.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 export type BillLine = {
@@ -248,11 +249,65 @@ export async function flushZohoUsage() {
   await supabaseAdmin.from("app_settings").upsert({ key: USAGE_KEY, value: { day, calls }, updated_at: new Date().toISOString() });
 }
 
+// ------------------------------------------------------------------
+// Organisations. The business can move to a new Zoho POS organisation (same Zoho login,
+// same connection). The current one is `organizationId`; earlier ones stay in
+// `previousOrganizations` so their bills (warranty, history, sales before the change) are
+// still read. Each has the last day it billed (`until`); without one it is still read.
+// ------------------------------------------------------------------
+
+export type PreviousZohoOrg = { id: string; name: string; until: string | null };
+
+const orgScope = new AsyncLocalStorage<string>();
+
+/** Runs `fn` with every Zoho read going to organisation `orgId` (the current one when empty). */
+export function withZohoOrg<T>(orgId: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  return orgId ? orgScope.run(orgId, fn) : fn();
+}
+
+export function previousZohoOrgs(saved: Record<string, unknown>): PreviousZohoOrg[] {
+  const list = Array.isArray(saved.previousOrganizations) ? (saved.previousOrganizations as Record<string, unknown>[]) : [];
+  return list
+    .map((o) => ({ id: String(o.id ?? "").trim(), name: String(o.name ?? "").trim(), until: /^\d{4}-\d{2}-\d{2}$/.test(String(o.until ?? "")) ? String(o.until) : null }))
+    .filter((o) => /^\d+$/.test(o.id));
+}
+
+/** Every organisation to search for a bill: the current one first, then the earlier ones. */
+export async function zohoOrgIds(): Promise<string[]> {
+  const config = await zohoConfig();
+  const prev = previousZohoOrgs(await loadZohoSettings()).map((o) => o.id);
+  return [...new Set([config.organizationId, ...prev].filter(Boolean))];
+}
+
+/** Organisations that billed on `date` (YYYY-MM-DD): the current one and earlier ones still open then. */
+export async function zohoOrgIdsOn(date: string): Promise<string[]> {
+  const config = await zohoConfig();
+  const prev = previousZohoOrgs(await loadZohoSettings()).filter((o) => !o.until || date <= o.until).map((o) => o.id);
+  return [...new Set([config.organizationId, ...prev].filter(Boolean))];
+}
+
+/** Runs `fn` once per organisation and keeps the answers that did not fail (errors only if all fail). */
+async function eachOrg<T>(orgs: string[], fn: () => Promise<T>): Promise<{ org: string; value: T }[] & { failed?: unknown }> {
+  const out: { org: string; value: T }[] & { failed?: unknown } = [];
+  let firstError: unknown = null;
+  for (const org of orgs) {
+    try {
+      out.push({ org, value: await withZohoOrg(org, fn) });
+    } catch (error) {
+      firstError ??= error;
+      console.warn(`Zoho organisation ${org} failed (continuing):`, error);
+    }
+  }
+  if (!out.length && firstError) throw firstError;
+  if (firstError) out.failed = firstError;
+  return out;
+}
+
 async function zohoGet(path: string, query: Record<string, string> = {}): Promise<ZohoJson> {
   const config = await zohoConfig();
   await waitForSlot();
   const url = new URL(`${config.apiUrl}/inventory/v1/${path}`);
-  url.searchParams.set("organization_id", config.organizationId);
+  url.searchParams.set("organization_id", orgScope.getStore() || config.organizationId);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
 
   // Never let a slow Zoho POS hold a page for long.
@@ -316,11 +371,15 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
 
   const wanted = billNumber.trim().toUpperCase();
 
-  const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
-  const matches = arr(list.invoices).filter(
-    (inv) => str(inv.invoice_number).toUpperCase() === wanted
-  );
+  // Search every organisation (the current one first); the bill is read from the one that has it.
+  const found = await eachOrg(await zohoOrgIds(), async () => {
+    const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
+    return arr(list.invoices).filter((inv) => str(inv.invoice_number).toUpperCase() === wanted);
+  });
+  const matches = found.flatMap((f) => f.value.map((inv): Obj => ({ ...inv, __org: f.org })));
 
+  // Not found, but one organisation could not be searched: say so rather than "not found".
+  if (matches.length === 0 && found.failed) throw found.failed;
   if (matches.length === 0) {
     throw new ZohoError(`Bill ${billNumber} was not found in Zoho POS.`, 404);
   }
@@ -334,7 +393,7 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
     );
   }
 
-  return billFromInvoice(match);
+  return withZohoOrg(str(match.__org), () => billFromInvoice(match));
 }
 
 /** Full bill (lines, categories, customer) for one invoice from the Zoho list. */
@@ -405,9 +464,12 @@ export type InvoiceSummary = {
 export async function fetchInvoiceByNumber(billNumber: string): Promise<InvoiceSummary | null> {
   if (!(await zohoConfigured())) return null;
   const wanted = billNumber.trim().toUpperCase();
-  const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
-  const matches = arr(list.invoices)
-    .filter((inv) => str(inv.invoice_number).toUpperCase() === wanted)
+  const found = await eachOrg(await zohoOrgIds(), async () => {
+    const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
+    return arr(list.invoices).filter((inv) => str(inv.invoice_number).toUpperCase() === wanted);
+  });
+  const matches = found
+    .flatMap((f) => f.value.map((inv): Obj => ({ ...inv, __org: f.org })))
     .sort((a, b) => str(b.date).localeCompare(str(a.date)));
   const match = matches[0];
   if (!match) return null;
@@ -416,7 +478,7 @@ export async function fetchInvoiceByNumber(billNumber: string): Promise<InvoiceS
   let storeName = str(match.location_name) || str(match.branch_name) || "";
   if (!salesperson || !storeName) {
     try {
-      const detail = obj((await zohoGet(`invoices/${str(match.invoice_id)}`)).invoice);
+      const detail = obj((await withZohoOrg(str(match.__org), () => zohoGet(`invoices/${str(match.invoice_id)}`))).invoice);
       salesperson = salesperson || str(detail.salesperson_name);
       storeName = storeName || str(detail.location_name) || str(detail.branch_name) || str(detail.warehouse_name);
     } catch (error) {
@@ -500,6 +562,14 @@ function readStore(item: Obj, idKey: string, nameKey: string): ZohoStore | null 
  * Warehouses (different Zoho set-ups use different names for the same thing).
  */
 export async function fetchZohoStores(): Promise<ZohoStore[]> {
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const found = await eachOrg(await zohoOrgIdsOn(today), fetchZohoStoresOfOrg);
+  const unique = new Map<string, ZohoStore>();
+  for (const f of found) for (const s of f.value) if (!unique.has(s.name.toLowerCase())) unique.set(s.name.toLowerCase(), s);
+  return [...unique.values()].sort((x, y) => x.name.localeCompare(y.name));
+}
+
+async function fetchZohoStoresOfOrg(): Promise<ZohoStore[]> {
   const attempts: { path: string; listKey: string; idKey: string; nameKey: string }[] = [
     { path: "locations", listKey: "locations", idKey: "location_id", nameKey: "location_name" },
     { path: "branches", listKey: "branches", idKey: "branch_id", nameKey: "branch_name" },
@@ -620,6 +690,11 @@ function demoBill(billNumber: string, billDate: string): Bill {
  */
 export async function fetchInvoicesForMobile(mobile: string): Promise<{ billNumber: string; customerName: string; billDate: string }[]> {
   if (!(await zohoConfigured())) return [];
+  const found = await eachOrg(await zohoOrgIds(), () => invoicesForMobileInOrg(mobile));
+  return found.flatMap((f) => f.value);
+}
+
+async function invoicesForMobileInOrg(mobile: string): Promise<{ billNumber: string; customerName: string; billDate: string }[]> {
   const digits = (v: unknown) => str(v).replace(/\D/g, "");
   const sameNumber = (c: Obj) => [c.phone, c.mobile].some((v) => digits(v).endsWith(mobile));
 
@@ -693,4 +768,17 @@ export async function probeZohoOrganization(organizationId: string, from: string
   }
   const prefixes = [...new Set(rows.map((r) => str(r.invoice_number).replace(/\d+$/, "")))].slice(0, 10);
   return { bills: rows.length, more: rows.length >= 1000, first: dates[0] ?? null, last: dates[dates.length - 1] ?? null, stores: Object.fromEntries(stores), numberPrefixes: prefixes };
+}
+
+/** One day's bills in one organisation (read only): number, status, total with GST, store. */
+export async function zohoDayBills(organizationId: string, date: string) {
+  const rows: Obj[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const res = await zohoGet("invoices", { organization_id: organizationId, date_start: date, date_end: date, per_page: "200", page: String(page) });
+    rows.push(...arr(res.invoices));
+    if (!obj(res.page_context).has_more_page) break;
+  }
+  return rows
+    .filter((r) => str(r.date) === date)
+    .map((r) => ({ number: str(r.invoice_number), status: str(r.status), total: Number(r.total) || 0, store: str(r.location_name) || str(r.branch_name) }));
 }

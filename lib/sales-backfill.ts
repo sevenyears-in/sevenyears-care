@@ -7,7 +7,7 @@
 // by the normal 30-minute sync.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { flushZohoUsage, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoRead } from "@/lib/zoho";
+import { flushZohoUsage, withZohoOrg, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { assignPtCodes, saveCreditNote, saveInvoice, SKIP_STATUS } from "@/lib/sales-sync";
 
@@ -107,10 +107,15 @@ async function listMonth(path: "invoices" | "creditnotes", key: string, month: s
   const from = `${month}-01`;
   const to = lastDay(month);
   const out: Obj[] = [];
-  for (let page = 1; page <= 100; page++) {
-    const res = await zohoRead(path, { date_start: from, date_end: to, per_page: "200", page: String(page) });
-    out.push(...arr(res[key]));
-    if (!obj(res.page_context).has_more_page) break;
+  // Every Zoho organisation that billed in the month (each row remembers its organisation).
+  for (const org of await zohoOrgIdsOn(from)) {
+    await withZohoOrg(org, async () => {
+      for (let page = 1; page <= 100; page++) {
+        const res = await zohoRead(path, { date_start: from, date_end: to, per_page: "200", page: String(page) });
+        out.push(...arr(res[key]).map((r) => ({ ...r, __org: org })));
+        if (!obj(res.page_context).has_more_page) break;
+      }
+    });
   }
   return out.filter((r) => str(r.date) >= from && str(r.date) <= to && !SKIP_STATUS.has(str(r.status).toLowerCase()));
 }
@@ -198,7 +203,7 @@ export async function runNightBackfill(): Promise<string> {
         if (!canGo()) break;
         await pace();
         try {
-          await saveInvoice(row, links);
+          await withZohoOrg(str(row.__org), () => saveInvoice(row, links));
           night.bills++;
           progress.billsSaved++;
           billsLeft--;
@@ -225,7 +230,7 @@ export async function runNightBackfill(): Promise<string> {
             if (!canGo()) break;
             await pace();
             try {
-              await saveCreditNote(row, links);
+              await withZohoOrg(str(row.__org), () => saveCreditNote(row, links));
               night.returns++;
               progress.returnsSaved++;
               returnsLeft--;

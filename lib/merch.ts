@@ -6,7 +6,7 @@
 //   Stock-out    = 0 in the store and sold in the last 60 days.
 
 import { todayISO } from "@/lib/helpers";
-import { addDays, daysWithData, fastMovers, itemSales, OVERSTOCK_DAYS, REORDER_DAYS, stockFor, type ItemSales } from "@/lib/stock";
+import { addDays, alignToStock, daysWithData, fastMovers, itemSales, OVERSTOCK_DAYS, REORDER_DAYS, stockFor, type ItemSales } from "@/lib/stock";
 import { isCarryBag } from "@/lib/sales-sync";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
 
@@ -106,7 +106,7 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
 
   const settings = await loadPerformanceSettings();
   const vDays = settings.velocityDays;
-  const [now, before, lastYear, s28, s60, stock, momDays, lflDays, days28] = await Promise.all([
+  const [nowRaw, beforeRaw, lastYearRaw, s28Raw, s60Raw, stock, momDays, lflDays, days28] = await Promise.all([
     itemSales(store, ...mtd),
     itemSales(store, ...mom),
     itemSales(store, ...lfl),
@@ -117,6 +117,8 @@ export async function merchReport(store: string, month = todayISO().slice(0, 7))
     daysWithData(store, ...lfl),
     daysWithData(store, addDays(end, -(vDays - 1)), end),
   ]);
+  // Sales under an item's earlier id (before a move to a new Zoho organisation) count under its stock id.
+  const [now, before, lastYear, s28, s60] = [nowRaw, beforeRaw, lastYearRaw, s28Raw, s60Raw].map((m) => alignToStock(m, stock));
   // Average a day over the days that have sales data (earlier months may not be copied yet).
   const window28 = Math.max(1, Math.min(vDays, days28));
   const momCoverage = momDays / Math.max(1, Number(mom[1].slice(8, 10)));

@@ -181,8 +181,10 @@ async function loadMonth(month: string, lists: string[]) {
 /** Lines of listed products sold and returned in the month. */
 async function loadPromoLines(month: string, promos: PromoRow[], userId?: string) {
   const { from, to } = monthRange(month);
+  // By item and by SKU: after a move to a new Zoho organisation the same product has a new item id
+  // but keeps its SKU, so lists made before the move still count.
   const ids = [...new Set(promos.map((p) => p.item_id).filter(Boolean) as string[])];
-  const skus = [...new Set(promos.filter((p) => !p.item_id && p.sku).map((p) => p.sku as string))];
+  const skus = [...new Set(promos.filter((p) => p.sku).map((p) => p.sku as string))];
   const sold: Row[] = [];
   const back: Row[] = [];
   const chunks = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / 150) }, (_, i) => list.slice(i * 150, i * 150 + 150));
@@ -192,7 +194,7 @@ async function loadPromoLines(month: string, promos: PromoRow[], userId?: string
         ...(await fetchAll<Row>((a, b) => {
           let q = supabaseAdmin
             .from("sales_invoice_lines")
-            .select("invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net, total")
+            .select("line_item_id, invoice_id, invoice_date, staff_user_id, store, item_id, sku, quantity, discount, net, total")
             .in(col, part)
             .gte("invoice_date", from)
             .lte("invoice_date", to);
@@ -204,7 +206,7 @@ async function loadPromoLines(month: string, promos: PromoRow[], userId?: string
         ...(await fetchAll<Row>((a, b) => {
           let q = supabaseAdmin
             .from("sales_return_lines")
-            .select("return_date, staff_user_id, store, item_id, sku, quantity, net, total")
+            .select("line_item_id, return_date, staff_user_id, store, item_id, sku, quantity, net, total")
             .in(col, part)
             .gte("return_date", from)
             .lte("return_date", to);
@@ -214,14 +216,25 @@ async function loadPromoLines(month: string, promos: PromoRow[], userId?: string
       );
     }
   }
-  return { sold, back };
+  // A line found both by item and by SKU is counted once.
+  const once = (rows: Row[]) => {
+    const seen = new Set<string>();
+    return rows.filter((r) => {
+      const k = String(r.line_item_id ?? "");
+      if (!k) return true;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+  return { sold: once(sold), back: once(back) };
 }
 
 /** Product lists a line belongs to on that day. */
 function listsOf(promos: PromoRow[], line: Row, date: string) {
   const lists = new Set<string>();
   for (const p of promos) {
-    const match = (p.item_id && p.item_id === line.item_id) || (!p.item_id && p.sku && p.sku === line.sku);
+    const match = (p.item_id && p.item_id === line.item_id) || (p.sku && p.sku === line.sku);
     if (!match) continue;
     if (p.from_date && date < p.from_date) continue;
     if (p.to_date && date > p.to_date) continue;

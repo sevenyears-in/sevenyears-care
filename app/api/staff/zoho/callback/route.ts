@@ -86,7 +86,8 @@ export async function GET(request: Request) {
     }
 
     const saved = await loadZohoSettings();
-    const single = organizations.length === 1 ? organizations[0] : null;
+    // Reconnecting keeps the organisation already in use (when the login still has it).
+    const single = organizations.find((o) => o.id === String(saved.organizationId ?? "")) ?? (organizations.length === 1 ? organizations[0] : null);
 
     await saveZohoSettings({
       ...saved,

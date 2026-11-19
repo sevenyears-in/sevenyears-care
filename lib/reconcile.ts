@@ -8,7 +8,7 @@
 // Differences are listed bill by bill (missing here, not in Zoho any more, or amount changed).
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { zohoRead } from "@/lib/zoho";
+import { withZohoOrg, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { SKIP_STATUS, storeKey } from "@/lib/sales-sync";
 import { appendSyncLog } from "@/lib/sync-log";
 
@@ -24,11 +24,15 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 async function listDay(path: "invoices" | "creditnotes", date: string) {
   const out: Obj[] = [];
   let reads = 0;
-  for (let page = 1; page <= 30; page++) {
-    const res = await zohoRead(path, { date_start: date, date_end: date, per_page: "200", page: String(page) });
-    reads++;
-    out.push(...arr(res[path]));
-    if (!(res.page_context as Obj | undefined)?.has_more_page) break;
+  for (const org of await zohoOrgIdsOn(date)) {
+    await withZohoOrg(org, async () => {
+      for (let page = 1; page <= 30; page++) {
+        const res = await zohoRead(path, { date_start: date, date_end: date, per_page: "200", page: String(page) });
+        reads++;
+        out.push(...arr(res[path]));
+        if (!(res.page_context as Obj | undefined)?.has_more_page) break;
+      }
+    });
   }
   return { rows: out.filter((r) => str(r.date) === date && !SKIP_STATUS.has(str(r.status).toLowerCase())), reads };
 }

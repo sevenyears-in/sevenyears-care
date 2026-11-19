@@ -7,7 +7,7 @@
 // recently-selling item was out of stock.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { flushZohoUsage, zohoCallsLastMinute, zohoConfigured, zohoRead } from "@/lib/zoho";
+import { flushZohoUsage, withZohoOrg, zohoCallsLastMinute, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { isCarryBag, storeKey } from "@/lib/sales-sync";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
@@ -84,19 +84,25 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
   const stores = new Set<string>();
   try {
     // 1. Active items with their total stock, 200 a request.
-    const meta = new Map<string, { sku: string | null; name: string; category: string | null; rate: number; cost: number | null; tracked: boolean }>();
-    for (let page = 1; page <= 400; page++) {
-      if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests while listing items (Zoho limit).`);
-      await pace();
-      const res = await zohoRead("items", { per_page: "200", page: String(page), filter_by: "Status.Active" });
-      reads++;
-      for (const i of arr(res.items)) {
-        const id = str(i.item_id);
-        if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
-        const mrp = num(i.label_rate) > 0 ? num(i.label_rate) : num(i.rate);
-        meta.set(id, { sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, cost: num(i.purchase_rate) > 0 ? num(i.purchase_rate) : null, tracked: i.track_inventory !== false });
-      }
-      if (!obj(res.page_context).has_more_page) break;
+    //    Every Zoho organisation still billing today (normally just the current one).
+    const orgs = await zohoOrgIdsOn(today);
+    const meta = new Map<string, { org: string; sku: string | null; name: string; category: string | null; rate: number; cost: number | null; tracked: boolean }>();
+    for (const org of orgs) {
+      await withZohoOrg(org, async () => {
+        for (let page = 1; page <= 400; page++) {
+          if (reads >= maxReads) throw new Error(`Stopped after ${reads} requests while listing items (Zoho limit).`);
+          await pace();
+          const res = await zohoRead("items", { per_page: "200", page: String(page), filter_by: "Status.Active" });
+          reads++;
+          for (const i of arr(res.items)) {
+            const id = str(i.item_id);
+            if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
+            const mrp = num(i.label_rate) > 0 ? num(i.label_rate) : num(i.rate);
+            meta.set(id, { org, sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, cost: num(i.purchase_rate) > 0 ? num(i.purchase_rate) : null, tracked: i.track_inventory !== false });
+          }
+          if (!obj(res.page_context).has_more_page) break;
+        }
+      });
     }
 
     // What is saved now (to keep the date an item went out of stock) and what sold in 60 days.
@@ -127,21 +133,33 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
       for (const r of data ?? []) if (r.store) stores.add(String(r.store));
     }
     const sold60 = new Map<string, Set<string>>();
-    for (const store of stores) sold60.set(store, new Set((await itemSales(store, addDays(today, -59), today).catch(() => new Map())).keys()));
-    const keep = (store: string, id: string, stock: number) => stock !== 0 || Boolean(sold60.get(store)?.has(id));
+    for (const store of stores) {
+      const sales = await itemSales(store, addDays(today, -59), today).catch(() => new Map<string, ItemSales>());
+      // By item id, and by SKU (items keep their SKU when they get a new id in a new Zoho organisation).
+      sold60.set(store, new Set([...sales.keys(), ...[...sales.values()].filter((v) => v.s).map((v) => `sku:${v.s}`)]));
+    }
+    const soldIn = (store: string, id: string) => {
+      const set = sold60.get(store);
+      const sku = meta.get(id)?.sku;
+      return Boolean(set?.has(id) || (sku && set?.has(`sku:${sku}`)));
+    };
+    const keep = (store: string, id: string, stock: number) => stock !== 0 || soldIn(store, id);
 
     // 2. Stock per store from the item details (100 a request; 50 if Zoho refuses 100).
     const withStock = [...meta.entries()].filter(([, m]) => m.tracked).map(([id]) => id);
     const seen = new Set<string>();
     let size = 100;
     let done = 0;
-    for (let i = 0; i < withStock.length; ) {
+    for (const org of orgs) {
+     const orgItems = withStock.filter((id) => meta.get(id)?.org === org);
+     await withZohoOrg(org, async () => {
+     for (let i = 0; i < orgItems.length; ) {
       if (reads >= maxReads) {
         await flush();
         throw new Error(`Stopped after ${reads} requests to stay inside the Zoho limit (${Math.round((done / Math.max(1, withStock.length)) * 100)}% of items with stock read; saved so far).`);
       }
       await pace();
-      const chunk = withStock.slice(i, i + size);
+      const chunk = orgItems.slice(i, i + size);
       let res: Obj;
       try {
         res = await zohoRead("itemdetails", { item_ids: chunk.join(",") });
@@ -168,8 +186,10 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         }
       }
       i += chunk.length;
-      done = i;
+      done += chunk.length;
       if (pending.length >= 2000) await flush();
+     }
+     });
     }
     await flush();
 
@@ -177,7 +197,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
     for (const [id, m] of meta) {
       if (seen.has(id)) continue;
       for (const store of stores) {
-        if (!sold60.get(store)?.has(id)) continue;
+        if (!soldIn(store, id)) continue;
         pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category, rate: m.rate, cost: m.cost, stock: 0 });
       }
       if (pending.length >= 2000) await flush();
@@ -236,6 +256,23 @@ export async function itemSales(store: string, from: string, to: string): Promis
   return new Map(list.filter((r) => !isCarryBag(r.c)).map((r) => [r.k, { ...r, u: num(r.u), v: num(r.v) }]));
 }
 
+/**
+ * Sales keyed like the stock list. After a move to a new Zoho organisation a product has a new
+ * item id but the same SKU: sales under the old id are counted under the stock's item id.
+ */
+export function alignToStock(sales: Map<string, ItemSales>, stock: { item_id: string; sku: string | null }[]): Map<string, ItemSales> {
+  const ids = new Set(stock.map((r) => r.item_id));
+  const bySku = new Map<string, string>();
+  for (const r of stock) if (r.sku && !bySku.has(r.sku)) bySku.set(r.sku, r.item_id);
+  const out = new Map<string, ItemSales>();
+  for (const [k, v] of sales) {
+    const key = ids.has(k) ? k : (v.s && bySku.get(v.s)) || k;
+    const had = out.get(key);
+    out.set(key, had ? { ...had, n: had.n ?? v.n, s: had.s ?? v.s, c: had.c ?? v.c, u: had.u + v.u, v: had.v + v.v } : { ...v, k: key });
+  }
+  return out;
+}
+
 export async function daysWithData(store: string, from: string, to: string): Promise<number> {
   const { data } = await supabaseAdmin.rpc("merch_days_with_data", { p_store: store, p_from: from, p_to: to });
   return num(data);
@@ -283,12 +320,14 @@ export const OVERSTOCK_DAYS = 90;
 export async function stockAlertsFor(store: string) {
   const today = todayISO();
   const vDays = (await loadPerformanceSettings().catch(() => null))?.velocityDays ?? 28;
-  const [s28, s60, stock, days28] = await Promise.all([
+  const [s28raw, s60raw, stock, days28] = await Promise.all([
     itemSales(store, addDays(today, -(vDays - 1)), today),
     itemSales(store, addDays(today, -59), today),
     stockFor(store),
     daysWithData(store, addDays(today, -(vDays - 1)), today),
   ]);
+  const s28 = alignToStock(s28raw, stock);
+  const s60 = alignToStock(s60raw, stock);
   const window28 = Math.max(1, Math.min(vDays, days28));
   const fast = fastMovers(s28);
   let lowFast = 0;
