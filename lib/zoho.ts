@@ -254,6 +254,7 @@ export async function flushZohoUsage() {
 // same connection). The current one is `organizationId`; earlier ones stay in
 // `previousOrganizations` so their bills (warranty, history, sales before the change) are
 // still read. Each has the last day it billed (`until`); without one it is still read.
+// Moved to Seven Years Kids Care LLP on 19 Nov 2026 (its earlier November bills are copies).
 // ------------------------------------------------------------------
 
 export type PreviousZohoOrg = { id: string; name: string; until: string | null };
