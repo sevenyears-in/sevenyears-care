@@ -7,6 +7,7 @@
 // recently-selling item was out of stock.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { categoryLookup, realCategory } from "@/lib/item-categories";
 import { flushZohoUsage, withZohoOrg, zohoCallsLastMinute, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { isCarryBag, storeKey } from "@/lib/sales-sync";
@@ -86,6 +87,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
     // 1. Active items with their total stock, 200 a request.
     //    Every Zoho organisation still billing today (normally just the current one).
     const orgs = await zohoOrgIdsOn(today);
+    const fromEarlier = await categoryLookup();
     const meta = new Map<string, { org: string; sku: string | null; name: string; category: string | null; rate: number; cost: number | null; tracked: boolean }>();
     for (const org of orgs) {
       await withZohoOrg(org, async () => {
@@ -98,7 +100,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
             const id = str(i.item_id);
             if (!id || i.is_combo_product === true || str(i.product_type) === "service" || str(i.item_type) === "service") continue;
             const mrp = num(i.label_rate) > 0 ? num(i.label_rate) : num(i.rate);
-            meta.set(id, { org, sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: str(i.category_name) || null, rate: mrp, cost: num(i.purchase_rate) > 0 ? num(i.purchase_rate) : null, tracked: i.track_inventory !== false });
+            meta.set(id, { org, sku: str(i.sku) || null, name: (str(i.name) || "Item").slice(0, 200), category: realCategory(i.category_name, i.name) || fromEarlier(i.sku, i.name) || null, rate: mrp, cost: num(i.purchase_rate) > 0 ? num(i.purchase_rate) : null, tracked: i.track_inventory !== false });
           }
           if (!obj(res.page_context).has_more_page) break;
         }
@@ -182,7 +184,7 @@ export async function readStockFromZoho(maxReads = 600): Promise<string> {
         for (const [store, stock] of stockByStore(it)) {
           stores.add(store);
           if (!keep(store, id, stock)) continue;
-          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || str(it.category_name) || null, rate: mrp, cost, stock });
+          pending.push({ store, item_id: id, sku: m.sku, name: m.name, category: m.category || realCategory(it.category_name, it.name) || null, rate: mrp, cost, stock });
         }
       }
       i += chunk.length;

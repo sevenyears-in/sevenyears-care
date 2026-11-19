@@ -14,6 +14,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { categoryLookup, realCategory } from "@/lib/item-categories";
 
 export type BillLine = {
   lineItemId: string;
@@ -440,6 +441,7 @@ async function billFromInvoice(match: Obj, categoryCache?: Map<string, string>):
   // Item categories are not on the bill lines, so look the items up.
   const itemIds = [...new Set(lineItems.map((l) => str(l.item_id)).filter(Boolean))];
   const categories = await fetchItemCategories(itemIds, categoryCache);
+  const fromEarlier = await categoryLookup();
 
   // Customer mobile / address
   let mobile = "";
@@ -474,14 +476,18 @@ async function billFromInvoice(match: Obj, categoryCache?: Map<string, string>):
     },
     lines: lineItems.map((line) => {
       const itemId = str(line.item_id) || null;
+      const name = str(line.name) || str(line.description) || "Item";
       return {
         lineItemId: str(line.line_item_id),
         itemId,
-        name: str(line.name) || str(line.description) || "Item",
+        name,
         sku: str(line.sku) || null,
         quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
         categoryName:
-          str(line.category_name) || (itemId ? categories.get(itemId) ?? null : null),
+          realCategory(line.category_name, name) ||
+          (itemId ? realCategory(categories.get(itemId), name) : "") ||
+          fromEarlier(line.sku, name) ||
+          null,
       };
     }),
     demo: false,
@@ -537,8 +543,9 @@ async function fetchItemCategories(allIds: string[], cache?: Map<string, string>
   const itemIds = allIds.filter((id) => !result.has(id));
   if (itemIds.length === 0) return result;
 
+  // A "category" that is only the item's own name (new organisation's items) is not one.
   const readCategory = (item: Obj) =>
-    str(item.category_name) || str(item.group_name) || "";
+    realCategory(item.category_name, item.name) || realCategory(item.group_name, item.name);
 
   try {
     const bulk = await zohoGet("itemdetails", { item_ids: itemIds.join(",") });

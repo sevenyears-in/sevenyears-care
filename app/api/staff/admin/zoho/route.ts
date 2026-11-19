@@ -115,7 +115,10 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => ({}));
   const organizationId = String(body.organizationId ?? "").trim();
   const saved = await loadZohoSettings();
-  const orgs = (saved.organizations as { id: string; name: string }[]) ?? [];
+  let orgs = (saved.organizations as { id: string; name: string }[]) ?? [];
+  // Names (and the list) as Zoho has them now, e.g. after a new organisation was added to the login.
+  const fresh = await listZohoOrganizations().catch(() => [] as { id: string; name: string }[]);
+  if (fresh.length) orgs = fresh;
   const before = previousZohoOrgs(saved);
   const nameOf = (id: string) => orgs.find((o) => o.id === id)?.name || before.find((o) => o.id === id)?.name || (id === String(saved.organizationId ?? "") ? String(saved.organizationName ?? "") : "");
   if (!/^\d{5,20}$/.test(organizationId)) return NextResponse.json({ error: "Enter a valid Organisation ID (numbers only)." }, { status: 400 });
@@ -139,7 +142,7 @@ export async function PATCH(request: Request) {
     previous = previous.filter((x) => x.id !== organizationId);
   }
 
-  await saveZohoSettings({ ...saved, organizationId, organizationName: nameOf(organizationId) || null, previousOrganizations: previous });
+  await saveZohoSettings({ ...saved, organizations: orgs, organizationId, organizationName: nameOf(organizationId) || null, previousOrganizations: previous });
   await logAudit(
     auth.staff,
     "zoho",

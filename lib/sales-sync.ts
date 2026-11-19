@@ -7,6 +7,7 @@
 
 import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { categoryLookup, realCategory } from "@/lib/item-categories";
 import { flushZohoUsage, oncePerBill, withZohoOrg, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { appendSyncLog, isTransient, type SyncLogEntry } from "@/lib/sync-log";
 import { todayISO } from "@/lib/helpers";
@@ -150,7 +151,7 @@ async function categoriesFor(itemIds: string[]) {
     try {
       const res = await zohoRead("itemdetails", { item_ids: chunk.join(",") });
       for (const item of arr(res.items)) {
-        const category = str(item.category_name) || str(item.group_name);
+        const category = realCategory(item.category_name, item.name) || realCategory(item.group_name, item.name);
         if (category) result.set(str(item.item_id), category);
       }
     } catch (error) {
@@ -164,7 +165,7 @@ async function categoriesFor(itemIds: string[]) {
     async (id) => {
       try {
         const item = obj((await zohoRead(`items/${id}`)).item);
-        result.set(id, str(item.category_name) || str(item.group_name));
+        result.set(id, realCategory(item.category_name, item.name) || realCategory(item.group_name, item.name));
       } catch (error) {
         console.warn(`Item ${id} category lookup failed:`, error);
       }
@@ -181,6 +182,7 @@ export async function saveInvoice(listRow: Obj, links: SyncLinks) {
   const d = obj((await zohoRead(`invoices/${str(listRow.invoice_id)}`)).invoice);
   const lines = arr(d.line_items);
   const categories = await categoriesFor(lines.map((l) => str(l.item_id)));
+  const fromEarlier = await categoryLookup();
   const inclusive = d.is_inclusive_tax === true;
 
   const salesperson = (str(d.salesperson_name) || str(listRow.salesperson_name)).replace(/\s+/g, " ");
@@ -201,7 +203,10 @@ export async function saveInvoice(listRow: Obj, links: SyncLinks) {
     const lineGross = inclusive ? (price * qty) / (1 + taxPct / 100) : price * qty;
     gross += lineGross;
     const itemId = str(l.item_id) || null;
-    const category = str(l.category_name) || (itemId ? categories.get(itemId) ?? "" : "");
+    const lineName = str(l.name) || str(l.description);
+    // Items of the new Zoho organisation have no category: same SKU / name in the earlier one.
+    const category =
+      realCategory(l.category_name, lineName) || (itemId ? realCategory(categories.get(itemId), lineName) : "") || fromEarlier(l.sku, lineName);
     // Carry bags are not "items sold" (WOW bill counts, items per bill).
     if (!isCarryBag(category)) {
       quantity += qty;
