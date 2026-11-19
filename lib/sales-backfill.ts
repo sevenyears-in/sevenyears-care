@@ -7,7 +7,7 @@
 // by the normal 30-minute sync.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { flushZohoUsage, withZohoOrg, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
+import { flushZohoUsage, oncePerBill, withZohoOrg, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { assignPtCodes, saveCreditNote, saveInvoice, SKIP_STATUS } from "@/lib/sales-sync";
 
@@ -117,7 +117,18 @@ async function listMonth(path: "invoices" | "creditnotes", key: string, month: s
       }
     });
   }
-  return out.filter((r) => str(r.date) >= from && str(r.date) <= to && !SKIP_STATUS.has(str(r.status).toLowerCase()));
+  // Trust order changes by day (an earlier organisation is first up to its last billing day).
+  const rank = new Map<string, Map<string, number>>();
+  const order = async (date: string) => {
+    if (!rank.has(date)) rank.set(date, new Map((await zohoOrgIdsOn(date)).map((o, i) => [o, i])));
+    return rank.get(date)!;
+  };
+  const scored: { r: Obj; n: number }[] = [];
+  for (const r of out) scored.push({ r, n: (await order(str(r.date))).get(str(r.__org)) ?? 99 });
+  scored.sort((a, b) => a.n - b.n);
+  // Bills of an organisation after its last billing day are not counted.
+  scored.splice(0, scored.length, ...scored.filter((x) => x.n !== 99));
+  return oncePerBill(scored.map((x) => x.r), path === "invoices" ? "invoice_number" : "creditnote_number").filter((r) => str(r.date) >= from && str(r.date) <= to && !SKIP_STATUS.has(str(r.status).toLowerCase()));
 }
 
 async function savedIds(table: "sales_invoices" | "sales_returns", idCol: string, dateCol: string, month: string) {

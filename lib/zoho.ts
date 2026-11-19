@@ -279,11 +279,38 @@ export async function zohoOrgIds(): Promise<string[]> {
   return [...new Set([config.organizationId, ...prev].filter(Boolean))];
 }
 
-/** Organisations that billed on `date` (YYYY-MM-DD): the current one and earlier ones still open then. */
+/**
+ * Organisations that billed on `date` (YYYY-MM-DD), most trusted first: an earlier organisation is
+ * first up to its last billing day (bills copied into the new one are copies), then the current one.
+ * Earlier organisations whose last billing day is before `date` are left out.
+ */
 export async function zohoOrgIdsOn(date: string): Promise<string[]> {
   const config = await zohoConfig();
-  const prev = previousZohoOrgs(await loadZohoSettings()).filter((o) => !o.until || date <= o.until).map((o) => o.id);
-  return [...new Set([config.organizationId, ...prev].filter(Boolean))];
+  const prev = previousZohoOrgs(await loadZohoSettings());
+  const closing = prev.filter((o) => o.until && date <= o.until).map((o) => o.id);
+  const open = prev.filter((o) => !o.until).map((o) => o.id);
+  return [...new Set([...closing, config.organizationId, ...open].filter(Boolean))];
+}
+
+/** Every organisation, most trusted first for a bill of `date`. */
+async function zohoOrgIdsFor(date: string): Promise<string[]> {
+  return [...new Set([...(await zohoOrgIdsOn(date)), ...(await zohoOrgIds())])];
+}
+
+/**
+ * Rows listed from several organisations (in trust order): a bill copied from one organisation into
+ * another (same number, same day) is kept once, from the organisation listed first.
+ */
+export function oncePerBill<T extends Record<string, unknown>>(rows: T[], numberKey: string): T[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    const number = String(r[numberKey] ?? "").trim().toUpperCase();
+    if (!number) return true;
+    const key = `${number}|${String(r.date ?? "")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Runs `fn` once per organisation and keeps the answers that did not fail (errors only if all fail). */
@@ -372,7 +399,7 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
   const wanted = billNumber.trim().toUpperCase();
 
   // Search every organisation (the current one first); the bill is read from the one that has it.
-  const found = await eachOrg(await zohoOrgIds(), async () => {
+  const found = await eachOrg(await zohoOrgIdsFor(billDate), async () => {
     const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
     return arr(list.invoices).filter((inv) => str(inv.invoice_number).toUpperCase() === wanted);
   });
@@ -384,7 +411,15 @@ export async function fetchBill(billNumber: string, billDate: string): Promise<B
     throw new ZohoError(`Bill ${billNumber} was not found in Zoho POS.`, 404);
   }
 
-  const match = matches.find((inv) => str(inv.date) === billDate);
+  // The same bill can be in two organisations (copied over when the business moved). Use the copy
+  // that warranties were already registered against, so registered items are recognised.
+  const dated = matches.filter((inv) => str(inv.date) === billDate);
+  let match = dated[0];
+  if (dated.length > 1) {
+    const { data } = await supabaseAdmin.from("warranties").select("zoho_invoice_id").eq("bill_number", str(dated[0].invoice_number)).eq("bill_date", billDate).limit(50);
+    const used = new Set((data ?? []).map((w) => String(w.zoho_invoice_id ?? "")));
+    match = dated.find((inv) => used.has(str(inv.invoice_id))) ?? dated[0];
+  }
   if (!match) {
     const dates = matches.map((inv) => str(inv.date)).join(", ");
     throw new ZohoError(

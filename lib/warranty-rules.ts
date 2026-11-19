@@ -60,7 +60,7 @@ export async function buildWarrantyRows(bill: Bill) {
   const { data: existing, error } = await supabaseAdmin
     .from("warranties")
     .select(
-      "zoho_line_item_id, unit_index, warranty_number, verification_token, model_number, serial_number, customer_name"
+      "zoho_line_item_id, unit_index, warranty_number, verification_token, model_number, serial_number, customer_name, product_name"
     )
     .eq("bill_number", bill.billNumber)
     .eq("bill_date", bill.billDate);
@@ -69,6 +69,14 @@ export async function buildWarrantyRows(bill: Bill) {
 
   const existingByKey = new Map(
     (existing ?? []).map((w) => [`${w.zoho_line_item_id}#${w.unit_index}`, w])
+  );
+  // Registered against another copy of this bill (e.g. in an earlier Zoho organisation): its line
+  // ids differ, so those are matched by product name and unit instead.
+  const billLineIds = new Set(bill.lines.map((l) => l.lineItemId));
+  const existingByName = new Map(
+    (existing ?? [])
+      .filter((w) => !billLineIds.has(String(w.zoho_line_item_id)))
+      .map((w) => [`${String(w.product_name ?? "").trim().toLowerCase()}#${w.unit_index}`, w])
   );
 
   const rows: WarrantyRow[] = [];
@@ -91,7 +99,7 @@ export async function buildWarrantyRows(bill: Bill) {
 
     for (let unit = 1; unit <= line.quantity; unit++) {
       const key = `${line.lineItemId}#${unit}`;
-      const found = existingByKey.get(key);
+      const found = existingByKey.get(key) ?? existingByName.get(`${line.name.trim().toLowerCase()}#${unit}`);
 
       rows.push({
         key,
