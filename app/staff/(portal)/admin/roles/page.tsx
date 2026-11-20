@@ -152,11 +152,11 @@ export default function RolesAccessPage() {
             <div className="space-y-2">
               <input autoFocus value={d.name} onChange={(e) => setDraft({ ...d, name: e.target.value })} className={`${inputClass} py-2`} placeholder="Role name, e.g. Area Manager" />
               <label className="block text-[11px] font-semibold text-black/50">
-                Works like (who gets complaints, approvals)
+                Gets the same work &amp; alerts as (service requests, complaints, approvals)
                 <select value={d.baseRole} onChange={(e) => setDraft({ ...d, baseRole: e.target.value as Role })} className={`${inputClass} mt-1 py-2`}>
                   {BUILT_IN.map((r) => (
                     <option key={r} value={r}>
-                      {ROLE_LABELS[r]}
+                      {r === "employee" ? "Nobody — own performance only (no app work)" : ROLE_LABELS[r]}
                     </option>
                   ))}
                 </select>
@@ -248,9 +248,9 @@ export default function RolesAccessPage() {
                         <p className="mt-0.5 text-[11px] text-black/45">
                           {row.staff} staff
                           {row.kind === "custom"
-                            ? row.access.sections.length === 0
-                              ? " · sees only their own performance & incentives"
-                              : ` · works like ${ROLE_LABELS[row.baseRole]}`
+                            ? row.baseRole === "employee"
+                              ? " · no app work — sees only their own performance & incentives"
+                              : ` · same work & alerts as ${ROLE_LABELS[row.baseRole]}`
                             : ""}
                         </p>
                           </div>
@@ -311,7 +311,7 @@ export default function RolesAccessPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-bold">What each role does</h2>
           <p className="text-sm text-black/55">
-            This decides who receives complaints, escalations and approvals. A role you create works like the built-in role you choose for it.
+            This decides who receives complaints, escalations and approvals. A role you create gets the same work and alerts as the built-in role you choose for it, or none ("own performance only").
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {BUILT_IN.map((r, i) => (

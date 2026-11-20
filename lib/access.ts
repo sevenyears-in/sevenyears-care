@@ -32,6 +32,8 @@ export const EMPTY_ACCESS_CONFIG: AccessConfig = { builtin: {}, custom: [] };
 
 /** What each built-in role could open before Roles & Access existed. */
 export function defaultAccess(role: Role, storeName: string | null = null): RoleAccess {
+  // "Own performance only": no sections at all.
+  if (role === "employee") return { sections: [], allStores: false };
   const sections: Section[] = ["register", "warranties", "explanations"];
   if (canSeeService(role)) sections.push("service");
   if (canSeeComplaints(role)) sections.push("complaints");

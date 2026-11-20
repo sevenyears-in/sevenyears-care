@@ -26,7 +26,7 @@ type StaffRow = {
 
 type CustomRoleOption = { id: string; name: string; baseRole: Role };
 
-const STORE_ROLES: Role[] = ["store_manager", "technician", "csa", "floor_incharge"];
+const STORE_ROLES: Role[] = ["store_manager", "technician", "csa", "floor_incharge", "employee"];
 
 type StoreOption = { name: string; code: string | null };
 
@@ -210,7 +210,7 @@ export default function StaffUsersPage() {
             )}
           </select>
           <p className="mt-1 text-xs text-black/50">
-            {newCustomRole ? `Custom role — works like ${ROLE_LABELS[role]}. Access is set in Roles & Access.` : ROLE_HELP[role]}
+            {newCustomRole ? `Custom role — ${role === "employee" ? "no app work, own performance only" : `same work & alerts as ${ROLE_LABELS[role]}`}. Access is set in Roles & Access.` : ROLE_HELP[role]}
           </p>
         </div>
         <div>
@@ -347,7 +347,11 @@ export default function StaffUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-semibold">{custom?.name ?? ROLE_LABELS[u.role]}</p>
-                        {custom && <p className="text-[11px] text-black/45">Works like {ROLE_LABELS[custom.baseRole]}</p>}
+                        {custom && (
+                          <p className="text-[11px] text-black/45">
+                            {custom.baseRole === "employee" ? "Own performance only" : `Same work & alerts as ${ROLE_LABELS[custom.baseRole]}`}
+                          </p>
+                        )}
                         {u.role === "store_manager" && !u.custom_role_id && u.can_edit_warranties === false && (
                           <p className="text-[11px] font-semibold text-red-700">Warranty editing suspended</p>
                         )}

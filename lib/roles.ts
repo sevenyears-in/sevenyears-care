@@ -14,6 +14,7 @@ export const ROLES = [
   "cre",
   "floor_incharge",
   "csa",
+  "employee",
   "staff", // old "Store Staff" — kept only so existing accounts still work
 ] as const;
 
@@ -32,6 +33,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   cre: "CRE",
   floor_incharge: "Floor Incharge",
   csa: "CSA",
+  employee: "Own performance only",
   staff: "Store Staff (old)",
 };
 
@@ -51,6 +53,7 @@ export const ROLE_HELP: Record<Role, string> = {
   cre: "Customer Relationship Executive: owns product, billing and other complaints of their store (all stores if at CORPORATE OFFICE); follows up service requests.",
   floor_incharge: "Runs the shop floor: sees service requests and complaints of their store and follows them up.",
   csa: "Customer Service Associate: registers warranties and follows up service requests and complaints of their store.",
+  employee: "No service, complaint or warranty work and no alerts about them. Sees only their own performance, incentives and duties (e.g. housekeeping, backend staff, VM).",
   staff: "Old role — registers warranties only. Change to CSA.",
 };
 
