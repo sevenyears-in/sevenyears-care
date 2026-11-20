@@ -98,7 +98,7 @@ export function resolveAccess(
 
 /** What "work & alerts" a built-in role brings, in plain words. */
 export function workLabel(role: Role): string {
-  return role === "employee" ? "None — own performance only" : `${ROLE_LABELS[role]}'s work`;
+  return role === "employee" ? "None — no work or alerts" : `${ROLE_LABELS[role]}'s work`;
 }
 
 export function hasSection(staff: { role: Role; access?: StaffAccess }, section: Section) {
