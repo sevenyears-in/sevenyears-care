@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/helpers";
-import { attendanceCode, attendanceSettings, hashKey, newSyncKey, saveAttendanceSettings } from "@/lib/attendance";
-import { listDevices, setDeviceStore } from "@/lib/store-open-close";
+import { attendanceCode, attendanceSettings, hashKey, machineEmployees, newSyncKey, saveAttendanceSettings } from "@/lib/attendance";
+import { fetchAll } from "@/lib/fetch-all";
+import { deviceStores, listDevices, setDeviceStore } from "@/lib/store-open-close";
 import { getStores } from "@/lib/stores";
 
 // Settings → Attendance (Super Admin).
@@ -11,10 +12,66 @@ import { getStores } from "@/lib/stores";
 // POST { action: "newKey" } → a new sync key, shown once (the old one stops working)
 // POST { action: "backfill", from } → the office PC sends all punches from that day at its next run
 
+/** A role from the eTimeTrackLite designation (the person adding them can change it). */
+function roleFrom(designation: string): string {
+  const d = designation.toLowerCase();
+  if (/store\s*manager|\bsm\b|branch\s*manager/.test(d)) return "store_manager";
+  if (/\basm\b|asst|assistant\s*manager|floor/.test(d)) return "floor_incharge";
+  if (/tech|service\s*eng/.test(d)) return "technician";
+  if (/\bcre\b|customer\s*rel/.test(d)) return "cre";
+  if (/\bhr\b|human/.test(d)) return "hr_executive";
+  return "csa";
+}
+
+/**
+ * People who punched in the last 45 days but have no staff account (User ID = employee code),
+ * with their name from eTimeTrackLite and the store of the machine they punch on most.
+ */
+async function notInApp() {
+  const since = new Date(Date.now() - 45 * 86_400_000).toISOString();
+  const [punches, staff, machines, emps] = await Promise.all([
+    fetchAll<{ emp_code: string; device: string | null; punch_time: string }>((a, b) =>
+      supabaseAdmin.from("attendance_punches").select("emp_code, device, punch_time").gte("punch_time", since).order("id").range(a, b)
+    ),
+    supabaseAdmin.from("staff_users").select("user_id"),
+    deviceStores().catch(() => ({}) as Record<string, string>),
+    machineEmployees(),
+  ]);
+  const have = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
+  const byCode = new Map<string, { punches: number; last: string; devices: Map<string, number> }>();
+  for (const p of punches) {
+    const code = attendanceCode(p.emp_code);
+    if (!code || have.has(code)) continue;
+    const cur = byCode.get(code) ?? { punches: 0, last: p.punch_time, devices: new Map<string, number>() };
+    cur.punches++;
+    if (p.punch_time > cur.last) cur.last = p.punch_time;
+    if (p.device) cur.devices.set(p.device, (cur.devices.get(p.device) ?? 0) + 1);
+    byCode.set(code, cur);
+  }
+  const info = new Map(emps.list.map((e) => [e.code, e]));
+  const list = [...byCode.entries()].map(([code, x]) => {
+    const device = [...x.devices.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const e = info.get(code);
+    return {
+      code,
+      name: e?.name ?? "",
+      designation: e?.designation ?? "",
+      department: e?.department ?? "",
+      status: e?.status ?? "",
+      store: device ? machines[device] ?? "" : "",
+      role: roleFrom(e?.designation ?? ""),
+      punches: x.punches,
+      lastPunch: x.last,
+    };
+  });
+  list.sort((a, b) => b.lastPunch.localeCompare(a.lastPunch));
+  return { list, namesAt: emps.at };
+}
+
 export async function GET() {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const [settings, punches, staff, devices, storeList] = await Promise.all([
+  const [settings, punches, staff, devices, storeList, missing] = await Promise.all([
     attendanceSettings(),
     supabaseAdmin
       .from("attendance_punches")
@@ -24,6 +81,7 @@ export async function GET() {
     supabaseAdmin.from("staff_users").select("user_id").eq("is_active", true),
     listDevices().catch(() => []),
     getStores().catch(() => null),
+    notInApp().catch(() => ({ list: [], namesAt: null })),
   ]);
   const userIds = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
   const codesToday = [...new Set((punches.data ?? []).map((p) => attendanceCode(p.emp_code)))];
@@ -45,6 +103,8 @@ export async function GET() {
     backfillSent: settings.backfillSent ?? 0,
     devices,
     stores: (storeList?.stores ?? []).map((st) => st.name),
+    notInApp: missing.list,
+    namesAt: missing.namesAt,
   });
 }
 

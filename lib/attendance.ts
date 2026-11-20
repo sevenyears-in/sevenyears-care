@@ -8,7 +8,7 @@ import { todayISO } from "@/lib/helpers";
 
 export const ATTENDANCE_KEY = "attendance";
 /** Newest office-PC sync script (public/downloads/attendance-sync-template.ps1). Scripts from 3 on update themselves. */
-export const LATEST_SYNC_SCRIPT = 3;
+export const LATEST_SYNC_SCRIPT = 4;
 
 export type Presence = { status: "in" | "out"; firstIn: string; lastPunch: string; punches: number };
 export type AttendanceSettings = {
@@ -101,4 +101,47 @@ export async function recentAttendanceCodes(): Promise<Set<string>> {
     supabaseAdmin.from("attendance_punches").select("emp_code").gte("punch_time", since).order("id").range(a, b)
   );
   return new Set(data.map((p) => attendanceCode(p.emp_code)));
+}
+
+// ------------------------------------------------------------------
+// Employees in eTimeTrackLite (sent by the office PC script from version 4, every few hours),
+// so people who punch but have no staff account can be added with their name.
+// ------------------------------------------------------------------
+
+export const MACHINE_EMPLOYEES_KEY = "attendance_employees";
+export type MachineEmployee = { code: string; name: string; designation: string; department: string; status: string; joined: string };
+
+export async function machineEmployees(): Promise<{ at: string | null; list: MachineEmployee[] }> {
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", MACHINE_EMPLOYEES_KEY).maybeSingle();
+  const v = (data?.value ?? {}) as { at?: string; list?: MachineEmployee[] };
+  return { at: v.at ?? null, list: Array.isArray(v.list) ? v.list : [] };
+}
+
+export async function saveMachineEmployees(raw: unknown[]) {
+  const clean = (v: unknown, n: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+  const seen = new Set<string>();
+  const list: MachineEmployee[] = [];
+  for (const r of raw.slice(0, 5000)) {
+    const e = (r ?? {}) as Record<string, unknown>;
+    const code = attendanceCode(clean(e.code, 40));
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    list.push({
+      code,
+      name: clean(e.name, 120),
+      designation: clean(e.designation, 80),
+      department: clean(e.department, 80),
+      status: clean(e.status, 30),
+      joined: clean(e.joined, 20),
+    });
+  }
+  const value = { at: new Date().toISOString(), list };
+  await supabaseAdmin.from("app_settings").upsert({ key: MACHINE_EMPLOYEES_KEY, value, updated_at: value.at });
+  return list.length;
+}
+
+/** Asks the office PC for the employee list when it is missing or older than 6 hours. */
+export async function wantMachineEmployees(): Promise<boolean> {
+  const { at } = await machineEmployees();
+  return !at || Date.now() - Date.parse(at) > 6 * 3600_000;
 }

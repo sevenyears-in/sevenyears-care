@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
+import NotInAppStaff, { type NotInAppPerson } from "@/components/NotInAppStaff";
 
 type Status = {
   hasKey: boolean;
@@ -22,6 +23,8 @@ type Status = {
   backfillSent: number;
   devices?: { device: string; store: string | null; punches: number; people: number; lastPunch: string | null; guess: string | null }[];
   stores?: string[];
+  notInApp?: NotInAppPerson[];
+  namesAt?: string | null;
 };
 
 /** First day of last month (YYYY-MM-DD). */
@@ -178,14 +181,11 @@ export default function AttendanceSetupPage() {
             <p className="text-xs font-bold uppercase tracking-wider text-black/45">Matched to staff today</p>
             <p className="mt-1 text-2xl font-bold">{status.linkedStaff}</p>
           </div>
-          {status.unlinkedCodes.length > 0 && (
-            <p className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-4">
-              Employee codes punching today that don&apos;t match any staff User ID: <b>{status.unlinkedCodes.join(", ")}</b>. The
-              User ID on <a href="/staff/admin/users" className="font-bold underline">Staff Users</a> must be the same as the
-              eTimeTrackLite employee code.
-            </p>
-          )}
         </div>
+      )}
+
+      {status?.notInApp && (
+        <NotInAppStaff people={status.notInApp} stores={status.stores ?? []} namesAt={status.namesAt ?? null} scriptVersion={status.scriptVersion} onAdded={load} />
       )}
 
       {status?.devices && (

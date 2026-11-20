@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { attendanceSettings, hashKey, LATEST_SYNC_SCRIPT, saveAttendanceSettings } from "@/lib/attendance";
+import { attendanceSettings, hashKey, LATEST_SYNC_SCRIPT, saveAttendanceSettings, saveMachineEmployees, wantMachineEmployees } from "@/lib/attendance";
 
 // POST /api/attendance/push — called every 2 minutes by the sync script on the
 // office PC (eTimeTrackLite). Header "x-sync-key" must match the key created in
@@ -16,7 +16,9 @@ export async function POST(request: Request) {
     timingSafeEqual(Buffer.from(hashKey(key)), Buffer.from(settings.keyHash));
   if (!ok) return NextResponse.json({ error: "Not allowed." }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { punches?: unknown[]; version?: unknown; backfillDone?: unknown; backfillSent?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { punches?: unknown[]; version?: unknown; backfillDone?: unknown; backfillSent?: unknown; employees?: unknown[] };
+  // Version 4 and later: the employee list from eTimeTrackLite (names of people who punch).
+  const employeesSaved = Array.isArray(body.employees) ? await saveMachineEmployees(body.employees) : null;
   const list = Array.isArray(body.punches) ? body.punches.slice(0, 5000) : [];
   const rows = list
     .map((p) => p as Record<string, unknown>)
@@ -53,5 +55,13 @@ export async function POST(request: Request) {
   const after = await saveAttendanceSettings(change);
   // Ask the script (version 2 and later) to send older punches from this day.
   // latestScript: scripts from version 3 update themselves when this is higher.
-  return NextResponse.json({ ok: true, received: rows.length, saved, backfillFrom: after.backfillFrom ?? null, latestScript: LATEST_SYNC_SCRIPT });
+  return NextResponse.json({
+    ok: true,
+    received: rows.length,
+    saved,
+    backfillFrom: after.backfillFrom ?? null,
+    latestScript: LATEST_SYNC_SCRIPT,
+    employeesSaved,
+    wantEmployees: employeesSaved === null && version >= 4 ? await wantMachineEmployees() : false,
+  });
 }

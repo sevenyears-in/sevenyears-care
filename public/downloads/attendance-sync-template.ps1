@@ -8,6 +8,9 @@
 #  Version 3: updates itself. When the website has a newer version, this script
 #  downloads it and keeps its own settings (server, database, login, key) -
 #  nothing to download or copy on this PC again.
+#  Version 4: when the website asks (every few hours), it also sends the employee
+#  list (code, name, designation, department, status) so people who punch but
+#  are not in the app yet can be added there with their names.
 #
 #  Check:     powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Check
 #  Install:   powershell -ExecutionPolicy Bypass -File C:\SevenYearsSync\SevenYearsSync.ps1 -Install
@@ -22,7 +25,7 @@ $SqlPassword = '__SQLPASSWORD__'
 $Url         = '__URL__'
 $Key         = '__KEY__'
 $TaskName    = 'SevenYears Attendance Sync'
-$Version     = 3
+$Version     = 4
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -83,6 +86,48 @@ function To-Punch($t, $r) {
     device = [string]$r.DeviceId
     direction = [string]$r.Direction
   }
+}
+
+# One text value of a row: the first of these columns that exists and is not empty.
+function Get-Col($r, $names) {
+  foreach ($n in $names) {
+    if ($r.Table.Columns.Contains($n) -and $r[$n] -ne [DBNull]::Value) {
+      $v = ([string]$r[$n]).Trim()
+      if ($v) { return $v }
+    }
+  }
+  return ''
+}
+
+# The employee list of eTimeTrackLite (read only).
+function Get-Employees($conn) {
+  $e = Invoke-Query $conn "SELECT OBJECT_ID('Employees') AS id" $null
+  if ($e.Rows[0].id -eq [DBNull]::Value) { return @() }
+  $deps = @{}
+  $d = Invoke-Query $conn "SELECT OBJECT_ID('Departments') AS id" $null
+  if ($d.Rows[0].id -ne [DBNull]::Value) {
+    foreach ($r in (Invoke-Query $conn 'SELECT * FROM Departments' $null).Rows) {
+      $deps[(Get-Col $r @('DepartmentId'))] = (Get-Col $r @('DepartmentFName', 'DepartmentSName', 'DepartmentName'))
+    }
+  }
+  $list = New-Object System.Collections.ArrayList
+  foreach ($r in (Invoke-Query $conn 'SELECT TOP 3000 * FROM Employees' $null).Rows) {
+    $code = Get-Col $r @('EmployeeCodeInDevice', 'EmployeeCode')
+    if (-not $code) { continue }
+    $joined = ''
+    if ($r.Table.Columns.Contains('DOJ') -and $r['DOJ'] -ne [DBNull]::Value) {
+      try { $joined = ([datetime]$r['DOJ']).ToString('yyyy-MM-dd') } catch { $joined = '' }
+    }
+    [void]$list.Add(@{
+      code = $code
+      name = (Get-Col $r @('EmployeeName', 'EmployeeFName', 'Name'))
+      designation = (Get-Col $r @('Designation'))
+      department = $deps[(Get-Col $r @('DepartmentId'))]
+      status = (Get-Col $r @('Status', 'EmployementStatus', 'EmploymentStatus'))
+      joined = $joined
+    })
+  }
+  return $list
 }
 
 # Older punches asked for by the website: every month table from that day to today,
@@ -209,6 +254,14 @@ try {
 
   if ($result.latestScript -and [int]$result.latestScript -gt $Version) {
     try { Update-Self ([int]$result.latestScript) } catch { Write-Log ('Script update failed: ' + $_.Exception.Message) }
+  }
+
+  if ($result.wantEmployees) {
+    try {
+      $emps = Get-Employees $conn
+      [void](Send-Punches @() @{ employees = @($emps) })
+      Write-Log ('Employee list sent: ' + @($emps).Count + '.')
+    } catch { Write-Log ('Employee list not sent: ' + $_.Exception.Message) }
   }
 
   if ($result.backfillFrom) {
