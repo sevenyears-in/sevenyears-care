@@ -3,13 +3,18 @@
 import { Fragment, useEffect, useState } from "react";
 import { ErrorBox, inputClass } from "@/components/SiteChrome";
 import { ASSIGNABLE_ROLES, ROLE_HELP, ROLE_LABELS, type Role } from "@/lib/roles";
-import { SECTIONS, type AccessConfig, type CustomRole, type RoleAccess, type Section } from "@/lib/access";
+import { SECTIONS, workLabel, type AccessConfig, type CustomRole, type RoleAccess, type Section } from "@/lib/access";
 
 const BUILT_IN: Role[] = ASSIGNABLE_ROLES.filter((r) => r !== "super_admin");
 const isBuiltIn = (k: string): k is Role => (BUILT_IN as string[]).includes(k);
 
 function same(a: RoleAccess, b: RoleAccess) {
-  return a.allStores === b.allStores && a.sections.length === b.sections.length && a.sections.every((s) => b.sections.includes(s));
+  return (
+    a.allStores === b.allStores &&
+    (a.group ?? null) === (b.group ?? null) &&
+    a.sections.length === b.sections.length &&
+    a.sections.every((s) => b.sections.includes(s))
+  );
 }
 
 /** One row of the list: a built-in role or a role you created. */
@@ -35,6 +40,8 @@ export default function RolesAccessPage() {
   const [config, setConfig] = useState<AccessConfig | null>(null);
   const [defaults, setDefaults] = useState<Record<string, RoleAccess>>({});
   const [usage, setUsage] = useState<Record<string, number>>({});
+  const [groups, setGroups] = useState<{ key: string; label: string }[]>([]);
+  const groupLabel = (g: string | null | undefined) => (g ? groups.find((x) => x.key === g)?.label ?? g : "From the role");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -48,6 +55,7 @@ export default function RolesAccessPage() {
         setConfig(d.config);
         setDefaults(d.defaults ?? {});
         setUsage(d.usage ?? {});
+        setGroups(d.groups ?? []);
       })
       .catch(() => setError("Unable to load."));
   }, []);
@@ -63,7 +71,7 @@ export default function RolesAccessPage() {
           kind: "custom" as const,
           name: c.name,
           baseRole: c.baseRole,
-          access: { sections: c.sections, allStores: c.allStores },
+          access: { sections: c.sections, allStores: c.allStores, group: c.group ?? null },
           staff: usage[`custom:${c.id}`] ?? 0,
         })),
       ]
@@ -98,8 +106,8 @@ export default function RolesAccessPage() {
   const startNew = () => {
     setNotice("");
     setError("");
-    const base = defaults.csa ?? { sections: [], allStores: false };
-    setDraft({ key: `r${Date.now().toString(36)}`, isNew: true, name: "", baseRole: "csa", access: { ...base, sections: [...base.sections] } });
+    // A new role starts with no work, nothing to open and own store: tick what it needs.
+    setDraft({ key: `r${Date.now().toString(36)}`, isNew: true, name: "", baseRole: "employee", access: { sections: [], allStores: false, group: null } });
   };
 
   const saveDraft = async () => {
@@ -139,7 +147,13 @@ export default function RolesAccessPage() {
     });
 
   const th = "px-1.5 py-3 align-bottom text-[10px] font-bold uppercase tracking-wide text-black/45";
-  const cols = SECTIONS.length + 3;
+  const cols = SECTIONS.length + 5;
+  const pickBase = (r: Role) => {
+    // Choosing the work also offers that role's usual sections (they can still be changed).
+    if (!draft) return;
+    const d = defaults[r] ?? { sections: [], allStores: false };
+    setDraft({ ...draft, baseRole: r, access: { ...draft.access, sections: draft.isNew ? [...d.sections] : draft.access.sections } });
+  };
 
   const editRow = (d: Draft) => {
     const builtinRow = isBuiltIn(d.key);
@@ -151,17 +165,23 @@ export default function RolesAccessPage() {
           ) : (
             <div className="space-y-2">
               <input autoFocus value={d.name} onChange={(e) => setDraft({ ...d, name: e.target.value })} className={`${inputClass} py-2`} placeholder="Role name, e.g. Area Manager" />
-              <label className="block text-[11px] font-semibold text-black/50">
-                Gets the same work &amp; alerts as (service requests, complaints, approvals)
-                <select value={d.baseRole} onChange={(e) => setDraft({ ...d, baseRole: e.target.value as Role })} className={`${inputClass} mt-1 py-2`}>
-                  {BUILT_IN.map((r) => (
-                    <option key={r} value={r}>
-                      {r === "employee" ? "Nobody — own performance only (no app work)" : ROLE_LABELS[r]}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
+          )}
+        </td>
+        <td className="px-2 py-3 align-top">
+          {builtinRow ? (
+            <p className="text-xs text-black/60">{workLabel(d.key as Role)}</p>
+          ) : (
+            <>
+              <select value={d.baseRole} onChange={(e) => pickBase(e.target.value as Role)} className={`${inputClass} py-2 text-xs`} aria-label="Work & alerts">
+                {BUILT_IN.map((r) => (
+                  <option key={r} value={r}>
+                    {workLabel(r)}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] leading-4 text-black/45">{ROLE_HELP[d.baseRole]}</p>
+            </>
           )}
         </td>
         {SECTIONS.map((s) => (
@@ -177,6 +197,21 @@ export default function RolesAccessPage() {
             onChange={() => setDraft({ ...d, access: { ...d.access, allStores: !d.access.allStores } })}
             aria-label="All stores"
           />
+        </td>
+        <td className="px-2 py-3 align-top">
+          <select
+            value={d.access.group ?? ""}
+            onChange={(e) => setDraft({ ...d, access: { ...d.access, group: e.target.value || null } })}
+            className={`${inputClass} py-2 text-xs`}
+            aria-label="Incentive group"
+          >
+            <option value="">From the role</option>
+            {groups.map((g) => (
+              <option key={g.key} value={g.key}>
+                {g.label}
+              </option>
+            ))}
+          </select>
         </td>
         <td className="px-4 py-3 align-top">
           <div className="flex flex-col gap-2">
@@ -198,9 +233,9 @@ export default function RolesAccessPage() {
         <div>
           <h1 className="text-3xl font-bold">Roles &amp; Access</h1>
           <p className="mt-2 max-w-3xl text-sm text-black/60">
-            Tick the sections each role can open, and whether it sees all stores or only its own. Tap <b>Edit</b> to change a role.
-            Who receives complaints, escalations and approvals follows the built-in role (for a role you create, the role it “works
-            like”). Settings pages stay with the Super Admin and Admins; the Super Admin always has full access.
+            Each role has: the <b>work &amp; alerts</b> it handles (service requests, complaints, approvals — or none), the
+            <b> sections</b> it can open, <b>own store or all stores</b>, and a default <b>incentive group</b>. Tap <b>Edit</b> to
+            change a role; give people their role in Staff Users. Settings pages stay with the Super Admin and Admins.
           </p>
         </div>
         <button type="button" onClick={startNew} disabled={!config || Boolean(draft)} className="rounded-2xl bg-[#161616] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">
@@ -219,12 +254,14 @@ export default function RolesAccessPage() {
             <thead className="border-b border-black/5">
               <tr>
                 <th className={`${th} w-[190px] whitespace-nowrap pl-6 text-left`}>Role</th>
+                <th className={`${th} w-[170px] text-left`}>Work &amp; alerts</th>
                 {SECTIONS.map((s) => (
                   <th key={s.key} className={`${th} whitespace-normal text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
                 <th className={`${th} w-[70px] whitespace-normal text-center leading-tight`}>Stores</th>
+                <th className={`${th} w-[130px] text-left`}>Incentive group</th>
                 <th className={`${th} w-[170px] text-left`}> </th>
               </tr>
             </thead>
@@ -245,17 +282,11 @@ export default function RolesAccessPage() {
                             <span className="ml-2 rounded-full bg-[#8883d7]/15 px-2 py-0.5 text-[10px] font-bold uppercase text-[#5d58b5]">Custom</span>
                           )}
                         </p>
-                        <p className="mt-0.5 text-[11px] text-black/45">
-                          {row.staff} staff
-                          {row.kind === "custom"
-                            ? row.baseRole === "employee"
-                              ? " · no app work — sees only their own performance & incentives"
-                              : ` · same work & alerts as ${ROLE_LABELS[row.baseRole]}`
-                            : ""}
-                        </p>
+                        <p className="mt-0.5 text-[11px] text-black/45">{row.staff} staff</p>
                           </div>
                         </div>
                       </td>
+                      <td className="px-2 py-2.5 text-xs text-black/65">{workLabel(row.baseRole)}</td>
                       {SECTIONS.map((s) => (
                         <td key={s.key} className="px-2 py-2.5 text-center">
                           {row.access.sections.includes(s.key) ? <Yes /> : <No />}
@@ -268,6 +299,7 @@ export default function RolesAccessPage() {
                           <span className="rounded-full bg-black/5 px-2.5 py-1 text-[11px] font-semibold text-black/50">Own</span>
                         )}
                       </td>
+                      <td className="px-2 py-2.5 text-xs text-black/65">{groupLabel(row.access.group)}</td>
                       <td className="py-3 pl-2 pr-5">
                         <div className="flex flex-nowrap items-center gap-2">
                           <button
@@ -309,9 +341,9 @@ export default function RolesAccessPage() {
 
       {config && (
         <section className="space-y-3">
-          <h2 className="text-lg font-bold">What each role does</h2>
+          <h2 className="text-lg font-bold">Work &amp; alerts of each choice</h2>
           <p className="text-sm text-black/55">
-            This decides who receives complaints, escalations and approvals. A role you create gets the same work and alerts as the built-in role you choose for it, or none ("own performance only").
+            Who receives service requests, complaints, escalations and approvals. A role you create takes one of these, or none.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {BUILT_IN.map((r, i) => (

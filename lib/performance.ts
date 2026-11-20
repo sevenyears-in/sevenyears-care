@@ -282,6 +282,8 @@ export async function loadStaffForPerformance(asmIsFm = true): Promise<StaffRow[
     const custom = s.custom_role_id ? config.custom.find((c) => c.id === s.custom_role_id) : undefined;
     const roleLabel = custom?.name ?? ROLE_LABELS[role];
     const chosen = isGroup(s.incentive_group) ? (s.incentive_group as IncentiveGroup) : null;
+    // Default group of the role (Roles & Access), when the person has none of their own.
+    const roleGroup = custom ? custom.group : config.builtin[role]?.group;
     return {
       id: String(s.id),
       userId: attendanceCode(s.user_id),
@@ -289,7 +291,7 @@ export async function loadStaffForPerformance(asmIsFm = true): Promise<StaffRow[
       roleLabel,
       role,
       store: s.store_name ? String(s.store_name).toUpperCase() : null,
-      group: chosen ?? defaultGroup(role, roleLabel, asmIsFm),
+      group: chosen ?? (isGroup(roleGroup) ? (roleGroup as IncentiveGroup) : defaultGroup(role, roleLabel, asmIsFm)),
       groupChosen: Boolean(chosen),
     };
   });

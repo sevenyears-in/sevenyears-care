@@ -1,3 +1,6 @@
+import { roleAccess, SECTIONS, workLabel, type RoleAccess } from "@/lib/access";
+import { groupList } from "@/lib/performance-rules";
+import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import {
@@ -8,7 +11,7 @@ import {
   userIdProblem,
 } from "@/lib/auth";
 import { cleanMobile, isValidMobile } from "@/lib/helpers";
-import { isRole, type Role } from "@/lib/roles";
+import { ASSIGNABLE_ROLES, isRole, type Role } from "@/lib/roles";
 import { SECTION_KEYS } from "@/lib/access";
 import { loadAccessConfig } from "@/lib/access-config";
 import { CORPORATE_OFFICE, getStores, matchStore } from "@/lib/stores";
@@ -90,10 +93,30 @@ export async function GET() {
     currentUserId: auth.staff.id,
     currentRole: auth.staff.role,
     customRoles: access.custom.map((c) => ({ id: c.id, name: c.name, baseRole: c.baseRole })),
+    roleInfo: await roleSummaries(access),
     stores: [{ name: CORPORATE_OFFICE, code: null }, ...storeList.stores],
     storeSource: storeList.source,
     storeError: storeList.error,
   });
+}
+
+/** One line per role (built-in and custom): work & alerts · what it opens · stores · incentive group. */
+async function roleSummaries(config: Awaited<ReturnType<typeof loadAccessConfig>>) {
+  const groups = groupList(await loadPerformanceSettings());
+  const groupName = (g: string | null | undefined) => (g ? groups.find((x) => x.key === g)?.label ?? g : null);
+  const line = (base: Role, a: RoleAccess) => {
+    const opens = SECTIONS.filter((s) => a.sections.includes(s.key)).map((s) => s.label);
+    return [
+      `Work & alerts: ${workLabel(base)}`,
+      `Opens: ${opens.length ? opens.join(", ") : "only their own performance & incentives"}`,
+      `Stores: ${a.allStores ? "all" : "own store"}`,
+      `Incentive: ${groupName(a.group) ?? "from the role"}`,
+    ].join(" · ");
+  };
+  const out: Record<string, string> = {};
+  for (const r of ASSIGNABLE_ROLES) out[r] = line(r, roleAccess(config, r));
+  for (const c of config.custom) out[`custom:${c.id}`] = line(c.baseRole, c);
+  return out;
 }
 
 export async function POST(request: Request) {

@@ -29,7 +29,11 @@ export async function creStoreOf(staff: StaffUser): Promise<string | null> {
     loadPerformanceSettings(),
     supabaseAdmin.from("staff_users").select("incentive_group").eq("id", staff.id).maybeSingle(),
   ]);
-  const group = isGroup(data?.incentive_group) ? (data!.incentive_group as IncentiveGroup) : defaultGroup(staff.role, staff.access.roleLabel, s.asmIsFm);
+  const group = isGroup(data?.incentive_group)
+    ? (data!.incentive_group as IncentiveGroup)
+    : isGroup(staff.access.group)
+      ? (staff.access.group as IncentiveGroup)
+      : defaultGroup(staff.role, staff.access.roleLabel, s.asmIsFm);
   const store = (staff.storeName ?? "").toUpperCase();
   return group === "cashier_cre" && store ? store : null;
 }

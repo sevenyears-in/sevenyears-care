@@ -1,8 +1,9 @@
 // Roles & Access: which sections each role (built-in or custom) can open,
 // plus extra sections given to one person. Shared by server and client code.
 //
-// How work is routed (who gets a complaint, escalations, approvals) still follows
-// the built-in role. A custom role "works like" one built-in role for that.
+// Each role has: the work & alerts it handles (who gets a complaint, escalations, approvals —
+// one of the built-in roles' work, or none), the sections it can open, own store or all stores,
+// and a default incentive group.
 
 import { canSeeComplaints, canSeeService, isCorporateStaff, ROLE_LABELS, type Role } from "@/lib/roles";
 import { FEEDBACK_ROLES } from "@/lib/feedback-access";
@@ -16,19 +17,27 @@ export const SECTIONS = [
   { key: "explanations", label: "Explanations" },
   { key: "feedback", label: "Customer Feedback" },
   { key: "extended", label: "Extended Warranty" },
+  { key: "performance", label: "Sales & Performance" },
+  { key: "stock", label: "Stock & Merchandise" },
 ] as const;
 
 export type Section = (typeof SECTIONS)[number]["key"];
 export const SECTION_KEYS = SECTIONS.map((s) => s.key) as Section[];
 
-export type RoleAccess = { sections: Section[]; allStores: boolean };
+export type RoleAccess = {
+  sections: Section[];
+  allStores: boolean;
+  /** Default incentive group of people with this role (a person's own choice in Performance wins). */
+  group?: string | null;
+};
 export type CustomRole = RoleAccess & { id: string; name: string; baseRole: Role };
 export type AccessConfig = {
+  version?: number;
   builtin: Partial<Record<Role, RoleAccess>>;
   custom: CustomRole[];
 };
 
-export const EMPTY_ACCESS_CONFIG: AccessConfig = { builtin: {}, custom: [] };
+export const EMPTY_ACCESS_CONFIG: AccessConfig = { version: 2, builtin: {}, custom: [] };
 
 /** What each built-in role could open before Roles & Access existed. */
 export function defaultAccess(role: Role, storeName: string | null = null): RoleAccess {
@@ -39,6 +48,8 @@ export function defaultAccess(role: Role, storeName: string | null = null): Role
   if (canSeeComplaints(role)) sections.push("complaints");
   if (FEEDBACK_ROLES.includes(role)) sections.push("feedback");
   if (EXTENSION_ROLES.includes(role)) sections.push("extended");
+  // Store sales dashboards and stock pages: management and the store's managers.
+  if (["admin", "director", "operations_manager", "store_manager", "floor_incharge"].includes(role)) sections.push("performance", "stock");
   return {
     sections: SECTION_KEYS.filter((k) => sections.includes(k)),
     allStores: isCorporateStaff({ role, storeName }),
@@ -47,7 +58,9 @@ export function defaultAccess(role: Role, storeName: string | null = null): Role
 
 export function roleAccess(config: AccessConfig, role: Role): RoleAccess {
   const saved = config.builtin[role];
-  return saved ? { sections: SECTION_KEYS.filter((k) => saved.sections.includes(k)), allStores: Boolean(saved.allStores) } : defaultAccess(role);
+  return saved
+    ? { sections: SECTION_KEYS.filter((k) => saved.sections.includes(k)), allStores: Boolean(saved.allStores), group: saved.group ?? null }
+    : defaultAccess(role);
 }
 
 export type StaffAccess = {
@@ -57,6 +70,8 @@ export type StaffAccess = {
   roleLabel: string;
   customRoleId: string | null;
   extraSections: Section[];
+  /** Default incentive group of the role (null: worked out from the role). */
+  group: string | null;
 };
 
 /** Final access of one staff member. Super Admin always has everything. */
@@ -66,7 +81,7 @@ export function resolveAccess(
 ): StaffAccess {
   const extra = SECTION_KEYS.filter((k) => (person.extraSections ?? []).includes(k));
   if (person.role === "super_admin") {
-    return { sections: [...SECTION_KEYS], allStores: true, roleLabel: ROLE_LABELS.super_admin, customRoleId: null, extraSections: extra };
+    return { sections: [...SECTION_KEYS], allStores: true, roleLabel: ROLE_LABELS.super_admin, customRoleId: null, extraSections: extra, group: null };
   }
   const custom = person.customRoleId ? config.custom.find((c) => c.id === person.customRoleId) : undefined;
   const base = custom ?? roleAccess(config, person.role);
@@ -77,7 +92,13 @@ export function resolveAccess(
     roleLabel: custom ? custom.name : ROLE_LABELS[person.role],
     customRoleId: custom?.id ?? null,
     extraSections: extra,
+    group: base.group ?? null,
   };
+}
+
+/** What "work & alerts" a built-in role brings, in plain words. */
+export function workLabel(role: Role): string {
+  return role === "employee" ? "None — own performance only" : `${ROLE_LABELS[role]}'s work`;
 }
 
 export function hasSection(staff: { role: Role; access?: StaffAccess }, section: Section) {

@@ -40,6 +40,7 @@ export default function StaffUsersPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentRole, setCurrentRole] = useState<Role>("admin");
   const [customRoles, setCustomRoles] = useState<CustomRoleOption[]>([]);
+  const [roleInfo, setRoleInfo] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -70,6 +71,7 @@ export default function StaffUsersPage() {
       setCurrentUserId(data.currentUserId ?? "");
       setCurrentRole(data.currentRole ?? "admin");
       setCustomRoles(data.customRoles ?? []);
+      setRoleInfo(data.roleInfo ?? {});
     }
     setLoading(false);
   }, []);
@@ -210,7 +212,7 @@ export default function StaffUsersPage() {
             )}
           </select>
           <p className="mt-1 text-xs text-black/50">
-            {newCustomRole ? `Custom role — ${role === "employee" ? "no app work, own performance only" : `same work & alerts as ${ROLE_LABELS[role]}`}. Access is set in Roles & Access.` : ROLE_HELP[role]}
+            {roleInfo[newCustomRole ? `custom:${newCustomRole}` : role] ?? ROLE_HELP[role]}
           </p>
         </div>
         <div>
@@ -322,6 +324,7 @@ export default function StaffUsersPage() {
                         isSuper={isSuper}
                         stores={stores}
                         customRoles={customRoles}
+                        roleInfo={roleInfo}
                         roleOptions={(isSuper ? ASSIGNABLE_ROLES : ASSIGNABLE_ROLES.filter((r) => !PROTECTED.includes(r)))
                           .concat([u.role])
                           .filter((r, i, all) => all.indexOf(r) === i)}
@@ -349,7 +352,7 @@ export default function StaffUsersPage() {
                         <p className="font-semibold">{custom?.name ?? ROLE_LABELS[u.role]}</p>
                         {custom && (
                           <p className="text-[11px] text-black/45">
-                            {custom.baseRole === "employee" ? "Own performance only" : `Same work & alerts as ${ROLE_LABELS[custom.baseRole]}`}
+                            {custom.baseRole === "employee" ? "No app work" : `${ROLE_LABELS[custom.baseRole]}'s work`}
                           </p>
                         )}
                         {u.role === "store_manager" && !u.custom_role_id && u.can_edit_warranties === false && (
@@ -447,6 +450,7 @@ type EditProps = {
   isSuper: boolean;
   stores: StoreOption[];
   customRoles: CustomRoleOption[];
+  roleInfo: Record<string, string>;
   roleOptions: Role[];
   onCancel: () => void;
   onSaved: (message: string) => void;
@@ -454,7 +458,7 @@ type EditProps = {
 };
 
 /** Edit one staff member — nothing changes until Save. */
-function EditStaffRow({ user: u, self, isSuper, stores, customRoles, roleOptions, onCancel, onSaved, onError }: EditProps) {
+function EditStaffRow({ user: u, self, isSuper, stores, customRoles, roleInfo, roleOptions, onCancel, onSaved, onError }: EditProps) {
   const startRole = u.custom_role_id ? `custom:${u.custom_role_id}` : u.role;
   const [fullName, setFullName] = useState(u.full_name);
   const [roleValue, setRoleValue] = useState(startRole);
@@ -546,6 +550,7 @@ function EditStaffRow({ user: u, self, isSuper, stores, customRoles, roleOptions
                 </optgroup>
               )}
             </select>
+            {roleInfo[roleValue] && <span className="mt-1 block text-[11px] leading-4 text-black/50">{roleInfo[roleValue]}</span>}
             {self && <span className="mt-1 block text-[11px] text-black/45">You can&apos;t change your own role.</span>}
             {isSuper && effectiveRole === "store_manager" && !custom && (
               <label className="mt-2 flex items-center gap-2 text-xs font-semibold">

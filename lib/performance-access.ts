@@ -4,6 +4,7 @@
 
 import type { StaffUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/roles";
+import { hasSection } from "@/lib/access";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { defaultGroup, isGroup, type IncentiveGroup } from "@/lib/performance-rules";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
@@ -15,15 +16,21 @@ export async function performanceAccess(staff: StaffUser): Promise<PerformanceAc
     supabaseAdmin.from("staff_users").select("incentive_group").eq("id", staff.id).maybeSingle(),
     loadPerformanceSettings(),
   ]);
-  const group = isGroup(data?.incentive_group) ? (data!.incentive_group as IncentiveGroup) : defaultGroup(staff.role, staff.access.roleLabel, settings.asmIsFm);
+  // The person's own group (Performance settings), else their role's default group, else from the role.
+  const group = isGroup(data?.incentive_group)
+    ? (data!.incentive_group as IncentiveGroup)
+    : isGroup(staff.access.group)
+      ? (staff.access.group as IncentiveGroup)
+      : defaultGroup(staff.role, staff.access.roleLabel, settings.asmIsFm);
   const own = (staff.storeName ?? "").toUpperCase();
   let teamAll = false;
   let teamStores: string[] = [];
-  if (isAdmin(staff.role) || staff.role === "operations_manager") teamAll = true;
-  else if (staff.role === "director") {
-    if (staff.directorStores.length) teamStores = staff.directorStores.map((s) => s.toUpperCase());
-    else teamAll = true;
-  } else if (group === "sm" || group === "asm" || staff.role === "store_manager") teamStores = own ? [own] : [];
+  // Store dashboards: roles with "Sales & Performance" (Roles & Access) — all stores or their own.
+  if (isAdmin(staff.role) || hasSection(staff, "performance")) {
+    if (staff.role === "director" && staff.directorStores.length) teamStores = staff.directorStores.map((s) => s.toUpperCase());
+    else if (isAdmin(staff.role) || staff.access.allStores) teamAll = true;
+    else teamStores = own ? [own] : [];
+  } else if (group === "sm" || group === "asm") teamStores = own ? [own] : [];
   return { eligible: group !== "none", group, teamAll, teamStores };
 }
 

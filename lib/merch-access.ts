@@ -3,13 +3,22 @@
 
 import type { StaffUser } from "@/lib/auth";
 import { performanceAccess } from "@/lib/performance-access";
+import { hasSection } from "@/lib/access";
 
 export async function merchStores(staff: StaffUser, allStores: string[]): Promise<string[]> {
-  const a = await performanceAccess(staff);
-  if (a.teamAll) return allStores;
+  // Roles with "Stock & Merchandise" (Roles & Access): every store, a director's stores, or their own.
+  if (staff.role === "super_admin" || staff.role === "admin") return allStores;
+  if (!hasSection(staff, "stock")) {
+    // Store / Assistant Store Managers by incentive group keep their own store.
+    const a = await performanceAccess(staff);
+    const mine = new Set(a.teamAll ? [] : a.teamStores);
+    return a.group === "sm" || a.group === "asm" ? allStores.filter((s) => mine.has(s)) : [];
+  }
+  if (staff.role === "director" && staff.directorStores.length) {
+    const mine = new Set(staff.directorStores.map((s) => s.toUpperCase()));
+    return allStores.filter((s) => mine.has(s));
+  }
+  if (staff.access.allStores) return allStores;
   const own = (staff.storeName ?? "").toUpperCase();
-  const mine = new Set(a.teamStores);
-  // Floor Managers too, also when ASM and Floor Manager are separate roles.
-  if (own && (staff.role === "floor_incharge" || /floor\s*(manager|in\s*charge|incharge)/i.test(staff.access.roleLabel))) mine.add(own);
-  return allStores.filter((s) => mine.has(s));
+  return allStores.filter((s) => s === own);
 }

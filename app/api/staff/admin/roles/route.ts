@@ -1,3 +1,5 @@
+import { loadPerformanceSettings } from "@/lib/performance-settings";
+import { groupList } from "@/lib/performance-rules";
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
@@ -21,9 +23,9 @@ async function usage() {
 export async function GET() {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const [config, counts] = await Promise.all([loadAccessConfig(), usage()]);
+  const [config, counts, settings] = await Promise.all([loadAccessConfig(), usage(), loadPerformanceSettings()]);
   const defaults = Object.fromEntries(ASSIGNABLE_ROLES.filter((r) => r !== "super_admin").map((r) => [r, defaultAccess(r)]));
-  return NextResponse.json({ config, defaults, usage: counts });
+  return NextResponse.json({ config, defaults, usage: counts, groups: groupList(settings).map((g) => ({ key: g.key, label: g.label })) });
 }
 
 export async function PUT(request: Request) {
