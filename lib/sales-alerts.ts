@@ -13,6 +13,8 @@
 // the audiences in "alertEmailTo" also get an e-mail (only staff with e-mail alerts on).
 
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { loadAccessConfig } from "@/lib/access-config";
+import { watchesAllStores } from "@/lib/eod-report";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { loadStaffForPerformance, monthReport, type StoreReport } from "@/lib/performance";
 import { hoursOf, istNow } from "@/lib/business-day";
@@ -102,10 +104,13 @@ export async function buildSalesAlerts(at = new Date(), slotTime?: string): Prom
   const link = `${siteUrl()}/staff/performance`;
   const tail = [staleLine, "Provisional — today is not closed yet.", `Open: ${link}`].filter(Boolean);
 
-  const { data: staffRows } = await supabaseAdmin
-    .from("staff_users")
-    .select("id, full_name, role, store_name, email, notify_email, director_stores, incentive_group")
-    .eq("is_active", true);
+  const [{ data: staffRows }, accessConfig] = await Promise.all([
+    supabaseAdmin
+      .from("staff_users")
+      .select("id, full_name, role, store_name, email, notify_email, director_stores, incentive_group, custom_role_id, extra_sections")
+      .eq("is_active", true),
+    loadAccessConfig(),
+  ]);
   const staff = (staffRows ?? []) as {
     id: string;
     full_name: string;
@@ -115,6 +120,8 @@ export async function buildSalesAlerts(at = new Date(), slotTime?: string): Prom
     notify_email: boolean | null;
     director_stores: string[] | null;
     incentive_group: string | null;
+    custom_role_id: string | null;
+    extra_sections: string[] | null;
   }[];
 
   const stores = report.stores.filter((st) => !s.excludedStores.includes(st.store));
@@ -143,7 +150,8 @@ export async function buildSalesAlerts(at = new Date(), slotTime?: string): Prom
       else if (role === "director") {
         const mine = (r.director_stores ?? []).map((x) => x.toUpperCase());
         list = mine.length ? stores.filter((st) => mine.includes(st.store)) : stores;
-      } else continue;
+      } else if (watchesAllStores(accessConfig, r)) list = stores; // e.g. the Visual Merchandiser
+      else continue;
       if (!list.length) continue;
       const body: string[] = [];
       const sums: string[] = [];

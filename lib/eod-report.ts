@@ -16,6 +16,8 @@ import { parseReport, reportHtml } from "@/lib/report-parse";
 import { loadWalkins } from "@/lib/walkins";
 import { itemSales, stockAlertsFor } from "@/lib/stock";
 import { isAdmin, asRole } from "@/lib/roles";
+import { resolveAccess, type AccessConfig } from "@/lib/access";
+import { loadAccessConfig } from "@/lib/access-config";
 import { sendEmail, siteUrl } from "@/lib/notify";
 import { pushToStaff } from "@/lib/push";
 import { syncRecentSales } from "@/lib/sales-sync";
@@ -182,16 +184,44 @@ export function eodText(d: EodData, status: "provisional" | "final") {
 export type Recipient = { id: string; full_name: string; email: string | null; notify_email: boolean | null; audience: AlertAudience };
 
 /** Store Managers / ASM of the store and the management that looks after it. */
+/**
+ * Roles with "Sales & Performance" for all stores (Roles & Access), e.g. the Visual Merchandiser,
+ * get the management alerts of every store: sales updates, end of day, opening / closing, stock.
+ */
+export function watchesAllStores(
+  config: AccessConfig,
+  r: { role: string; store_name: string | null; custom_role_id?: string | null; extra_sections?: string[] | null }
+) {
+  const a = resolveAccess(config, { role: asRole(r.role), storeName: r.store_name, customRoleId: r.custom_role_id ?? null, extraSections: r.extra_sections ?? [] });
+  return a.allStores && a.sections.includes("performance");
+}
+
 export async function recipients(store: string): Promise<Recipient[]> {
-  const { data } = await supabaseAdmin
-    .from("staff_users")
-    .select("id, full_name, role, store_name, email, notify_email, director_stores, incentive_group")
-    .eq("is_active", true);
+  const [{ data }, config] = await Promise.all([
+    supabaseAdmin
+      .from("staff_users")
+      .select("id, full_name, role, store_name, email, notify_email, director_stores, incentive_group, custom_role_id, extra_sections")
+      .eq("is_active", true),
+    loadAccessConfig(),
+  ]);
   const out: Recipient[] = [];
-  for (const r of (data ?? []) as { id: string; full_name: string; role: string; store_name: string | null; email: string | null; notify_email: boolean | null; director_stores: string[] | null; incentive_group: string | null }[]) {
+  for (const row of (data ?? []) as {
+    id: string;
+    full_name: string;
+    role: string;
+    store_name: string | null;
+    email: string | null;
+    notify_email: boolean | null;
+    director_stores: string[] | null;
+    incentive_group: string | null;
+    custom_role_id: string | null;
+    extra_sections: string[] | null;
+  }[]) {
+    const { custom_role_id, extra_sections, ...r } = row;
     const role = asRole(r.role);
     const own = (r.store_name ?? "").toUpperCase() === store;
     if (isAdmin(role) || role === "operations_manager") out.push({ ...r, audience: "management" });
+    else if (role !== "director" && watchesAllStores(config, { ...r, custom_role_id, extra_sections })) out.push({ ...r, audience: "management" });
     else if (role === "director") {
       const mine = (r.director_stores ?? []).map((x) => x.toUpperCase());
       if (!mine.length || mine.includes(store)) out.push({ ...r, audience: "management" });
