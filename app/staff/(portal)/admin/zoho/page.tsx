@@ -15,6 +15,7 @@ type Status = {
   organizationName: string | null;
   organizations: { id: string; name: string }[];
   previousOrganizations?: { id: string; name: string; until: string | null }[];
+  skipBillPrefixes?: string[];
   connectedAt: string | null;
   redirectUri: string;
   homepageUrl: string;
@@ -275,6 +276,8 @@ function OrganisationsCard({ status, onSaved }: { status: Status; onSaved: () =>
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState("");
   const [rows, setRows] = useState<{ id: string; until: string }[]>([]);
+  const [skip, setSkip] = useState("");
+  const skipped = status.skipBillPrefixes ?? [];
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [checkFrom, setCheckFrom] = useState(() => new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10));
@@ -291,6 +294,7 @@ function OrganisationsCard({ status, onSaved }: { status: Status; onSaved: () =>
   const startEdit = () => {
     setCurrent(status.organizationId ?? "");
     setRows(previous.map((o) => ({ id: o.id, until: o.until ?? "" })));
+    setSkip(skipped.join(", "));
     setError("");
     setEditing(true);
   };
@@ -312,7 +316,11 @@ function OrganisationsCard({ status, onSaved }: { status: Status; onSaved: () =>
     const response = await fetch("/api/staff/admin/zoho", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ organizationId: current, previousOrganizations: rows.filter((r) => r.id.trim()) }),
+      body: JSON.stringify({
+        organizationId: current,
+        previousOrganizations: rows.filter((r) => r.id.trim()),
+        skipBillPrefixes: skip.split(/[,\n]/).map((p) => p.trim()).filter(Boolean),
+      }),
     });
     const data = await response.json().catch(() => ({}));
     setSaving(false);
@@ -370,6 +378,16 @@ function OrganisationsCard({ status, onSaved }: { status: Status; onSaved: () =>
               </p>
             ))
           )}
+          <p>
+            <span className="inline-block w-36 text-black/50">Not counted</span>
+            {skipped.length ? (
+              <>
+                bills starting with <b>{skipped.join(", ")}</b>
+              </>
+            ) : (
+              "none"
+            )}
+          </p>
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -404,6 +422,11 @@ function OrganisationsCard({ status, onSaved }: { status: Status; onSaved: () =>
               + Add earlier organisation
             </button>
             <p className="mt-1 text-xs text-black/50">Leave the last billing day empty while that organisation still makes bills.</p>
+          </div>
+          <div>
+            <label className={labelClass}>Bills not counted as sales (number starts with)</label>
+            <input value={skip} onChange={(e) => setSkip(e.target.value)} className={`${inputClass} max-w-md`} placeholder="e.g. 26-INV-" />
+            <p className="mt-1 text-xs text-black/50">For transfer or B2B invoices. Separate several with commas.</p>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={save} disabled={saving || !current} className="rounded-xl bg-[#161616] px-5 py-2 text-sm font-bold text-white disabled:opacity-40">

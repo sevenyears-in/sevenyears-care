@@ -7,7 +7,7 @@
 // by the normal 30-minute sync.
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { flushZohoUsage, oncePerBill, withZohoOrg, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
+import { countedBills, flushZohoUsage, oncePerBill, withZohoOrg, zohoCallsLastMinute, zohoCallsMade, zohoCallsToday, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { todayISO } from "@/lib/helpers";
 import { assignPtCodes, saveCreditNote, saveInvoice, SKIP_STATUS } from "@/lib/sales-sync";
 
@@ -128,7 +128,8 @@ async function listMonth(path: "invoices" | "creditnotes", key: string, month: s
   scored.sort((a, b) => a.n - b.n);
   // Bills of an organisation after its last billing day are not counted.
   scored.splice(0, scored.length, ...scored.filter((x) => x.n !== 99));
-  return oncePerBill(scored.map((x) => x.r), path === "invoices" ? "invoice_number" : "creditnote_number").filter((r) => str(r.date) >= from && str(r.date) <= to && !SKIP_STATUS.has(str(r.status).toLowerCase()));
+  const once = oncePerBill(scored.map((x) => x.r), path === "invoices" ? "invoice_number" : "creditnote_number");
+  return (path === "invoices" ? await countedBills(once, "invoice_number") : once).filter((r) => str(r.date) >= from && str(r.date) <= to && !SKIP_STATUS.has(str(r.status).toLowerCase()));
 }
 
 async function savedIds(table: "sales_invoices" | "sales_returns", idCol: string, dateCol: string, month: string) {

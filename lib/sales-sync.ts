@@ -8,7 +8,7 @@
 import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { categoryLookup, realCategory } from "@/lib/item-categories";
-import { flushZohoUsage, oncePerBill, withZohoOrg, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
+import { countedBills, flushZohoUsage, oncePerBill, withZohoOrg, zohoConfigured, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { appendSyncLog, isTransient, type SyncLogEntry } from "@/lib/sync-log";
 import { todayISO } from "@/lib/helpers";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
@@ -118,7 +118,8 @@ async function listAllOrgs(path: string, key: string, date: string) {
     out.push(...rows.map((r) => ({ ...r, __org: org })));
   }
   // A bill copied into the new organisation is kept once (from the organisation trusted that day).
-  return oncePerBill(out, key === "invoices" ? "invoice_number" : "creditnote_number");
+  if (key !== "invoices") return oncePerBill(out, "creditnote_number");
+  return countedBills(oncePerBill(out, "invoice_number"), "invoice_number");
 }
 
 /** Reads a saved row's details from the organisation it came from. */

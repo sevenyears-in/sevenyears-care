@@ -8,7 +8,7 @@
 // Differences are listed bill by bill (missing here, not in Zoho any more, or amount changed).
 
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { oncePerBill, withZohoOrg, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
+import { countedBills, oncePerBill, withZohoOrg, zohoOrgIdsOn, zohoRead } from "@/lib/zoho";
 import { SKIP_STATUS, storeKey } from "@/lib/sales-sync";
 import { appendSyncLog } from "@/lib/sync-log";
 
@@ -34,7 +34,8 @@ async function listDay(path: "invoices" | "creditnotes", date: string) {
       }
     });
   }
-  return { rows: oncePerBill(out, path === "invoices" ? "invoice_number" : "creditnote_number").filter((r) => str(r.date) === date && !SKIP_STATUS.has(str(r.status).toLowerCase())), reads };
+  const once = oncePerBill(out, path === "invoices" ? "invoice_number" : "creditnote_number");
+  return { rows: (path === "invoices" ? await countedBills(once, "invoice_number") : once).filter((r) => str(r.date) === date && !SKIP_STATUS.has(str(r.status).toLowerCase())), reads };
 }
 
 export type StoreCheck = {

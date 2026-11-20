@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { publicOrigin } from "@/lib/origin";
-import { listZohoOrganizations, loadZohoSettings, previousZohoOrgs, probeZohoOrganization, saveZohoSettings, zohoConfig, zohoDayBills } from "@/lib/zoho";
+import { listZohoOrganizations, loadZohoSettings, previousZohoOrgs, probeZohoOrganization, saveZohoSettings, skippedBillPrefixes, zohoConfig, zohoDayBills } from "@/lib/zoho";
 import { logAudit } from "@/lib/audit";
 
 // Super Admin only: Zoho POS connection settings (stored server-side in Supabase).
@@ -62,6 +62,7 @@ export async function GET(request: Request) {
     organizationName: (saved.organizationName as string) ?? null,
     organizations: (saved.organizations as { id: string; name: string }[]) ?? [],
     previousOrganizations: previousZohoOrgs(saved),
+    skipBillPrefixes: skippedBillPrefixes(saved),
     connectedAt: (saved.connectedAt as string) ?? null,
     redirectUri: `${origin}/api/staff/zoho/callback`,
     homepageUrl: origin,
@@ -142,13 +143,18 @@ export async function PATCH(request: Request) {
     previous = previous.filter((x) => x.id !== organizationId);
   }
 
-  await saveZohoSettings({ ...saved, organizations: orgs, organizationId, organizationName: nameOf(organizationId) || null, previousOrganizations: previous });
+  // Bill-number starts not counted as sales (as sent, otherwise unchanged).
+  const skip = Array.isArray(body.skipBillPrefixes)
+    ? skippedBillPrefixes({ skipBillPrefixes: (body.skipBillPrefixes as unknown[]).map((p) => String(p ?? "").slice(0, 30)) })
+    : skippedBillPrefixes(saved);
+
+  await saveZohoSettings({ ...saved, organizations: orgs, organizationId, organizationName: nameOf(organizationId) || null, previousOrganizations: previous, skipBillPrefixes: skip });
   await logAudit(
     auth.staff,
     "zoho",
     "organisation",
-    { organizationId: saved.organizationId ?? null, previousOrganizations: before },
-    { organizationId, previousOrganizations: previous }
+    { organizationId: saved.organizationId ?? null, previousOrganizations: before, skipBillPrefixes: skippedBillPrefixes(saved) },
+    { organizationId, previousOrganizations: previous, skipBillPrefixes: skip }
   ).catch(() => undefined);
   return NextResponse.json({ success: true });
 }

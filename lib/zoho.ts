@@ -294,6 +294,22 @@ export async function zohoOrgIdsOn(date: string): Promise<string[]> {
   return [...new Set([...closing, config.organizationId, ...open].filter(Boolean))];
 }
 
+/** Bill-number starts that are not counted as sales (e.g. "26-INV-": transfer / B2B invoices). */
+export function skippedBillPrefixes(saved: Record<string, unknown>): string[] {
+  const list = Array.isArray(saved.skipBillPrefixes) ? (saved.skipBillPrefixes as unknown[]) : [];
+  return [...new Set(list.map((p) => String(p ?? "").trim().toUpperCase()).filter(Boolean))].slice(0, 20);
+}
+
+/** Leaves out bills whose number starts with a prefix that is not counted as sales. */
+export async function countedBills<T extends Record<string, unknown>>(rows: T[], numberKey: string): Promise<T[]> {
+  const prefixes = skippedBillPrefixes(await loadZohoSettings());
+  if (!prefixes.length) return rows;
+  return rows.filter((r) => {
+    const n = String(r[numberKey] ?? "").trim().toUpperCase();
+    return !prefixes.some((p) => n.startsWith(p));
+  });
+}
+
 /** Every organisation, most trusted first for a bill of `date`. */
 async function zohoOrgIdsFor(date: string): Promise<string[]> {
   return [...new Set([...(await zohoOrgIdsOn(date)), ...(await zohoOrgIds())])];
