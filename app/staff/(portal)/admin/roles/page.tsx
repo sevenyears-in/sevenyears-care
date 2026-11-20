@@ -246,7 +246,12 @@ export default function RolesAccessPage() {
                           )}
                         </p>
                         <p className="mt-0.5 text-[11px] text-black/45">
-                          {row.staff} staff{row.kind === "custom" ? ` · works like ${ROLE_LABELS[row.baseRole]}` : ""}
+                          {row.staff} staff
+                          {row.kind === "custom"
+                            ? row.access.sections.length === 0
+                              ? " · sees only their own performance & incentives"
+                              : ` · works like ${ROLE_LABELS[row.baseRole]}`
+                            : ""}
                         </p>
                           </div>
                         </div>

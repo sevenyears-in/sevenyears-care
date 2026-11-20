@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { runWishes } from "@/lib/wishes";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured } from "@/lib/zoho";
@@ -18,6 +19,7 @@ import { OffersBanner } from "@/components/OffersBanner";
 import { ExtendedWarrantySection } from "@/components/ExtendedWarrantySection";
 import { canSeeExtensions } from "@/lib/extended-access";
 import { hasSection } from "@/lib/access";
+import { performanceAccess } from "@/lib/performance-access";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,11 @@ export default async function StaffDashboard() {
   // Birthday & anniversary wishes go out once a day even without a scheduled job.
   after(() => runWishes().catch((e) => console.error("Wishes run failed:", e)));
   if (!staff) return null;
+  // A role with no sections (e.g. House Keeping Executive) only sees its own performance & incentives.
+  if (!isAdmin(staff.role) && staff.role !== "director" && staff.access && staff.access.sections.length === 0) {
+    const pa = await performanceAccess(staff).catch(() => null);
+    if (pa && (pa.eligible || pa.teamAll || pa.teamStores.length)) redirect("/staff/performance");
+  }
   const today = todayISO();
 
   const showService = hasSection(staff, "service");
