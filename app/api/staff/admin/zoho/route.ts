@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { publicOrigin } from "@/lib/origin";
-import { listZohoOrganizations, loadZohoSettings, previousZohoOrgs, probeZohoOrganization, saveZohoSettings, skippedBillPrefixes, zohoConfig, zohoDayBills } from "@/lib/zoho";
+import { listZohoOrganizations, loadZohoSettings, previousZohoOrgs, probeZohoOrganization, saveZohoSettings, skippedBillPrefixes, zohoConfig, zohoDayBills, zohoInvoiceDetail } from "@/lib/zoho";
 import { logAudit } from "@/lib/audit";
 
 // Super Admin only: Zoho POS connection settings (stored server-side in Supabase).
@@ -28,6 +28,16 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   // ?compare=YYYY-MM-DD → that day's bills in every organisation (read only), to see whether two
   // organisations hold the same bills.
+  // ?invoice=NUMBER → that invoice in full (read only).
+  const invoice = (url.searchParams.get("invoice") ?? "").trim();
+  if (invoice) {
+    try {
+      const detail = await zohoInvoiceDetail(invoice.slice(0, 40));
+      return detail ? NextResponse.json(detail) : NextResponse.json({ error: "Not found." }, { status: 404 });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Could not reach Zoho POS." }, { status: 502 });
+    }
+  }
   const compare = url.searchParams.get("compare") ?? "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(compare)) {
     try {

@@ -29,6 +29,26 @@ async function uploadedDaily(from: string, to: string, stores: string[]) {
   return out;
 }
 
+/**
+ * The day each store started: its first bill (or uploaded sale). Days before it are not shown
+ * and add no target (e.g. QUE TEE PALACE opened on 15 Nov 2026). Cached for 10 minutes.
+ */
+let openedCache: { at: number; map: Map<string, string | null> } | null = null;
+export async function storeOpenedOn(stores: string[]): Promise<Map<string, string | null>> {
+  if (!openedCache || Date.now() - openedCache.at > 10 * 60_000) openedCache = { at: Date.now(), map: new Map() };
+  const map = openedCache.map;
+  for (const store of stores) {
+    if (map.has(store)) continue;
+    const [bill, up] = await Promise.all([
+      supabaseAdmin.from("sales_invoices").select("invoice_date").eq("store", store).order("invoice_date", { ascending: true }).limit(1).maybeSingle(),
+      supabaseAdmin.from("sales_history_lines").select("day").eq("store", store).order("day", { ascending: true }).limit(1).maybeSingle(),
+    ]);
+    const days = [bill.data?.invoice_date, up.data?.day].filter((d): d is string => typeof d === "string" && d.length >= 10).map((d) => d.slice(0, 10));
+    map.set(store, days.length ? days.sort()[0] : null);
+  }
+  return map;
+}
+
 export type DailyRow = {
   date: string;
   store: string;
@@ -68,6 +88,13 @@ export async function dailySales(from: string, to: string, stores: string[], con
   for (const m of months) targets.set(m, (await loadTargets(m)).stores);
   const monthTarget = (store: string, m: string) => targets.get(m)?.get(store) ?? settings.storeTargets[store] ?? 0;
 
+  // A store is shown from the day it opened (its first bill).
+  const opened = await storeOpenedOn(stores).catch(() => new Map<string, string | null>());
+  const openOn = (s: string, d: string) => {
+    const o = opened.get(s);
+    return o === undefined || (o !== null && d >= o);
+  };
+
   // Fill missing days (no bills) so the trend shows them.
   const byKey = new Map(raw.map((r) => [`${r.date}|${r.store}`, r]));
   const rows: DailyRow[] = [];
@@ -75,7 +102,11 @@ export async function dailySales(from: string, to: string, stores: string[], con
   for (const store of list) {
     let prev: number | null = null;
     for (let d = addDays(from, -1); d <= to; d = addDays(d, 1)) {
-      const keys = store === "ALL" ? stores : [store];
+      const keys = (store === "ALL" ? stores : [store]).filter((s) => openOn(s, d));
+      if (!keys.length) {
+        prev = null;
+        continue;
+      }
       const parts = keys.map((s) => byKey.get(`${d}|${s}`)).filter((r): r is NonNullable<typeof r> => Boolean(r) && (r!.bills > 0 || r!.returns > 0));
       const sum = (k: "bills" | "billed" | "returned" | "returns" | "net") => parts.reduce((a, r) => a + r[k], 0);
       // Stores with no bills that day: use an Excel upload when there is one, otherwise "no data yet".
@@ -85,9 +116,9 @@ export async function dailySales(from: string, to: string, stores: string[], con
       const upStores = missing.filter((s) => uploaded.has(`${d}|${s}`));
       const stillMissing = missing.filter((s) => !uploaded.has(`${d}|${s}`));
       const m = d.slice(0, 7);
-      const target = (store === "ALL" ? stores.reduce((a, s) => a + monthTarget(s, m), 0) : monthTarget(store, m)) / daysIn(m);
+      const target = keys.reduce((a, s) => a + monthTarget(s, m), 0) / daysIn(m);
       const net = sum("net") + upNet;
-      const states = (store === "ALL" ? stores : [store]).map((s) => dayState(settings, s, d, settings.lastSyncAt ?? null));
+      const states = keys.map((s) => dayState(settings, s, d, settings.lastSyncAt ?? null));
       const state: DayState = states.includes("live") ? "live" : states.includes("provisional") ? "provisional" : states.every((x) => x === "special") ? "special" : "closed";
       if (d >= from) {
         rows.push({

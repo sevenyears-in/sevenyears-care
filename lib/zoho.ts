@@ -841,3 +841,49 @@ export async function zohoDayBills(organizationId: string, date: string) {
     .filter((r) => str(r.date) === date)
     .map((r) => ({ number: str(r.invoice_number), status: str(r.status), total: Number(r.total) || 0, store: str(r.location_name) || str(r.branch_name) }));
 }
+
+/** One invoice in full (read only, for checking): searched in every organisation. */
+export async function zohoInvoiceDetail(billNumber: string) {
+  const wanted = billNumber.trim().toUpperCase();
+  const found = await eachOrg(await zohoOrgIds(), async () => {
+    const list = await zohoGet("invoices", { invoice_number: billNumber.trim() });
+    const hit = arr(list.invoices).find((inv) => str(inv.invoice_number).toUpperCase() === wanted);
+    if (!hit) return null;
+    return obj((await zohoGet(`invoices/${str(hit.invoice_id)}`)).invoice);
+  });
+  const f = found.find((x) => x.value);
+  if (!f?.value) return null;
+  const d = f.value;
+  const n = (v: unknown) => Number(v) || 0;
+  return {
+    organisation: f.org,
+    number: str(d.invoice_number),
+    date: str(d.date),
+    dueDate: str(d.due_date),
+    status: str(d.status),
+    store: str(d.location_name) || str(d.branch_name),
+    customer: str(d.customer_name),
+    gstin: str(d.gst_no),
+    placeOfSupply: str(d.place_of_supply),
+    reference: str(d.reference_number),
+    salesperson: str(d.salesperson_name),
+    createdBy: str(d.created_by_name) || str(d.created_by),
+    createdTime: str(d.created_time),
+    notes: str(d.notes),
+    terms: str(d.terms),
+    subTotal: n(d.sub_total),
+    discount: n(d.discount_total) || n(d.discount),
+    tax: n(d.tax_total),
+    total: n(d.total),
+    balance: n(d.balance),
+    lines: arr(d.line_items).map((l) => ({
+      name: str(l.name) || str(l.description),
+      sku: str(l.sku),
+      quantity: n(l.quantity),
+      rate: n(l.rate),
+      discount: n(l.discount_amount) || n(l.discount),
+      tax: str(l.tax_name),
+      amount: n(l.item_total),
+    })),
+  };
+}
