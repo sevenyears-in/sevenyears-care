@@ -57,11 +57,6 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#ff5e79]">My Performance</p>
           <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Store opening &amp; closing · {store}</h1>
-          <p className="mt-1 text-sm text-black/55">
-            From the punching machine. Opening = first punch − 2 minutes; closing = last punch. As per SOP only the Store Manager or the ASM / Floor
-            Manager opens and closes the store (an SM / ASM punch within a minute of the first / last punch counts). Anything else is an SOP
-            violation until the Director approves it.
-          </p>
         </div>
         <Link href={`/staff/performance?view=team&store=${encodeURIComponent(store)}`} className="rounded-full bg-white px-4 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">
           ← Store dashboard
