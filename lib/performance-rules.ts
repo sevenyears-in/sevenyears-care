@@ -4,7 +4,19 @@
 
 import type { Role } from "@/lib/roles";
 
-export type PtPerson = { name: string; group?: IncentiveGroup };
+/**
+ * Daily-wages (temporary) salesperson without a staff account. Their store is chosen in
+ * Settings → Targets: `stores` maps a month (YYYY-MM) to the store from that month on.
+ * Without a choice, their store is where they sold most that month.
+ */
+export type PtPerson = { name: string; group?: IncentiveGroup; stores?: Record<string, string> };
+
+/** The store chosen for a temporary salesperson in a month: the latest choice up to that month. */
+export function ptStoreIn(p: PtPerson | undefined, month: string): string | null {
+  const keys = Object.keys(p?.stores ?? {}).filter((m) => m <= month).sort();
+  const s = keys.length ? p!.stores![keys[keys.length - 1]] : "";
+  return s ? s.toUpperCase() : null;
+}
 
 export type AlertAudience = "staff" | "sm" | "management";
 export const ALERT_AUDIENCES: { key: AlertAudience; label: string }[] = [

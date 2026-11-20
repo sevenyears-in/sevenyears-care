@@ -20,7 +20,10 @@ type Person = {
   /** Store chosen in Settings for Corporate Office staff. */
   chosenStore: string | null;
   group: IncentiveGroup;
+  /** Temporary (daily-wages, PT code) staff: their store is chosen here, not with a Transfer. */
   isPt: boolean;
+  /** Temporary staff: where they sold most this month (when no store is chosen). */
+  soldMost: string | null;
 };
 type Promo = { id: number; kind: string; item_id: string | null; sku: string | null; name: string; from_date: string | null; to_date: string | null };
 type ZItem = { item_id: string; name: string; sku: string | null; rate: number; category: string };
@@ -771,44 +774,39 @@ function TargetsCard(props: {
   const router = useRouter();
   const { month, settings } = props;
   const groups = groupList(settings);
-  const [editing, setEditing] = useState(false);
+  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string };
+  // One row (or one store target) is changed at a time, each with its own Save.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<RowState | null>(null);
+  const [editStore, setEditStore] = useState<string | null>(null);
+  const [storeDraft, setStoreDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
-  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string; shift: string };
-  const startRows = () =>
-    Object.fromEntries(
-      props.people.map((p) => [
-        p.userId,
-        {
-          sales: props.targets[p.userId]?.sales ? String(props.targets[p.userId].sales) : "",
-          abv: props.targets[p.userId]?.abv ? String(props.targets[p.userId].abv) : "",
-          group: p.group,
-          store: p.chosenStore ?? "",
-          salary: props.salaries[p.userId] ? String(props.salaries[p.userId]) : "",
-          shift: settings.personShifts[p.userId] ?? "",
-        },
-      ])
-    );
-  const [rows, setRows] = useState<Record<string, RowState>>(startRows);
-  const startStores = () => Object.fromEntries(props.stores.map((s) => [s, props.storeMonthTargets[s] ? String(props.storeMonthTargets[s]) : ""]));
-  const [storeRows, setStoreRows] = useState<Record<string, string>>(startStores);
-  const setRow = (id: string, change: Partial<RowState>) => setRows({ ...rows, [id]: { ...rows[id], ...change } });
+  const [showNone, setShowNone] = useState(false);
 
+  const NO_STORE = "No store yet";
   const noOwnTarget = (g: string) => settings.noTargetGroups.includes(g) || settings.poolOnlyGroups.includes(g);
-  const groupOf = (p: Person) => (editing ? rows[p.userId]?.group ?? p.group : p.group);
-  const isCorporate = (p: Person) => !p.homeStore || !props.stores.includes(p.homeStore);
-  const storeFor = (p: Person) => (editing ? (isCorporate(p) ? rows[p.userId]?.store || p.store : p.homeStore) : p.store);
+  const isCorporate = (p: Person) => !p.isPt && (!p.homeStore || !props.stores.includes(p.homeStore));
+  const current = (p: Person): RowState => ({
+    sales: props.targets[p.userId]?.sales ? String(props.targets[p.userId].sales) : "",
+    abv: props.targets[p.userId]?.abv ? String(props.targets[p.userId].abv) : "",
+    group: p.group,
+    store: p.chosenStore ?? "",
+    salary: props.salaries[p.userId] ? String(props.salaries[p.userId]) : "",
+  });
+  const groupNow = (p: Person) => (editId === p.userId && draft ? draft.group : p.group);
+  const set = (change: Partial<RowState>) => setDraft((d) => (d ? { ...d, ...change } : d));
 
   const { byStore, notIn } = useMemo(() => {
     const out = new Map<string, Person[]>();
     const none: Person[] = [];
     for (const p of props.people) {
-      if (groupOf(p) === "none") {
+      if (p.group === "none") {
         none.push(p);
         continue;
       }
-      const s = storeFor(p) && props.stores.includes(storeFor(p) as string) ? (storeFor(p) as string) : "Choose a store";
+      const s = p.store && props.stores.includes(p.store) ? p.store : NO_STORE;
       if (!out.has(s)) out.set(s, []);
       out.get(s)!.push(p);
     }
@@ -816,41 +814,59 @@ function TargetsCard(props: {
     return {
       byStore: [...out.entries()]
         .filter(([s]) => !excluded.includes(s))
-        .sort(([a], [b]) => (a === "Choose a store" ? 1 : b === "Choose a store" ? -1 : a.localeCompare(b))),
+        .sort(([a], [b]) => (a === NO_STORE ? 1 : b === NO_STORE ? -1 : a.localeCompare(b))),
       notIn: none,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.people, settings.excludedStores, editing, rows]);
+  }, [props.people, props.stores, settings.excludedStores]);
 
-  async function save() {
+  function startEdit(p: Person) {
+    setEditStore(null);
+    setEditId(p.userId);
+    setDraft(current(p));
+    setError("");
+    setMsg("");
+  }
+  function cancel() {
+    setEditId(null);
+    setDraft(null);
+    setEditStore(null);
+    setError("");
+  }
+
+  async function saveRow(p: Person) {
+    if (!draft) return;
+    const was = current(p);
     setBusy(true);
     setError("");
     try {
-      // People not in incentive have no targets.
-      await post({
-        action: "targets",
-        month,
-        // People not in incentive, and groups without individual targets (Store Manager), have no targets.
-        rows: Object.entries(rows).map(([userId, r]) =>
-          r.group === "none" || noOwnTarget(r.group) ? { userId, sales: "", abv: "" } : { userId, sales: r.sales, abv: r.abv }
-        ),
-      });
-      const salaryRows = props.people
-        .filter((p) => (rows[p.userId]?.salary ?? "") !== (props.salaries[p.userId] ? String(props.salaries[p.userId]) : ""))
-        .map((p) => ({ userId: p.userId, salary: rows[p.userId]?.salary ?? "" }));
-      if (salaryRows.length) await post({ action: "salaries", rows: salaryRows });
-      for (const p of props.people) {
-        const r = rows[p.userId];
-        if (!r) continue;
-        if (r.group !== p.group) await post({ action: "group", staffId: p.id, group: r.group });
-        if (isCorporate(p) && (r.store || "") !== (p.chosenStore ?? "")) await post({ action: "incentive_store", userId: p.userId, store: r.store });
-      }
-      for (const s of props.stores) {
-        const was = props.storeMonthTargets[s] ? String(props.storeMonthTargets[s]) : "";
-        if ((storeRows[s] ?? "") !== was) await post({ action: "store_target", month, store: s, target: storeRows[s] ?? "" });
-      }
-      setEditing(false);
-      setMsg("Saved.");
+      // People not in incentive, and groups without individual targets (Store Manager, pool only), have no targets.
+      const own = draft.group !== "none" && !noOwnTarget(draft.group);
+      const sales = own ? draft.sales : "";
+      const abv = own ? draft.abv : "";
+      if (sales !== was.sales || abv !== was.abv) await post({ action: "targets", month, rows: [{ userId: p.userId, sales, abv }] });
+      if (draft.salary !== was.salary) await post({ action: "salaries", rows: [{ userId: p.userId, salary: draft.salary }] });
+      if (draft.group !== was.group) await post({ action: "group", staffId: p.id, group: draft.group });
+      if (p.isPt && draft.store !== was.store) await post({ action: "pt_store", userId: p.userId, month, store: draft.store });
+      setEditId(null);
+      setDraft(null);
+      setMsg(`${p.name}: saved.`);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveStoreTarget(store: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const was = props.storeMonthTargets[store] ? String(props.storeMonthTargets[store]) : "";
+      if (storeDraft !== was) await post({ action: "store_target", month, store, target: storeDraft });
+      setEditStore(null);
+      setMsg(`${store}: store target saved.`);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -875,8 +891,8 @@ function TargetsCard(props: {
   }
 
   const storeTarget = (s: string) => props.storeMonthTargets[s] || settings.storeTargets[s] || 0;
-  const groupSelect = (p: Person) => (
-    <select className={`${input} py-1`} value={rows[p.userId]?.group ?? p.group} onChange={(e) => setRow(p.userId, { group: e.target.value })}>
+  const groupSelect = () => (
+    <select className={`${input} py-1`} value={draft?.group ?? ""} onChange={(e) => set({ group: e.target.value })}>
       {groups.map((g) => (
         <option key={g.key} value={g.key}>
           {g.label}
@@ -884,11 +900,64 @@ function TargetsCard(props: {
       ))}
     </select>
   );
+  const transferLink = (
+    <a href="/staff/team" className="font-semibold text-[#6f69c9] underline">
+      Transfer
+    </a>
+  );
+  const rowButtons = (p: Person) =>
+    editId === p.userId ? (
+      <span className="flex justify-end gap-1.5">
+        <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy} onClick={() => saveRow(p)}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button className={`${sbtn} bg-white ring-1 ring-black/10`} disabled={busy} onClick={cancel}>
+          Cancel
+        </button>
+      </span>
+    ) : (
+      <button className={`${sbtn} bg-white ring-1 ring-black/10 hover:bg-black/5`} disabled={busy} onClick={() => startEdit(p)} aria-label={`Edit ${p.name}`}>
+        ✎ Edit
+      </button>
+    );
+
+  // Under the name: the person's store, and how it is changed.
+  const storeLine = (p: Person, editing: boolean) => {
+    if (p.isPt) {
+      return editing ? (
+        <span className="mt-1 block">
+          <select className={`${input} w-56 py-1 text-xs`} value={draft?.store ?? ""} onChange={(e) => set({ store: e.target.value })}>
+            <option value="">{p.soldMost ? `Where they sell most (${p.soldMost})` : "Where they sell most"}</option>
+            {props.stores.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <span className="mt-0.5 block text-[11px] text-black/45">Store from {monthLabel(month)} on.</span>
+        </span>
+      ) : (
+        <span className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Temporary{p.chosenStore ? "" : " · where they sell most"}</span>
+      );
+    }
+    if (isCorporate(p)) {
+      return (
+        <>
+          <span className="ml-1.5 rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold text-black/50">
+            {p.homeStore ?? "No store"}
+            {p.chosenStore ? ` · shares ${p.chosenStore} pool` : ""}
+          </span>
+          {editing && <span className="mt-1 block text-[11px] text-black/45">Store changes with a {transferLink}.</span>}
+        </>
+      );
+    }
+    return editing ? <span className="mt-1 block text-[11px] text-black/45">Store changes with a {transferLink}.</span> : null;
+  };
 
   return (
     <Card
       title={`Targets — ${monthLabel(month)}`}
-      intro="Individual targets are net sales with GST, after discounts and returns. The Store Manager is measured on the store target; groups set to “No target — pool only” (e.g. data entry) only share the store pool. The group decides which part of the store pool a person shares."
+      intro="Individual targets are net sales with GST, after discounts and returns. The Store Manager is measured on the store target; groups set to “No target — pool only” (e.g. data entry) only share the store pool. The group decides which part of the store pool a person shares. Press ✎ Edit on a person to change them. Permanent staff change store with a Transfer; temporary staff change store here."
       actions={
         <>
           <a href={`/staff/admin/performance?m=${shiftMonth(month, -1)}`} className={ghost}>
@@ -899,69 +968,76 @@ function TargetsCard(props: {
               {monthLabel(shiftMonth(month, 1)).split(" ")[0]} →
             </a>
           )}
-          {!editing && (
-            <button className={ghost} disabled={busy} onClick={copyLastMonth}>
-              Copy from {monthLabel(shiftMonth(month, -1)).split(" ")[0]}
-            </button>
-          )}
-          {!editing ? (
-            <button
-              className={primary}
-              onClick={() => {
-                setRows(startRows());
-                setStoreRows(startStores());
-                setEditing(true);
-                setMsg("");
-              }}
-            >
-              ✎ Edit targets
-            </button>
-          ) : (
-            <>
-              <button className={primary} disabled={busy} onClick={save}>
-                {busy ? "Saving…" : "Save"}
-              </button>
-              <button className={ghost} disabled={busy} onClick={() => setEditing(false)}>
-                Cancel
-              </button>
-            </>
-          )}
+          <button className={ghost} disabled={busy} onClick={copyLastMonth}>
+            Copy from {monthLabel(shiftMonth(month, -1)).split(" ")[0]}
+          </button>
         </>
       }
     >
       {error && <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      {msg && !editing && <p className="mb-3 rounded-xl bg-green-50 px-3 py-2 text-sm text-green-800">{msg}</p>}
+      {msg && <p className="mb-3 rounded-xl bg-green-50 px-3 py-2 text-sm text-green-800">{msg}</p>}
       <div className="space-y-6">
         {byStore.map(([store, list]) => (
           <div key={store}>
             <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <h3 className={`text-base font-bold ${store === "Choose a store" ? "text-amber-700" : ""}`}>{store}</h3>
-              {store === "Choose a store" && <span className="text-sm text-black/55">Corporate Office staff in an incentive group: choose the store whose pool they share.</span>}
+              <h3 className={`text-base font-bold ${store === NO_STORE ? "text-amber-700" : ""}`}>{store}</h3>
+              {store === NO_STORE && (
+                <span className="text-sm text-black/55">
+                  No sales this month and no store chosen. Temporary staff: choose their store with ✎ Edit. Permanent staff: use a {transferLink}.
+                </span>
+              )}
               {props.stores.includes(store) && (
-                <span className="text-sm text-black/60">
-                  Store target:{" "}
-                  {editing ? (
-                    <input
-                      className={`${input} inline-block w-36 py-1`}
-                      inputMode="numeric"
-                      placeholder={settings.storeTargets[store] ? String(settings.storeTargets[store]) : "Default"}
-                      value={storeRows[store] ?? ""}
-                      onChange={(e) => setStoreRows({ ...storeRows, [store]: e.target.value.replace(/[^\d]/g, "") })}
-                    />
+                <span className="flex flex-wrap items-center gap-2 text-sm text-black/60">
+                  Store target:
+                  {editStore === store ? (
+                    <>
+                      <input
+                        className={`${input} inline-block w-36 py-1`}
+                        inputMode="numeric"
+                        autoFocus
+                        placeholder={settings.storeTargets[store] ? String(settings.storeTargets[store]) : "Default"}
+                        value={storeDraft}
+                        onChange={(e) => setStoreDraft(e.target.value.replace(/[^\d]/g, ""))}
+                      />
+                      <button className={`${sbtn} bg-[#8883d7] text-white`} disabled={busy} onClick={() => saveStoreTarget(store)}>
+                        {busy ? "Saving…" : "Save"}
+                      </button>
+                      <button className={`${sbtn} bg-white ring-1 ring-black/10`} disabled={busy} onClick={cancel}>
+                        Cancel
+                      </button>
+                      <span className="text-xs text-black/45">Empty = the usual store target{settings.storeTargets[store] ? ` (${rupees(settings.storeTargets[store])})` : ""}.</span>
+                    </>
                   ) : (
-                    <b className="text-black">{storeTarget(store) ? rupees(storeTarget(store)) : "not set"}</b>
+                    <>
+                      <b className="text-black">{storeTarget(store) ? rupees(storeTarget(store)) : "not set"}</b>
+                      {props.storeMonthTargets[store] ? <span className="text-xs">(this month only)</span> : null}
+                      <button
+                        className={`${sbtn} bg-white ring-1 ring-black/10 hover:bg-black/5`}
+                        disabled={busy}
+                        onClick={() => {
+                          setEditId(null);
+                          setDraft(null);
+                          setEditStore(store);
+                          setStoreDraft(props.storeMonthTargets[store] ? String(props.storeMonthTargets[store]) : "");
+                          setError("");
+                          setMsg("");
+                        }}
+                      >
+                        ✎ Edit
+                      </button>
+                    </>
                   )}
-                  {!editing && props.storeMonthTargets[store] ? <span className="ml-1 text-xs">(this month only)</span> : null}
                 </span>
               )}
             </div>
             <div className="-mx-2 overflow-x-auto">
-              <table className="w-full min-w-[740px] table-fixed text-sm">
+              <table className="w-full min-w-[860px] table-fixed text-sm">
                 <colgroup>
                   <col />
-                  <col className="w-56" />
-                  <col className="w-40" />
+                  <col className="w-52" />
                   <col className="w-36" />
+                  <col className="w-32" />
+                  <col className="w-32" />
                   <col className="w-36" />
                 </colgroup>
                 <thead>
@@ -971,38 +1047,28 @@ function TargetsCard(props: {
                     <th className="px-2 py-2 text-right">Sales target</th>
                     <th className="px-2 py-2 text-right">ABV target</th>
                     <th className="px-2 py-2 text-right" title="Only management sees salaries">Salary / month</th>
+                    <th className="px-2 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((p) => {
-                    const r = rows[p.userId];
+                    const editing = editId === p.userId && !!draft;
                     const t = props.targets[p.userId];
+                    const g = groupNow(p);
                     return (
-                      <tr key={p.id} className="border-t border-black/5 align-top">
+                      <tr key={p.id} className={`border-t border-black/5 align-top ${editing ? "bg-[#8883d7]/5" : ""}`}>
                         <td className="px-2 py-2">
                           <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
-                          {isCorporate(p) &&
-                            (editing ? (
-                              <select className={`${input} mt-1 w-48 py-1 text-xs`} value={r?.store ?? ""} onChange={(e) => setRow(p.userId, { store: e.target.value })}>
-                                <option value="">{p.store && props.stores.includes(p.store) ? `Where they sell most (${p.store})` : "Where they sell most"}</option>
-                                {props.stores.map((s) => (
-                                  <option key={s} value={s}>
-                                    {s}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className="ml-1.5 rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold text-black/50">{p.homeStore ?? "No store"}</span>
-                            ))}
+                          {storeLine(p, editing)}
                         </td>
-                        <td className="px-2 py-2">
-                          {editing ? groupSelect(p) : <span>{groupName(p.group, settings.groupLabels)}</span>}
-                        </td>
+                        <td className="px-2 py-2">{editing ? groupSelect() : <span>{groupName(p.group, settings.groupLabels)}</span>}</td>
                         <td className="px-2 py-2 text-right">
-                          {noOwnTarget(groupOf(p)) ? (
-                            <span className="text-xs text-black/45">{settings.noTargetGroups.includes(groupOf(p)) ? "Store target" : "No target — pool only"}</span>
+                          {g === "none" ? (
+                            <span className="text-xs text-black/45">Not in incentive</span>
+                          ) : noOwnTarget(g) ? (
+                            <span className="text-xs text-black/45">{settings.noTargetGroups.includes(g) ? "Store target" : "No target — pool only"}</span>
                           ) : editing ? (
-                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.sales ?? ""} onChange={(e) => setRow(p.userId, { sales: e.target.value.replace(/[^\d]/g, "") })} />
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={draft?.sales ?? ""} onChange={(e) => set({ sales: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.sales ? (
                             <b>{rupees(t.sales)}</b>
                           ) : (
@@ -1010,10 +1076,10 @@ function TargetsCard(props: {
                           )}
                         </td>
                         <td className="px-2 py-2 text-right">
-                          {noOwnTarget(groupOf(p)) ? (
+                          {g === "none" || noOwnTarget(g) ? (
                             <span className="text-xs text-black/30">—</span>
                           ) : editing ? (
-                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.abv ?? ""} onChange={(e) => setRow(p.userId, { abv: e.target.value.replace(/[^\d]/g, "") })} />
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={draft?.abv ?? ""} onChange={(e) => set({ abv: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : t?.abv ? (
                             rupees(t.abv)
                           ) : (
@@ -1022,13 +1088,14 @@ function TargetsCard(props: {
                         </td>
                         <td className="px-2 py-2 text-right">
                           {editing ? (
-                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={r?.salary ?? ""} onChange={(e) => setRow(p.userId, { salary: e.target.value.replace(/[^\d]/g, "") })} />
+                            <input className={`${input} py-1 text-right`} inputMode="numeric" placeholder="—" value={draft?.salary ?? ""} onChange={(e) => set({ salary: e.target.value.replace(/[^\d]/g, "") })} />
                           ) : props.salaries[p.userId] ? (
                             <span className="text-black/60">{rupees(props.salaries[p.userId])}</span>
                           ) : (
                             <span className="text-black/30">—</span>
                           )}
                         </td>
+                        <td className="px-2 py-2 text-right">{rowButtons(p)}</td>
                       </tr>
                     );
                   })}
@@ -1038,21 +1105,33 @@ function TargetsCard(props: {
           </div>
         ))}
 
-        {editing && notIn.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-base font-bold">{groupName("none", settings.groupLabels)}</h3>
-            <ul className="divide-y divide-black/5 rounded-2xl ring-1 ring-black/5">
-              {notIn.map((p) => (
-                <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm">
-                  <span>
-                    <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
-                    <span className="ml-1.5 text-xs text-black/45">{p.homeStore ?? ""}</span>
-                  </span>
-                  {editing && <span className="w-56">{groupSelect(p)}</span>}
-                </li>
-              ))}
+        {notIn.length > 0 && (
+          <details className="rounded-2xl ring-1 ring-black/5" open={showNone} onToggle={(e) => setShowNone((e.target as HTMLDetailsElement).open)}>
+            <summary className="cursor-pointer px-3 py-2.5 text-base font-bold">
+              {groupName("none", settings.groupLabels)} <span className="text-sm font-normal text-black/50">({notIn.length}) — ✎ Edit to put someone in a group</span>
+            </summary>
+            <ul className="divide-y divide-black/5 border-t border-black/5">
+              {notIn.map((p) => {
+                const editing = editId === p.userId && !!draft;
+                return (
+                  <li key={p.id} className={`flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm ${editing ? "bg-[#8883d7]/5" : ""}`}>
+                    <span>
+                      <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
+                      {p.isPt ? (
+                        <span className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Temporary</span>
+                      ) : (
+                        <span className="ml-1.5 text-xs text-black/45">{p.homeStore ?? ""}</span>
+                      )}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {editing && <span className="w-56">{groupSelect()}</span>}
+                      {rowButtons(p)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
-          </div>
+          </details>
         )}
       </div>
     </Card>

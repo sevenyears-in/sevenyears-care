@@ -8,7 +8,7 @@ import { todayISO } from "@/lib/helpers";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
 import { assignPtCodesForSavedBills } from "@/lib/sales-sync";
 import { loadSalaries, loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
-import { isMonth, monthRange } from "@/lib/performance-rules";
+import { isMonth, monthRange, ptStoreIn } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
 import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
@@ -55,12 +55,16 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
     loadIncentiveRules(),
   ]);
 
-  // PT staff: their store is where they sold most this month.
+  // Temporary (PT) staff: the store chosen for this month in Targets, else where they sold most.
   const ptStore = new Map<string, string>();
   for (const s of report?.stores ?? []) for (const p of s.people) if (p.isPt) ptStore.set(p.userId, s.store);
   const ptPeople = Object.entries(settings.ptPeople)
     .sort(([a], [b]) => Number(a.slice(2)) - Number(b.slice(2)))
-    .map(([code, p]) => ({ id: code, userId: code, name: p.name, store: ptStore.get(code) ?? null, homeStore: ptStore.get(code) ?? null, chosenStore: null, group: p.group ?? "sales", isPt: true }));
+    .map(([code, p]) => {
+      const chosen = ptStoreIn(p, month);
+      const store = chosen ?? ptStore.get(code) ?? null;
+      return { id: code, userId: code, name: p.name, store, homeStore: store, chosenStore: chosen, soldMost: chosen ? null : ptStore.get(code) ?? null, group: p.group ?? "sales", isPt: true };
+    });
 
   const stores = [
     ...new Set([
@@ -96,7 +100,7 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
           ...people.map((p) => {
             const chosen = settings.incentiveStores[p.userId] ?? null;
             const sold = (report?.stores ?? []).find((s) => s.people.some((x) => x.userId === p.userId))?.store ?? null;
-            return { id: p.id, userId: p.userId, name: p.name, store: chosen ?? (p.store && p.store !== "CORPORATE OFFICE" ? p.store : sold), homeStore: p.store, chosenStore: chosen, group: p.group, isPt: false };
+            return { id: p.id, userId: p.userId, name: p.name, store: chosen ?? (p.store && p.store !== "CORPORATE OFFICE" ? p.store : sold), homeStore: p.store, chosenStore: chosen, soldMost: null, group: p.group, isPt: false };
           }),
           ...ptPeople,
         ]}

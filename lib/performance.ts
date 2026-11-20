@@ -12,7 +12,7 @@ import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
-import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, ptStoreIn, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
   abvAmount,
   inForce,
@@ -742,6 +742,10 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
       .filter(([g, share]) => g !== "sales" && Number(share) > 0)
       .map(([g]) => g)
   );
+  const ptChosen = (code: string) => {
+    const c = ptStoreIn(settings.ptPeople[code], month);
+    return c && storeNames.has(c) ? c : null;
+  };
   const everyStore = (s: StaffRow) => homeStore(s) === CORPORATE_OFFICE && poolGroups.has(s.group);
 
   for (const store of [...storeNames].sort()) {
@@ -777,8 +781,18 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
       const s = staffById.get(id);
       if (s && (s.group === "none" || (homeStore(s) && homeStore(s) !== store && storeNames.has(homeStore(s) as string)))) continue;
       if (!s && !isPtCode(id)) continue; // unknown codes are listed for linking instead
+      // Temporary (daily-wages) staff: the store chosen in Settings → Targets, else where they sold most.
+      const chosen = !s ? ptChosen(id) : null;
+      if (chosen) {
+        if (chosen === store) members.set(id, null);
+        continue;
+      }
       const mainStore = [...a.stores.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
       if (mainStore === store) members.set(id, s ?? null);
+    }
+    // A temporary salesperson put in this store is listed even before their first bill.
+    for (const code of Object.keys(settings.ptPeople)) {
+      if (!members.has(code) && ptChosen(code) === store && groupOf(code) !== "none") members.set(code, null);
     }
 
     const people: PersonReport[] = [];

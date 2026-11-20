@@ -402,6 +402,29 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
       return NextResponse.json({ ok: true });
     }
 
+    case "pt_store": {
+      // Temporary (daily-wages) staff: their store from this month on. Empty = where they sell most.
+      const code = String(body.userId ?? "").trim();
+      if (!isPtCode(code)) return bad("Only temporary staff change store here. Others change store with a Transfer.");
+      if (!isMonth(body.month)) return bad("Choose a month.");
+      const store = String(body.store ?? "").trim().toUpperCase();
+      const current = await loadPerformanceSettings();
+      if (!current.ptPeople[code]) return bad("Person not found.");
+      const people = { ...current.ptPeople };
+      const stores = { ...(people[code].stores ?? {}) };
+      // A choice made for a month replaces later choices too, so it holds until changed again.
+      for (const m of Object.keys(stores)) if (m >= body.month) delete stores[m];
+      if (store) stores[body.month] = store;
+      else {
+        // "Where they sell most" from this month on, unless an earlier month has a store.
+        const earlier = Object.keys(stores).filter((m) => m < (body.month as string));
+        if (earlier.length) stores[body.month] = "";
+      }
+      people[code] = { ...people[code], stores };
+      await savePerformanceSettings({ ptPeople: people });
+      return NextResponse.json({ ok: true });
+    }
+
     case "rule_save": {
       // Add a new incentive, or change one. A change with a date after the start of the current
       // version ends that version the day before and starts a new one (history stays as it was).
