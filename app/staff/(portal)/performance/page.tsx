@@ -237,6 +237,16 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     return `Moved stores this month. This page shows ${here} (target split by days).${there ? ` Also: ${there}.` : ""}`;
   })();
 
+  // Corporate Office staff of a pool group (e.g. the Visual Merchandiser) are in every store's pool.
+  const allStoresNote = (() => {
+    if (!found || found.person.period) return null;
+    const entries = report.stores.flatMap((s) => s.people.filter((x) => x.userId === wanted && !x.period).map((x) => ({ store: s.store, p: x })));
+    if (entries.length < 2) return null;
+    const money = (v: number) => `₹${Math.round(v).toLocaleString("en-IN")}`;
+    const sum = entries.reduce((t, e) => t + e.p.total, 0);
+    return `Store pool share from every store: ${entries.map((e) => `${e.store} ${money(e.p.total)}`).join(" · ")} — total ${money(sum)}. This page shows ${found.store.store}.`;
+  })();
+
   const header = (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -435,6 +445,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       {wanted === me && stockBar(found.store.store)}
       {wanted === me && creStore ? await walkinBox(creStore) : null}
       {movedNote && <p className="rounded-2xl bg-[#8883d7]/10 p-3 text-sm text-[#3d3a7a]">{movedNote}</p>}
+      {allStoresNote && <p className="rounded-2xl bg-[#8883d7]/10 p-3 text-sm text-[#3d3a7a]">{allStoresNote}</p>}
       <PersonView p={found.person} store={found.store} detail={detail} threshold={report.settings.highDiscountPct} rules={report.rules} labels={labels} />
       <PeakLean
         title="Your peak and lean times"

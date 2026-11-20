@@ -735,6 +735,12 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
   for (const s of [...storeNames]) if (excluded.has(s) || s === CORPORATE_OFFICE) storeNames.delete(s);
 
   const stores: StoreReport[] = [];
+  const poolGroups = new Set(
+    Object.entries(poolRule?.split ?? {})
+      .filter(([g, share]) => g !== "sales" && Number(share) > 0)
+      .map(([g]) => g)
+  );
+  const everyStore = (s: StaffRow) => homeStore(s) === CORPORATE_OFFICE && poolGroups.has(s.group);
 
   for (const store of [...storeNames].sort()) {
     const bills = invoices.filter((b) => b.store === store);
@@ -753,6 +759,12 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     const members = new Map<string, StaffRow | null>();
     for (const s of staff) {
       if (s.group === "none") continue;
+      // Corporate Office staff of a pool group (e.g. the Visual Merchandiser) share that group's
+      // part of every store's pool, including stores added later.
+      if (everyStore(s)) {
+        members.set(`${s.userId}@${store}`, s);
+        continue;
+      }
       const ps = periodsOf.get(s.userId);
       if (ps) {
         if (ps.some((p) => p.store === store)) members.set(`${s.userId}@${store}`, s);
