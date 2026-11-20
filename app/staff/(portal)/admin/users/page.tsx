@@ -55,6 +55,8 @@ export default function StaffUsersPage() {
   const [email, setEmail] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [storeFilter, setStoreFilter] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch("/api/staff/admin/users");
@@ -134,6 +136,16 @@ export default function StaffUsersPage() {
     patch(user.id, { newPassword }, `Password changed for ${user.user_id}. They have been logged out.`);
   };
 
+
+  // Search: name, User ID, role (also custom role names), store, email, WhatsApp.
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = users.filter((u) => {
+    if (storeFilter && (u.store_name ?? "") !== storeFilter) return false;
+    if (!words.length || u.id === editing) return true;
+    const custom = u.custom_role_id ? customRoles.find((c) => c.id === u.custom_role_id)?.name : "";
+    const text = [u.full_name, u.user_id, ROLE_LABELS[u.role], custom, u.store_name, u.email, u.whatsapp_number].filter(Boolean).join(" ").toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
   return (
     <div className="space-y-6">
       <div>
@@ -252,6 +264,28 @@ export default function StaffUsersPage() {
         <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-800">{notice}</div>
       )}
 
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-white p-3 soft-card ring-1 ring-black/5">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search name, User ID, role, email or phone"
+          className={`${inputClass} min-w-[16rem] flex-1`}
+          aria-label="Search staff"
+        />
+        <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)} className={`${inputClass} w-auto`} aria-label="Store">
+          <option value="">All stores</option>
+          {[...new Set(users.map((u) => u.store_name ?? "").filter(Boolean))].sort().map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <span className="text-sm text-black/55">
+          {shown.length} of {users.length}
+        </span>
+      </div>
+
       <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
         {loading ? (
           <p className="p-5 text-sm text-black/60">Loading...</p>
@@ -269,7 +303,14 @@ export default function StaffUsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5">
-                {users.map((u) => {
+                {shown.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-black/50">
+                      No staff match this search.
+                    </td>
+                  </tr>
+                )}
+                {shown.map((u) => {
                   const self = u.id === currentUserId;
                   const locked = !isSuper && !self && PROTECTED.includes(u.role);
                   if (editing === u.id)
