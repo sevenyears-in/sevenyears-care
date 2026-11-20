@@ -17,7 +17,7 @@
 import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { istNow } from "@/lib/business-day";
-import { attendanceCode, attendanceSettings } from "@/lib/attendance";
+import { attendanceCode, attendanceSettings, machineEmployees } from "@/lib/attendance";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { timeToMinutes } from "@/lib/performance-rules";
 import { CORPORATE_OFFICE } from "@/lib/stores";
@@ -239,7 +239,7 @@ async function backfillStore(store: string, devices: Record<string, string>, day
 // ------------------------------------------------------------------
 
 const OC_COLS =
-  "day, store, opened_at, closed_at, first_punch, last_punch, opened_by_name, open_sop, open_approved_by, open_approval_note, closed_by_name, close_sop, close_approved_by, close_approval_note";
+  "day, store, opened_at, closed_at, first_punch, last_punch, opened_by, opened_by_name, open_sop, open_approved_by, open_approval_note, closed_by, closed_by_name, close_sop, close_approved_by, close_approval_note";
 type OcRow = Record<string, string | null>;
 const toOpenClose = (d: OcRow): OpenClose => ({
   day: String(d.day),
@@ -256,16 +256,42 @@ const toOpenClose = (d: OcRow): OpenClose => ({
   closeApproval: d.close_approved_by ? `${d.close_approved_by}${d.close_approval_note ? ` — ${d.close_approval_note}` : ""}` : null,
 });
 
+/**
+ * Names by employee code: staff accounts first, then the eTimeTrackLite employee list. Used so a
+ * person shows by name, also when the opening / closing was saved before they had an account.
+ */
+async function namesByCode(): Promise<Map<string, string>> {
+  const [{ data }, machine] = await Promise.all([
+    supabaseAdmin.from("staff_users").select("user_id, full_name"),
+    machineEmployees().catch(() => ({ list: [] as { code: string; name: string }[] })),
+  ]);
+  const out = new Map<string, string>();
+  for (const e of machine.list) if (e.name) out.set(attendanceCode(e.code), e.name);
+  for (const s of (data ?? []) as { user_id: string; full_name: string | null }[]) if (s.full_name) out.set(attendanceCode(s.user_id), s.full_name);
+  return out;
+}
+
+/** A saved "User ID 1005" becomes the person's name. */
+function withNames(rows: OcRow[], names: Map<string, string>): OcRow[] {
+  const fix = (saved: string | null, code: string | null) => {
+    if (saved && !/^User ID /i.test(saved)) return saved;
+    const n = code ? names.get(attendanceCode(code)) : undefined;
+    return n ?? saved;
+  };
+  return rows.map((r) => ({ ...r, opened_by_name: fix(r.opened_by_name, r.opened_by), closed_by_name: fix(r.closed_by_name, r.closed_by) }));
+}
+
 export async function loadOpenClose(store: string, day: string): Promise<OpenClose | null> {
   const { data } = await supabaseAdmin.from("store_open_close").select(OC_COLS).eq("store", store).eq("day", day).maybeSingle();
-  return data ? toOpenClose(data as OcRow) : null;
+  if (!data) return null;
+  return toOpenClose(withNames([data as OcRow], await namesByCode())[0]);
 }
 
 /** Openings and closings of a store, newest first. */
 export async function loadOpenCloseHistory(store: string, days = 45): Promise<OpenClose[]> {
   const since = shiftDay(istNow().date, -days);
   const { data } = await supabaseAdmin.from("store_open_close").select(OC_COLS).eq("store", store).gte("day", since).order("day", { ascending: false });
-  return ((data ?? []) as OcRow[]).map(toOpenClose);
+  return withNames((data ?? []) as OcRow[], await namesByCode()).map(toOpenClose);
 }
 
 /** Director / Super Admin approves an SOP violation (opening or closing) with a note. */
@@ -289,10 +315,14 @@ export async function approveSop(day: string, store: string, kind: "open" | "clo
 type Person = { id: string; name: string; group: string; store: string | null };
 type Punch = { code: string; at: number };
 
+/** Names from eTimeTrackLite for people without a staff account (refreshed with staffByCode). */
+let machineNames = new Map<string, string>();
+
 async function staffByCode(): Promise<Map<string, Person>> {
   const { loadStaffForPerformance } = await import("@/lib/performance");
   const s = await loadPerformanceSettings();
-  const list = await loadStaffForPerformance(s.asmIsFm);
+  const [list, machine] = await Promise.all([loadStaffForPerformance(s.asmIsFm), machineEmployees().catch(() => ({ list: [] as { code: string; name: string }[] }))]);
+  machineNames = new Map(machine.list.filter((e) => e.name).map((e) => [attendanceCode(e.code), e.name]));
   return new Map(list.map((p) => [p.userId, { id: p.id, name: p.name, group: p.group, store: p.store }]));
 }
 
@@ -306,7 +336,7 @@ function whoAndSop(list: Punch[], store: string, staff: Map<string, Person>, kin
   };
   const label = (code: string) => {
     const p = staff.get(code);
-    return p ? (isLead(code) ? `${p.name} (${roleShort(p)})` : p.name) : `User ID ${code}`;
+    return p ? (isLead(code) ? `${p.name} (${roleShort(p)})` : p.name) : machineNames.get(code) ?? `User ID ${code}`;
   };
   const edge = kind === "open" ? list[0] : list[list.length - 1];
   if (isLead(edge.code)) return { code: edge.code, name: label(edge.code), sop: "ok" as Sop, note: null as string | null };
