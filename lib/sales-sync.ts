@@ -39,6 +39,39 @@ const upperLinks = (links: Record<string, string>) => Object.fromEntries(Object.
 const cleanName = (v: unknown) => str(v).replace(/\s+/g, " ").toUpperCase();
 const likeExact = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+/** Bills of this name from a day on (and their returns) get a new owner; earlier bills keep theirs. */
+export async function setSalespersonOwnerFrom(name: string, owner: string, from: string) {
+  const pattern = likeExact(name);
+  const bills = await fetchAll<{ invoice_id: string }>((a, b) =>
+    supabaseAdmin.from("sales_invoices").select("invoice_id").ilike("salesperson", pattern).gte("invoice_date", from).order("invoice_id").range(a, b)
+  );
+  const list = bills.map((b) => b.invoice_id as string);
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200);
+    await supabaseAdmin.from("sales_invoices").update({ staff_user_id: owner }).in("invoice_id", part);
+    await supabaseAdmin.from("sales_invoice_lines").update({ staff_user_id: owner }).in("invoice_id", part);
+    const { data: rets } = await supabaseAdmin.from("sales_returns").update({ staff_user_id: owner }).in("invoice_id", part).select("creditnote_id");
+    const cn = (rets ?? []).map((r) => r.creditnote_id as string);
+    if (cn.length) await supabaseAdmin.from("sales_return_lines").update({ staff_user_id: owner }).in("creditnote_id", cn);
+  }
+  return list.length;
+}
+
+/**
+ * The owner of a bill on its date: a part-time person who became permanent from a day keeps
+ * the bills before that day under their part-time code.
+ */
+async function ownerOnDate(owner: string | null, salesperson: string, date: string): Promise<string | null> {
+  if (!owner || !date) return owner;
+  const s = await loadPerformanceSettings();
+  const name = cleanName(salesperson);
+  for (const [code, p] of Object.entries(s.ptPeople)) {
+    const m = p.movedTo;
+    if (m && m.userId === owner && date < m.from && m.names.includes(name)) return code;
+  }
+  return owner;
+}
+
 /** Give every saved bill (and its returns) of a salesperson name a new owner: a User ID or a PT code. */
 export async function setSalespersonOwner(name: string, owner: string | null) {
   const pattern = likeExact(name);
@@ -187,9 +220,9 @@ export async function saveInvoice(listRow: Obj, links: SyncLinks) {
   const inclusive = d.is_inclusive_tax === true;
 
   const salesperson = (str(d.salesperson_name) || str(listRow.salesperson_name)).replace(/\s+/g, " ");
-  const staffUserId = staffIdFromSalesperson(salesperson, links);
   const store = storeKey(d.location_name || d.branch_name || listRow.location_name);
   const date = str(d.date || listRow.date);
+  const staffUserId = await ownerOnDate(staffIdFromSalesperson(salesperson, links), salesperson, date);
   const invoiceId = str(d.invoice_id || listRow.invoice_id);
 
   let gross = 0;
@@ -311,7 +344,7 @@ export async function saveCreditNote(listRow: Obj, links: SyncLinks) {
       }
     }
   }
-  if (!staffUserId) staffUserId = staffIdFromSalesperson(salesperson, links);
+  if (!staffUserId) staffUserId = await ownerOnDate(staffIdFromSalesperson(salesperson, links), salesperson, date);
   if (!store) store = storeKey(lines.map((l) => str(l.location_name) || str(l.warehouse_name)).find(Boolean));
 
   const rows = lines.map((l) => {

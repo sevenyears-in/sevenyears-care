@@ -3,7 +3,7 @@ import { hashPassword, normaliseUserId, requireStaff, userIdProblem } from "@/li
 import { randomBytes } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { zohoConfigured, zohoRead } from "@/lib/zoho";
-import { setSalespersonOwner, staffIdFromSalesperson, syncSalesDayWithRetry, syncStatus } from "@/lib/sales-sync";
+import { setSalespersonOwner, setSalespersonOwnerFrom, staffIdFromSalesperson, syncSalesDayWithRetry, syncStatus } from "@/lib/sales-sync";
 import { changedKeys, logAudit } from "@/lib/audit";
 import type { StaffUser } from "@/lib/auth";
 import { appendSyncLog } from "@/lib/sync-log";
@@ -413,23 +413,35 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
       const current = await loadPerformanceSettings();
       const pt = current.ptPeople[code];
       if (!pt) return bad("Person not found.");
+      // From a joining day: bills (and targets of months) before it stay part-time; else everything moves.
+      const from = typeof body.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.from) ? body.from : null;
+      if (from && from > todayISO()) return bad("The joining day can't be in the future.");
       const links = { ...current.salespersonLinks };
       const names = new Set<string>([pt.name.toUpperCase()]);
       for (const [name, v] of Object.entries(links)) if (v === code) names.add(name.toUpperCase());
       for (const name of names) links[name] = userId;
       const people = { ...current.ptPeople };
-      delete people[code];
+      if (from) {
+        const lastDay = new Date(Date.parse(`${from}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+        people[code] = { ...pt, leftOn: lastDay, movedTo: { userId, from, names: [...names] } };
+      } else delete people[code];
       await savePerformanceSettings({ salespersonLinks: links, ptPeople: people });
-      for (const name of names) await setSalespersonOwner(name, userId);
-      // Monthly targets: kept where the staff member has none for that month.
+      for (const name of names) {
+        if (from) await setSalespersonOwnerFrom(name, userId, from);
+        else await setSalespersonOwner(name, userId);
+      }
+      // Monthly targets: kept where the staff member has none for that month (from the joining month on).
       const { data: tgts } = await supabaseAdmin.from("staff_sales_targets").select("month").eq("user_id", userId);
       const have = new Set(((tgts ?? []) as { month: string }[]).map((t) => t.month));
       const { data: ptTargets } = await supabaseAdmin.from("staff_sales_targets").select("*").eq("user_id", code);
+      const fromMonth = from ? from.slice(0, 7) : "";
       for (const t of (ptTargets ?? []) as Record<string, unknown>[]) {
-        if (!have.has(String(t.month))) await supabaseAdmin.from("staff_sales_targets").insert({ ...t, user_id: userId, updated_at: new Date().toISOString(), updated_by: staff.fullName });
+        const month = String(t.month);
+        if (month < fromMonth) continue;
+        if (!have.has(month)) await supabaseAdmin.from("staff_sales_targets").insert({ ...t, user_id: userId, updated_at: new Date().toISOString(), updated_by: staff.fullName });
+        await supabaseAdmin.from("staff_sales_targets").delete().eq("user_id", code).eq("month", month);
       }
-      await supabaseAdmin.from("staff_sales_targets").delete().eq("user_id", code);
-      await logAudit(staff, "part_time", "to_staff", { code, names: [...names] }, { userId }).catch(() => undefined);
+      await logAudit(staff, "part_time", "to_staff", { code, names: [...names] }, { userId, from }).catch(() => undefined);
       return NextResponse.json({ ok: true, names: [...names] });
     }
 

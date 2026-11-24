@@ -15,6 +15,11 @@ export type PtPerson = {
   stores?: Record<string, string>;
   /** Last working day (YYYY-MM-DD) once they have left; they show again if they bill after it. */
   leftOn?: string;
+  /**
+   * Became a permanent staff member: bills from `from` on count for `userId`; earlier bills of
+   * these Zoho POS names stay with this part-time code.
+   */
+  movedTo?: { userId: string; from: string; names: string[] };
 };
 
 /** Left before this month started (they may still come back by billing again). */

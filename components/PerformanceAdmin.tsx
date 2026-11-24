@@ -761,6 +761,8 @@ function SyncCard({ month, today, settings, billsCopied, lastBillDate }: { month
 // Targets
 // ------------------------------------------------------------------
 
+const formatDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
 function TargetsCard(props: {
   month: string;
   thisMonth: string;
@@ -774,7 +776,7 @@ function TargetsCard(props: {
   const router = useRouter();
   const { month, settings } = props;
   const groups = groupList(settings);
-  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string; staffId: string };
+  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string; staffId: string; staffFrom: string };
   // One row (or one store target) is changed at a time, each with its own Save.
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RowState | null>(null);
@@ -795,6 +797,7 @@ function TargetsCard(props: {
     store: p.chosenStore ?? "",
     salary: props.salaries[p.userId] ? String(props.salaries[p.userId]) : "",
     staffId: "",
+    staffFrom: "",
   });
   const groupNow = (p: Person) => (editId === p.userId && draft ? draft.group : p.group);
   const set = (change: Partial<RowState>) => setDraft((d) => (d ? { ...d, ...change } : d));
@@ -841,11 +844,15 @@ function TargetsCard(props: {
     // A temporary code that is really a permanent staff member: everything moves to their User ID.
     if (p.isPt && draft.staffId) {
       const who = props.people.find((x) => x.userId === draft.staffId);
-      if (!confirm(`${p.name} (${p.userId}) is ${who?.name ?? draft.staffId} (${draft.staffId})?\n\nTheir Zoho POS name, bills, returns and targets move to ${draft.staffId}, and ${p.userId} is removed.`)) return;
+      const from = draft.staffFrom;
+      const what = from
+        ? `Bills from ${formatDay(from)} on (and targets from ${monthLabel(from.slice(0, 7))}) count for ${draft.staffId}. Earlier bills stay with ${p.userId} as part-time, and ${p.userId} is marked as left the day before.`
+        : `Their Zoho POS name, all bills, returns and targets move to ${draft.staffId}, and ${p.userId} is removed.`;
+      if (!confirm(`${p.name} (${p.userId}) is ${who?.name ?? draft.staffId} (${draft.staffId})?\n\n${what}`)) return;
       setBusy(true);
       setError("");
       try {
-        await post({ action: "pt_to_staff", code: p.userId, userId: draft.staffId });
+        await post({ action: "pt_to_staff", code: p.userId, userId: draft.staffId, from: from || null });
         setEditId(null);
         setDraft(null);
         setMsg(`${p.name}: now counted as ${who?.name ?? draft.staffId} (${draft.staffId}).`);
@@ -967,6 +974,24 @@ function TargetsCard(props: {
               ))}
           </select>
           <span className="mt-0.5 block text-[11px] text-black/45">Permanent staff with a User ID? Choose them: their bills and targets move there.</span>
+          {draft?.staffId && (
+            <span className="mt-2 block space-y-1 text-[11px] text-black/60">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={!draft.staffFrom} onChange={() => set({ staffFrom: "" })} /> All their bills (always permanent)
+              </label>
+              <label className="flex flex-wrap items-center gap-1.5">
+                <input type="radio" checked={!!draft.staffFrom} onChange={() => set({ staffFrom: new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10) })} /> Permanent from
+                <input
+                  type="date"
+                  className={`${input} w-36 py-0.5 text-[11px]`}
+                  value={draft.staffFrom}
+                  max={new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10)}
+                  onChange={(e) => set({ staffFrom: e.target.value })}
+                />
+                <span className="w-full text-black/45">Earlier bills stay part-time.</span>
+              </label>
+            </span>
+          )}
         </span>
       ) : (
         <span className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Temporary{p.chosenStore ? "" : " · where they sell most"}</span>
