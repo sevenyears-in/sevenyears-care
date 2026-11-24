@@ -251,8 +251,10 @@ export default function RolesAccessPage() {
       {!config && !error && <div className="h-40 animate-pulse rounded-3xl bg-white" />}
 
       {config && (
-        <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
+        <div className="overflow-hidden rounded-3xl bg-white soft-card ring-1 ring-black/5">
+          {/* The colour strip stays across the whole card; only the table below scrolls sideways. */}
           <div className="h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
+          <div className="overflow-x-auto">
           <table className="w-full min-w-[1560px] table-fixed text-sm">
             <thead className="border-b border-black/5">
               <tr>
@@ -340,6 +342,7 @@ export default function RolesAccessPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
