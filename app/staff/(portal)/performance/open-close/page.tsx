@@ -8,6 +8,7 @@ import { clockIST, loadCamChecks, loadOpenCloseHistory, openCloseStores, punchMo
 import { ApproveSop } from "@/components/ApproveSop";
 import { CamCheck, type CamPhotoView } from "@/components/CamCheck";
 import { cctvSince, photosAtPunches } from "@/lib/cctv";
+import { loadKeyHolders } from "@/lib/store-keyholders";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Store opening & closing" };
@@ -85,6 +86,8 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
     const recent = at !== null && Date.now() - at < 10 * 60_000;
     return { photos: list, check: checks.get(day)?.[kind] ?? null, missing: at !== null && !list.length && !recent };
   };
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const allowed = (await loadKeyHolders().catch(() => [])).filter((k) => k.store === store && (!k.to || k.to >= today));
   const proxies = [...checks.values()].filter((c) => c.open?.verdict === "proxy" || c.close?.verdict === "proxy").length;
 
   return (
@@ -119,6 +122,22 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
         </p>
       )}
 
+      <p className="text-sm text-black/60">
+        Allowed to open and close: the Store Manager and ASM / Floor Manager
+        {allowed.length
+          ? `; also ${allowed
+              .map((k) => `${k.name} (${k.kinds.length === 2 ? "open & close" : k.kinds[0]}${k.from || k.to ? `, ${k.from ? formatDate(k.from) : "…"} – ${k.to ? formatDate(k.to) : "no end"}` : ""})`)
+              .join(", ")}`
+          : ""}
+        .{staff.role === "super_admin" ? (
+          <>
+            {" "}
+            <a href="/staff/admin/attendance" className="font-semibold text-[#6f69c9] underline">
+              Change
+            </a>
+          </>
+        ) : null}
+      </p>
       {proxies > 0 && (
         <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">⚠ {proxies} day(s) marked as a proxy punch from the camera photos.</p>
       )}

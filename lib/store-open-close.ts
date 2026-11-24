@@ -3,7 +3,8 @@
 // (opening time = first punch − 2 minutes); the last punch closes it. "Store Opened" and
 // "Store Closed" go to the store's Store Manager / ASM and management (app + phone).
 //
-// SOP: only the Store Manager or the ASM / Floor Manager of the store opens and closes it.
+// SOP: only the Store Manager or the ASM / Floor Manager of the store opens and closes it, or
+// someone the Super Admin allowed for that store (ongoing or for set dates; lib/store-keyholders).
 // Opening: the first punch is the opener; if it is someone else but the SM / ASM punches within
 // 60 seconds after it, the SM / ASM opened the store. Closing: the same with the last punch (an
 // SM / ASM punch within 60 seconds before it). Otherwise it is an SOP violation, which the
@@ -18,6 +19,7 @@ import { fetchAll } from "@/lib/fetch-all";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { istNow } from "@/lib/business-day";
 import { attendanceCode, attendanceSettings, machineEmployees } from "@/lib/attendance";
+import { keyHolderFor, loadKeyHolders, type KeyHolder } from "@/lib/store-keyholders";
 import { loadPerformanceSettings } from "@/lib/performance-settings";
 import { timeToMinutes } from "@/lib/performance-rules";
 import { CORPORATE_OFFICE } from "@/lib/stores";
@@ -204,8 +206,8 @@ async function backfillStore(store: string, devices: Record<string, string>, day
     const list: Punch[] = rows.map((p) => ({ code: attendanceCode(p.emp_code), at: Date.parse(p.punch_time) }));
     const first = rows[0].punch_time;
     const last = rows[rows.length - 1].punch_time;
-    const o = whoAndSop(list, store, staff, "open");
-    const c = whoAndSop(list, store, staff, "close");
+    const o = whoAndSop(list, store, staff, "open", day);
+    const c = whoAndSop(list, store, staff, "close", day);
     await supabaseAdmin.from("store_open_close").upsert(
       {
         day,
@@ -373,11 +375,18 @@ type Punch = { code: string; at: number };
 
 /** Names from eTimeTrackLite for people without a staff account (refreshed with staffByCode). */
 let machineNames = new Map<string, string>();
+/** People the Super Admin allowed to open / close a store (refreshed with staffByCode). */
+let keyHolders: KeyHolder[] = [];
 
 async function staffByCode(): Promise<Map<string, Person>> {
   const { loadStaffForPerformance } = await import("@/lib/performance");
   const s = await loadPerformanceSettings();
-  const [list, machine] = await Promise.all([loadStaffForPerformance(s.asmIsFm), machineEmployees().catch(() => ({ list: [] as { code: string; name: string }[] }))]);
+  const [list, machine, keys] = await Promise.all([
+    loadStaffForPerformance(s.asmIsFm),
+    machineEmployees().catch(() => ({ list: [] as { code: string; name: string }[] })),
+    loadKeyHolders().catch(() => [] as KeyHolder[]),
+  ]);
+  keyHolders = keys;
   machineNames = new Map(machine.list.filter((e) => e.name).map((e) => [attendanceCode(e.code), e.name]));
   return new Map(list.map((p) => [p.userId, { id: p.id, name: p.name, group: p.group, store: p.store }]));
 }
@@ -385,14 +394,19 @@ async function staffByCode(): Promise<Map<string, Person>> {
 const roleShort = (p: Person) => (p.group === "sm" ? "SM" : "ASM / FM");
 
 /** Opener (kind "open") or closer ("close") of a store-day, and whether it follows the SOP. */
-function whoAndSop(list: Punch[], store: string, staff: Map<string, Person>, kind: "open" | "close") {
-  const isLead = (code: string) => {
+function whoAndSop(list: Punch[], store: string, staff: Map<string, Person>, kind: "open" | "close", day: string) {
+  // The SM / ASM of the store, or someone the Super Admin allowed to open (close) it that day.
+  const lead = (code: string) => {
     const p = staff.get(code);
     return Boolean(p && (p.group === "sm" || p.group === "asm") && (!p.store || p.store === store));
   };
+  const allowed = (code: string) => keyHolderFor(keyHolders, store, day, kind, code);
+  const isLead = (code: string) => lead(code) || Boolean(allowed(code));
   const label = (code: string) => {
     const p = staff.get(code);
-    return p ? (isLead(code) ? `${p.name} (${roleShort(p)})` : p.name) : machineNames.get(code) ?? `User ID ${code}`;
+    const name = p?.name ?? machineNames.get(code) ?? `User ID ${code}`;
+    if (p && lead(code)) return `${name} (${roleShort(p)})`;
+    return allowed(code) ? `${name} (allowed)` : name;
   };
   const edge = kind === "open" ? list[0] : list[list.length - 1];
   if (isLead(edge.code)) return { code: edge.code, name: label(edge.code), sop: "ok" as Sop, note: null as string | null };
@@ -498,7 +512,7 @@ export async function openCloseTick(at = new Date()): Promise<string> {
           await supabaseAdmin.from("store_open_close").update({ first_punch: p.first, opened_at: new Date(firstMs - OPEN_EARLY_MIN * 60_000).toISOString(), updated_at: at.toISOString() }).eq("day", day).eq("store", store);
         }
         // Who opened (SOP). Kept up to date while punches arrive; an approval is never undone.
-        const opener = whoAndSop(p.list, store, staff, "open");
+        const opener = whoAndSop(p.list, store, staff, "open", day);
         if (row?.open_sop !== "approved" && (row?.opened_by !== opener.code || row?.open_sop !== opener.sop)) {
           await supabaseAdmin
             .from("store_open_close")
@@ -535,7 +549,7 @@ export async function openCloseTick(at = new Date()): Promise<string> {
           if (row && !row.closed_notified_at && row.last_punch !== p.last) await supabaseAdmin.from("store_open_close").update({ last_punch: p.last, updated_at: at.toISOString() }).eq("day", day).eq("store", store);
           continue;
         }
-        const closer = whoAndSop(p.list, store, staff, "close");
+        const closer = whoAndSop(p.list, store, staff, "close", day);
         const closerCols = row?.close_sop === "approved" ? {} : { closed_by: closer.code, closed_by_name: closer.name, close_sop: closer.sop, close_sop_note: closer.note };
         const closeBody = (time: string, updated = false) =>
           closer.sop === "violation"
@@ -596,11 +610,11 @@ async function fillPastSop(staff: Map<string, Person>, devices: Record<string, s
     if (!list.length) continue;
     const update: Record<string, unknown> = {};
     if (!r.opened_by && r.open_sop !== "approved") {
-      const o = whoAndSop(list, r.store, staff, "open");
+      const o = whoAndSop(list, r.store, staff, "open", r.day);
       Object.assign(update, { opened_by: o.code, opened_by_name: o.name, open_sop: o.sop, open_sop_note: o.note });
     }
     if (r.closed_at && !r.closed_by && r.close_sop !== "approved") {
-      const c = whoAndSop(list, r.store, staff, "close");
+      const c = whoAndSop(list, r.store, staff, "close", r.day);
       Object.assign(update, { closed_by: c.code, closed_by_name: c.name, close_sop: c.sop, close_sop_note: c.note });
     }
     if (Object.keys(update).length) {
