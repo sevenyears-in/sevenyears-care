@@ -16,7 +16,9 @@ export default function StoreKeyholders() {
   const [stores, setStores] = useState<string[]>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ store: "", code: "", open: true, close: true, dated: false, from: today(), to: "", note: "" });
+  const [form, setForm] = useState({ store: "", open: true, close: true, dated: false, from: today(), to: "", note: "" });
+  const [codes, setCodes] = useState<string[]>([]);
+  const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -50,7 +52,7 @@ export default function StoreKeyholders() {
     const ok = await post({
       action: "add",
       store: form.store,
-      code: form.code,
+      codes,
       kinds: [form.open && "open", form.close && "close"].filter(Boolean),
       from: form.dated ? form.from : null,
       to: form.dated ? form.to : null,
@@ -58,15 +60,20 @@ export default function StoreKeyholders() {
     });
     if (ok) {
       setAdding(false);
-      setForm({ ...form, code: "", note: "" });
+      setCodes([]);
+      setQ("");
+      setForm({ ...form, note: "" });
     }
   };
 
-  // Staff of the chosen store first.
-  const people = useMemo(
-    () => [...staff].sort((a, b) => Number(b.store?.toUpperCase() === form.store) - Number(a.store?.toUpperCase() === form.store) || a.name.localeCompare(b.name)),
-    [staff, form.store]
-  );
+  // Staff of the chosen store first; search by name, User ID or store.
+  const people = useMemo(() => {
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return [...staff]
+      .filter((p) => words.every((w) => `${p.name} ${p.code} ${p.store ?? ""}`.toLowerCase().includes(w)))
+      .sort((a, b) => Number(b.store?.toUpperCase() === form.store) - Number(a.store?.toUpperCase() === form.store) || a.name.localeCompare(b.name));
+  }, [staff, form.store, q]);
+  const toggle = (code: string) => setCodes((c) => (c.includes(code) ? c.filter((x) => x !== code) : [...c, code]));
   const t = today();
   const state = (k: KeyHolder) => (k.to && k.to < t ? "ended" : k.from && k.from > t ? "coming" : "active");
   const shown = (list ?? []).filter((k) => state(k) !== "ended");
@@ -148,14 +155,42 @@ export default function StoreKeyholders() {
                 </option>
               ))}
             </select>
-            <select className={`${inputClass} w-72`} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}>
-              <option value="">Person…</option>
+          </div>
+          <div className="rounded-2xl bg-white p-3 ring-1 ring-black/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <input className={`${inputClass} w-64`} placeholder="Search name, User ID or store" value={q} onChange={(e) => setQ(e.target.value)} />
+              <span className="text-sm text-black/60">
+                {codes.length} selected
+                {codes.length > 0 && (
+                  <button type="button" onClick={() => setCodes([])} className="ml-2 text-xs font-semibold underline">
+                    Clear
+                  </button>
+                )}
+              </span>
+            </div>
+            {codes.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {codes.map((c) => {
+                  const p = staff.find((x) => x.code === c);
+                  return (
+                    <button key={c} type="button" onClick={() => toggle(c)} className="rounded-full bg-[#8883d7]/15 px-2.5 py-1 text-xs font-semibold text-[#4c46a8]">
+                      {p?.name ?? c} ✕
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="mt-2 max-h-64 overflow-y-auto">
               {people.map((p) => (
-                <option key={p.code} value={p.code}>
-                  {p.name} ({p.code}){p.store ? ` · ${p.store}` : ""}
-                </option>
+                <label key={p.code} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm hover:bg-black/[0.03]">
+                  <input type="checkbox" checked={codes.includes(p.code)} onChange={() => toggle(p.code)} className="h-4 w-4" />
+                  <span className="font-semibold">{p.name}</span>
+                  <span className="text-xs text-black/40">{p.code}</span>
+                  {p.store && <span className={`ml-auto text-xs ${p.store.toUpperCase() === form.store ? "font-semibold text-[#4c46a8]" : "text-black/45"}`}>{p.store}</span>}
+                </label>
               ))}
-            </select>
+              {people.length === 0 && <p className="px-2 py-2 text-sm text-black/45">No one matches.</p>}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className="flex items-center gap-2">
@@ -184,13 +219,13 @@ export default function StoreKeyholders() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={busy || !form.store || !form.code || (!form.open && !form.close) || (form.dated && (!form.from || !form.to))}
+              disabled={busy || !form.store || !codes.length || (!form.open && !form.close) || (form.dated && (!form.from || !form.to))}
               onClick={add}
               className="rounded-xl bg-[#161616] px-5 py-2 text-sm font-bold text-white disabled:opacity-40"
             >
-              {busy ? "Saving…" : "Save"}
+              {busy ? "Saving…" : codes.length > 1 ? `Save for ${codes.length} people` : "Save"}
             </button>
-            <button type="button" onClick={() => setAdding(false)} className="rounded-xl border border-black/15 px-4 py-2 text-sm font-semibold">
+            <button type="button" onClick={() => { setAdding(false); setCodes([]); setQ(""); }} className="rounded-xl border border-black/15 px-4 py-2 text-sm font-semibold">
               Cancel
             </button>
           </div>

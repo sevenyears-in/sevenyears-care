@@ -40,18 +40,24 @@ export async function POST(request: Request) {
   }
   if (body.action !== "add") return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   const store = String(body.store ?? "").trim().toUpperCase();
-  const code = attendanceCode(body.code);
+  // One or more people (codes), each saved as its own permission.
+  const codes = [...new Set((Array.isArray(body.codes) ? body.codes : [body.code]).map((c) => attendanceCode(c)).filter(Boolean))];
   const kinds = (Array.isArray(body.kinds) ? body.kinds : []).filter((k): k is "open" | "close" => k === "open" || k === "close");
   const from = isDay(body.from) ? String(body.from) : null;
   const to = isDay(body.to) ? String(body.to) : null;
   if (!store) return NextResponse.json({ error: "Choose the store." }, { status: 400 });
-  if (!code) return NextResponse.json({ error: "Choose the person." }, { status: 400 });
+  if (!codes.length) return NextResponse.json({ error: "Choose at least one person." }, { status: 400 });
   if (!kinds.length) return NextResponse.json({ error: "Tick opening, closing or both." }, { status: 400 });
   if (from && to && to < from) return NextResponse.json({ error: "The To date is before the From date." }, { status: 400 });
   const { data: who } = await supabaseAdmin.from("staff_users").select("user_id, full_name").eq("is_active", true);
-  const person = ((who ?? []) as { user_id: string; full_name: string }[]).find((s) => attendanceCode(s.user_id) === code);
-  if (!person) return NextResponse.json({ error: `No active staff member has User ID ${code}.` }, { status: 400 });
-  const item = await addKeyHolder({ store, code, name: person.full_name, kinds, from, to, note: String(body.note ?? "").trim().slice(0, 200), by: auth.staff.fullName });
-  await logAudit(auth.staff, "store_keyholders", "add", null, item).catch(() => undefined);
-  return NextResponse.json({ ok: true });
+  const staff = (who ?? []) as { user_id: string; full_name: string }[];
+  const people = codes.map((code) => ({ code, person: staff.find((s) => attendanceCode(s.user_id) === code) }));
+  const missing = people.find((p) => !p.person);
+  if (missing) return NextResponse.json({ error: `No active staff member has User ID ${missing.code}.` }, { status: 400 });
+  const note = String(body.note ?? "").trim().slice(0, 200);
+  for (const p of people) {
+    const item = await addKeyHolder({ store, code: p.code, name: p.person!.full_name, kinds, from, to, note, by: auth.staff.fullName });
+    await logAudit(auth.staff, "store_keyholders", "add", null, item).catch(() => undefined);
+  }
+  return NextResponse.json({ ok: true, added: people.length });
 }
