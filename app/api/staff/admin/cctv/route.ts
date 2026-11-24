@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
-import { addLink, linkStatuses, removeLink, setLinkChannels } from "@/lib/cctv";
+import { addLink, cctvRequests, linkStatuses, removeLink, setLinkChannels } from "@/lib/cctv";
 import { logAudit } from "@/lib/audit";
 import { openCloseStores } from "@/lib/store-open-close";
 
@@ -10,8 +10,8 @@ import { openCloseStores } from "@/lib/store-open-close";
 export async function GET() {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const [links, stores] = await Promise.all([linkStatuses(), openCloseStores()]);
-  return NextResponse.json({ links, stores });
+  const [links, stores, requests] = await Promise.all([linkStatuses(), openCloseStores(), cctvRequests().catch(() => [])]);
+  return NextResponse.json({ links, stores, requests });
 }
 
 export async function POST(request: Request) {

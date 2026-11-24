@@ -86,6 +86,42 @@ export async function linkByKey(key: string): Promise<CctvLink | null> {
 }
 
 // ------------------------------------------------------------------
+// What the recorders send (last 40 calls, without photos), for Settings
+// ------------------------------------------------------------------
+
+const REQUESTS_KEY = "cctv_requests";
+export type CctvRequest = {
+  at: string;
+  method: string;
+  store: string | null;
+  key?: string;
+  contentType?: string;
+  length?: number | null;
+  userAgent?: string;
+  parts?: string[];
+  sample?: string;
+  saved?: number;
+  photo?: boolean;
+  error?: string;
+};
+
+export async function logCctvRequest(r: Omit<CctvRequest, "at">) {
+  try {
+    const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", REQUESTS_KEY).maybeSingle();
+    const list = Array.isArray((data?.value as { list?: unknown })?.list) ? (data!.value as { list: CctvRequest[] }).list : [];
+    const next = [{ at: new Date().toISOString(), ...r }, ...list].slice(0, 40);
+    await supabaseAdmin.from("app_settings").upsert({ key: REQUESTS_KEY, value: { list: next }, updated_at: new Date().toISOString() });
+  } catch (e) {
+    console.warn("CCTV request not noted:", e);
+  }
+}
+
+export async function cctvRequests(): Promise<CctvRequest[]> {
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", REQUESTS_KEY).maybeSingle();
+  return Array.isArray((data?.value as { list?: unknown })?.list) ? (data!.value as { list: CctvRequest[] }).list : [];
+}
+
+// ------------------------------------------------------------------
 // Events from the NVR
 // ------------------------------------------------------------------
 

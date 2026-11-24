@@ -17,11 +17,14 @@ type Link = {
   clockOffMin: number | null;
 };
 
+type Req = { at: string; method: string; store: string | null; contentType?: string; length?: number | null; userAgent?: string; parts?: string[]; sample?: string; saved?: number; photo?: boolean; error?: string };
+
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 
 /** Settings → Attendance: each store's VIGI NVR sends "person detected" photos to the app. */
 export default function CctvSettings() {
   const [links, setLinks] = useState<Link[] | null>(null);
+  const [requests, setRequests] = useState<Req[]>([]);
   const [stores, setStores] = useState<string[]>([]);
   const [store, setStore] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,6 +38,7 @@ export default function CctvSettings() {
     const data = res ? await res.json().catch(() => ({})) : {};
     if (!res?.ok) return setError(data.error ?? "Could not load the CCTV links.");
     setLinks(data.links ?? []);
+    setRequests(data.requests ?? []);
     setStores(data.stores ?? []);
     setPicked(Object.fromEntries((data.links ?? []).map((l: Link) => [l.id, l.channels])));
   };
@@ -190,6 +194,30 @@ export default function CctvSettings() {
         </div>
       )}
       <ErrorBox message={error} />
+
+      <details className="mt-5 text-sm">
+        <summary className="cursor-pointer font-semibold text-black/60">What the recorders sent ({requests.length}, newest first)</summary>
+        {requests.length === 0 ? (
+          <p className="mt-2 text-black/50">Nothing has reached the app from any recorder yet.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {requests.map((r, i) => (
+              <li key={i} className={`rounded-xl p-3 ring-1 ${r.error ? "bg-red-50 ring-red-100" : "bg-black/[0.02] ring-black/5"}`}>
+                <div className="flex flex-wrap gap-x-3 text-xs">
+                  <b>{formatDateTime(r.at)}</b>
+                  <span>{r.store ?? "unknown link"}</span>
+                  <span>{r.method}</span>
+                  {r.contentType && <span className="text-black/50">{r.contentType}</span>}
+                  {typeof r.saved === "number" && <span className="font-semibold text-green-700">saved {r.saved}{r.photo ? " + photo" : ""}</span>}
+                  {r.error && <span className="font-semibold text-red-700">{r.error}</span>}
+                </div>
+                {r.parts && r.parts.length > 0 && <p className="mt-1 text-[11px] text-black/50">Parts: {r.parts.join(", ")}</p>}
+                {r.sample && <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all text-[11px] text-black/60">{r.sample}</pre>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
     </div>
   );
 }
