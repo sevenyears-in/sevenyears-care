@@ -9,7 +9,18 @@ import type { Role } from "@/lib/roles";
  * Settings → Targets: `stores` maps a month (YYYY-MM) to the store from that month on.
  * Without a choice, their store is where they sold most that month.
  */
-export type PtPerson = { name: string; group?: IncentiveGroup; stores?: Record<string, string> };
+export type PtPerson = {
+  name: string;
+  group?: IncentiveGroup;
+  stores?: Record<string, string>;
+  /** Last working day (YYYY-MM-DD) once they have left; they show again if they bill after it. */
+  leftOn?: string;
+};
+
+/** Left before this month started (they may still come back by billing again). */
+export function ptLeftBefore(p: PtPerson | undefined, month: string): boolean {
+  return Boolean(p?.leftOn && p.leftOn < `${month}-01`);
+}
 
 /** The store chosen for a temporary salesperson in a month: the latest choice up to that month. */
 export function ptStoreIn(p: PtPerson | undefined, month: string): string | null {

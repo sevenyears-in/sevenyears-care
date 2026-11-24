@@ -7,7 +7,7 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/fetch-all";
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
-import { ptStoreIn, type PtPerson } from "@/lib/performance-rules";
+import { ptLeftBefore, ptStoreIn, type PtPerson } from "@/lib/performance-rules";
 import { forgetMonthReport } from "@/lib/performance";
 
 const prevMonth = (m: string) => {
@@ -19,9 +19,18 @@ const monthEnd = (m: string) => {
   return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
 };
 
-export type PtStaff = { code: string; name: string; store: string | null; chosen: boolean };
+export type PtStaff = {
+  code: string;
+  name: string;
+  store: string | null;
+  chosen: boolean;
+  /** Last working day, when they have left. */
+  leftOn: string | null;
+  /** False: left before this month and no bill since. */
+  active: boolean;
+};
 
-/** Every part-time person with their store in the month. */
+/** Every part-time person with their store in the month (and whether they are still working). */
 export async function ptStaffIn(month: string): Promise<PtStaff[]> {
   const settings = await loadPerformanceSettings();
   const people = settings.ptPeople as Record<string, PtPerson>;
@@ -29,19 +38,27 @@ export async function ptStaffIn(month: string): Promise<PtStaff[]> {
   if (!codes.length) return [];
   const pm = prevMonth(month);
   const unchosen = codes.filter((c) => !ptStoreIn(people[c], month));
+  const left = codes.filter((c) => ptLeftBefore(people[c], month));
+  const ask = [...new Set([...unchosen, ...left])];
   // Where each one billed most: this month first, else last month.
   const most = new Map<string, string>();
-  if (unchosen.length) {
+  // Left people who billed again after their last day are working again.
+  const back = new Set<string>();
+  if (ask.length) {
     const rows = await fetchAll<{ staff_user_id: string; store: string | null; invoice_date: string; net: number | null }>((a, b) =>
       supabaseAdmin
         .from("sales_invoices")
         .select("staff_user_id, store, invoice_date, net")
-        .in("staff_user_id", unchosen)
+        .in("staff_user_id", ask)
         .gte("invoice_date", `${pm}-01`)
         .lte("invoice_date", monthEnd(month))
         .order("invoice_id")
         .range(a, b)
     ).catch(() => []);
+    for (const r of rows) {
+      const p = people[r.staff_user_id];
+      if (p?.leftOn && r.invoice_date.startsWith(month) && r.invoice_date > p.leftOn) back.add(r.staff_user_id);
+    }
     for (const which of [month, pm]) {
       const sums = new Map<string, Map<string, number>>();
       for (const r of rows) {
@@ -56,7 +73,15 @@ export async function ptStaffIn(month: string): Promise<PtStaff[]> {
   return codes
     .map((code) => {
       const chosen = ptStoreIn(people[code], month);
-      return { code, name: people[code].name, store: chosen ?? most.get(code) ?? null, chosen: Boolean(chosen) };
+      const p = people[code];
+      return {
+        code,
+        name: p.name,
+        store: chosen ?? most.get(code) ?? null,
+        chosen: Boolean(chosen),
+        leftOn: p.leftOn ?? null,
+        active: !ptLeftBefore(p, month) || back.has(code),
+      };
     })
     .sort((a, b) => Number(a.code.slice(2)) - Number(b.code.slice(2)));
 }
@@ -76,8 +101,10 @@ export async function addPtPerson(rawName: string, store: string, month: string)
   if (existing && !/^PT\d+$/.test(existing)) return { error: `${name} is a staff member with a login (User ID ${existing}), not a part-time person.` };
   if (existing) {
     const now = (await ptStaffIn(month)).find((p) => p.code === existing);
-    if (now?.store && now.store !== store) return { error: `${name} (${existing}) is already in ${now.store} this month. Ask the Super Admin to change their store.` };
-    people[existing] = { ...people[existing], stores: { ...(people[existing].stores ?? {}), [month]: store } };
+    if (now?.active && now.store && now.store !== store) return { error: `${name} (${existing}) is already in ${now.store} this month. Ask the Super Admin to change their store.` };
+    const { leftOn: _gone, ...rest } = people[existing];
+    void _gone;
+    people[existing] = { ...rest, stores: { ...(rest.stores ?? {}), [month]: store } };
     await savePerformanceSettings({ ptPeople: people });
     forgetMonthReport();
     return { code: existing, added: false };
@@ -89,4 +116,17 @@ export async function addPtPerson(rawName: string, store: string, month: string)
   await savePerformanceSettings({ ptPeople: people, salespersonLinks: links });
   forgetMonthReport();
   return { code, added: true };
+}
+
+/** Marks a part-time person as left (last working day), or working again (null). */
+export async function setPtLeft(code: string, leftOn: string | null): Promise<boolean> {
+  const s = await loadPerformanceSettings(true);
+  const people = { ...(s.ptPeople as Record<string, PtPerson>) };
+  if (!people[code]) return false;
+  const { leftOn: _old, ...rest } = people[code];
+  void _old;
+  people[code] = leftOn ? { ...rest, leftOn } : rest;
+  await savePerformanceSettings({ ptPeople: people });
+  forgetMonthReport();
+  return true;
 }

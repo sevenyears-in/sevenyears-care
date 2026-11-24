@@ -12,7 +12,7 @@ import { loadAccessConfig } from "@/lib/access-config";
 import { attendanceCode } from "@/lib/attendance";
 import { CORPORATE_OFFICE } from "@/lib/stores";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
-import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, ptStoreIn, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
+import { attendanceShare, defaultGroup, isGroup, isPtCode, monthRange, ptLeftBefore, ptStoreIn, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
 import {
   abvAmount,
   inForce,
@@ -792,7 +792,7 @@ async function buildMonthReport(month: string): Promise<MonthReport> {
     }
     // A temporary salesperson put in this store is listed even before their first bill.
     for (const code of Object.keys(settings.ptPeople)) {
-      if (!members.has(code) && ptChosen(code) === store && groupOf(code) !== "none") members.set(code, null);
+      if (!members.has(code) && ptChosen(code) === store && groupOf(code) !== "none" && !ptLeftBefore(settings.ptPeople[code], month)) members.set(code, null);
     }
 
     const people: PersonReport[] = [];

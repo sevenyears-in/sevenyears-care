@@ -8,7 +8,7 @@ import { todayISO } from "@/lib/helpers";
 import { loadIncentiveRules, loadPerformanceSettings, withRoleNames } from "@/lib/performance-settings";
 import { assignPtCodesForSavedBills } from "@/lib/sales-sync";
 import { loadSalaries, loadStaffForPerformance, loadTargets, monthReport } from "@/lib/performance";
-import { isMonth, monthRange, ptStoreIn } from "@/lib/performance-rules";
+import { isMonth, monthRange, ptLeftBefore, ptStoreIn } from "@/lib/performance-rules";
 import { getStores } from "@/lib/stores";
 import { PerformanceAdmin } from "@/components/PerformanceAdmin";
 import { loadBackfill, monthsToCopy } from "@/lib/sales-backfill";
@@ -59,6 +59,8 @@ export default async function PerformanceSettingsPage({ searchParams }: { search
   const ptStore = new Map<string, string>();
   for (const s of report?.stores ?? []) for (const p of s.people) if (p.isPt) ptStore.set(p.userId, s.store);
   const ptPeople = Object.entries(settings.ptPeople)
+    // Left before this month (and no bill this month): not listed.
+    .filter(([code, p]) => !ptLeftBefore(p, month) || ptStore.has(code))
     .sort(([a], [b]) => Number(a.slice(2)) - Number(b.slice(2)))
     .map(([code, p]) => {
       const chosen = ptStoreIn(p, month);

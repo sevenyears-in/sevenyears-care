@@ -17,7 +17,8 @@ type Person = {
   partTime: boolean;
 };
 type Shift = { name: string; start: string; end?: string };
-type Data = { people: Person[]; shifts: Shift[]; grace: number; stores: string[]; month: string; can: { manage: boolean; transfer: boolean; delete: boolean; allStores: boolean } };
+type LeftPt = { userId: string; name: string; store: string | null; leftOn: string | null };
+type Data = { people: Person[]; partTimeLeft?: LeftPt[]; shifts: Shift[]; grace: number; stores: string[]; month: string; can: { manage: boolean; transfer: boolean; delete: boolean; allStores: boolean } };
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 const input = "rounded-xl bg-white px-3 py-2 text-sm ring-1 ring-black/10";
@@ -373,7 +374,90 @@ function PeopleCard({ data, reload, month, setMonth }: { data: Data; reload: () 
           </tbody>
         </table>
       </div>
+      <LeftPtList list={data.partTimeLeft ?? []} reload={reload} />
     </div>
+  );
+}
+
+/** Part-time person: mark as left (their last working day). */
+function PtLeft({ code, name, reload }: { code: string; name: string; reload: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const [day, setDay] = useState(today());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await post({ action: "pt_left", code, leftOn: day });
+      setAsking(false);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!asking)
+    return (
+      <button className={ghost} onClick={() => setAsking(true)} title={`${name} no longer works here`}>
+        Left
+      </button>
+    );
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+      <span className="text-xs text-black/55">Last working day</span>
+      <input type="date" className={`${input} py-1`} value={day} max={today()} onChange={(e) => setDay(e.target.value)} />
+      <button className={primary} disabled={busy || !day} onClick={save}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      <button className={ghost} disabled={busy} onClick={() => setAsking(false)}>
+        Cancel
+      </button>
+      {error && <span className="w-full text-xs text-red-700">{error}</span>}
+    </span>
+  );
+}
+
+/** Part-time staff who left: hidden from targets; "Working again" brings them back. */
+function LeftPtList({ list, reload }: { list: LeftPt[]; reload: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  if (!list.length) return null;
+  const back = async (code: string) => {
+    setBusy(code);
+    setError("");
+    try {
+      await post({ action: "pt_left", code, leftOn: null });
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <details className="mt-5 rounded-2xl ring-1 ring-black/5">
+      <summary className="cursor-pointer px-3 py-2.5 text-sm font-semibold text-black/60">Part-time staff who left ({list.length})</summary>
+      <ul className="divide-y divide-black/5 border-t border-black/5 text-sm">
+        {list.map((p) => (
+          <li key={p.userId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <span>
+              <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/40">{p.userId}</span>
+              <span className="ml-2 text-xs text-black/50">
+                {p.leftOn ? `last day ${day(p.leftOn)}` : ""}
+                {p.store ? ` · ${p.store}` : ""}
+              </span>
+            </span>
+            <button className={ghost} disabled={busy === p.userId} onClick={() => back(p.userId)}>
+              {busy === p.userId ? "Saving…" : "Working again"}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="px-3 pb-2 text-xs text-black/45">They come back by themselves if they make a bill in Zoho POS after their last day.</p>
+      {error && <p className="px-3 pb-2 text-xs text-red-700">{error}</p>}
+    </details>
   );
 }
 
@@ -436,6 +520,7 @@ function PersonRows({
               {open ? "Close" : p.editable ? "History / change" : "History"}
             </button>
           )}
+          {p.partTime && p.editable && <PtLeft code={p.userId} name={p.name} reload={reload} />}
         </td>
       </tr>
       {open && (

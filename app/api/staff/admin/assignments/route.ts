@@ -10,7 +10,7 @@ import { applyDueStores, forgetAssignments, loadAssignments, parseShiftReport, t
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
 import { forgetMonthReport } from "@/lib/performance";
 import { readFirstSheet } from "@/lib/xlsx-read";
-import { addPtPerson, ptStaffIn } from "@/lib/pt-staff";
+import { addPtPerson, ptStaffIn, setPtLeft } from "@/lib/pt-staff";
 
 // Settings → Shifts & transfers: each person's shift and store over time ("valid from").
 
@@ -58,8 +58,11 @@ export async function GET(request: Request) {
     .map((p) => ({ ...p, partTime: false }))
     .filter((p) => scope.stores === null || (p.store && scope.stores.includes(p.store)));
   // Part-time salespeople (no login): their store this month; targets only (no shift or transfer here).
-  const partTime = (await ptStaffIn(m).catch(() => []))
-    .filter((p) => scope.stores === null || (p.store && scope.stores.includes(p.store)))
+  const allPt = (await ptStaffIn(m).catch(() => [])).filter((p) => scope.stores === null || (p.store && scope.stores.includes(p.store)));
+  // Left before this month and no bill since: listed apart, so they can be marked working again.
+  const partTimeLeft = allPt.filter((p) => !p.active).map((p) => ({ userId: p.code, name: p.name, store: p.store, leftOn: p.leftOn }));
+  const partTime = allPt
+    .filter((p) => p.active)
     .map((p) => {
       const t = tgt.get(p.code);
       return {
@@ -72,6 +75,7 @@ export async function GET(request: Request) {
         abvTarget: t?.abv_target ? Number(t.abv_target) : null,
         editable: scope.stores === null || inScope(scope, p.store, p.code),
         partTime: true,
+        leftOn: p.leftOn,
       };
     });
   people.push(...partTime);
@@ -81,6 +85,7 @@ export async function GET(request: Request) {
   for (const x of await openCloseStores().catch(() => [] as string[])) stores.add(x.toUpperCase());
   return NextResponse.json({
     people,
+    partTimeLeft,
     shifts: settings.shifts,
     grace: settings.lateGraceMinutes,
     stores: [...stores].sort(),
@@ -179,6 +184,18 @@ export async function POST(request: Request) {
       if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
       await logAudit(auth.staff, "part_time", r.added ? "add" : "assign_store", null, { code: r.code, name: body.name, store, month }).catch(() => undefined);
       return NextResponse.json({ ok: true, code: r.code, added: r.added });
+    }
+
+    if (body.action === "pt_left") {
+      // A part-time person has left (last working day), or is working again (leftOn empty).
+      const code = String(body.code ?? "").trim().toUpperCase();
+      if (!/^PT\d+$/.test(code)) return NextResponse.json({ error: "Only part-time staff are marked as left here. Others: Staff Users." }, { status: 400 });
+      const leftOn = isDay(body.leftOn) ? String(body.leftOn) : null;
+      if (leftOn && leftOn > todayISO()) return NextResponse.json({ error: "The last working day can't be in the future." }, { status: 400 });
+      if (!(await allowedFor(code, (leftOn ?? todayISO()).slice(0, 7)))) return NextResponse.json({ error: "You can change only your own team." }, { status: 403 });
+      if (!(await setPtLeft(code, leftOn))) return NextResponse.json({ error: "Person not found." }, { status: 404 });
+      await logAudit(auth.staff, "part_time", leftOn ? "left" : "working_again", null, { code, leftOn }).catch(() => undefined);
+      return NextResponse.json({ ok: true });
     }
 
     if (body.action === "shifts") {
