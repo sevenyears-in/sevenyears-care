@@ -294,6 +294,62 @@ export async function loadOpenCloseHistory(store: string, days = 45): Promise<Op
   return withNames((data ?? []) as OcRow[], await namesByCode()).map(toOpenClose);
 }
 
+/**
+ * When the person credited with opening (closing) made their own punch, per day: their first
+ * (last) punch of the day on the store's machine. Used to show the CCTV photos at that moment.
+ */
+export async function punchMoments(store: string, days: string[]): Promise<Map<string, { open: number | null; close: number | null }>> {
+  const out = new Map<string, { open: number | null; close: number | null }>();
+  if (!days.length) return out;
+  const devices = await deviceStores();
+  const deviceIds = Object.entries(devices).filter(([, st]) => st === store).map(([d]) => d);
+  if (!deviceIds.length) return out;
+  const sorted = [...days].sort();
+  const { data: rows } = await supabaseAdmin.from("store_open_close").select("day, opened_by, closed_by, closed_at").eq("store", store).in("day", sorted);
+  const punches = await fetchAll<{ emp_code: string; punch_time: string }>((a, b) =>
+    supabaseAdmin
+      .from("attendance_punches")
+      .select("emp_code, punch_time")
+      .in("device", deviceIds)
+      .gte("punch_time", new Date(dayStartUtc(sorted[0]) + EARLIEST_OPEN * 60_000).toISOString())
+      .lt("punch_time", new Date(dayStartUtc(sorted[sorted.length - 1]) + 86_400_000).toISOString())
+      .order("punch_time")
+      .range(a, b)
+  );
+  const list = ((punches ?? []) as { emp_code: string; punch_time: string }[]).map((p) => ({ code: attendanceCode(p.emp_code), at: Date.parse(p.punch_time) }));
+  for (const r of (rows ?? []) as { day: string; opened_by: string | null; closed_by: string | null; closed_at: string | null }[]) {
+    const start = dayStartUtc(r.day) + EARLIEST_OPEN * 60_000;
+    const end = dayStartUtc(r.day) + 86_400_000;
+    const day = list.filter((p) => p.at >= start && p.at < end);
+    const opener = r.opened_by ? attendanceCode(r.opened_by) : null;
+    const closer = r.closed_by && r.closed_at ? attendanceCode(r.closed_by) : null;
+    const open = opener ? day.find((p) => p.code === opener)?.at ?? null : null;
+    const close = closer ? [...day].reverse().find((p) => p.code === closer)?.at ?? null : null;
+    out.set(r.day, { open, close });
+  }
+  return out;
+}
+
+export type CamCheck = { verdict: "ok" | "proxy"; by: string | null; note: string | null };
+
+/** Camera checks of a store's days (none before the CCTV columns are added). */
+export async function loadCamChecks(store: string, days: string[]): Promise<Map<string, { open: CamCheck | null; close: CamCheck | null }>> {
+  const out = new Map<string, { open: CamCheck | null; close: CamCheck | null }>();
+  if (!days.length) return out;
+  const { data, error } = await supabaseAdmin
+    .from("store_open_close")
+    .select("day, open_cam, open_cam_by, open_cam_note, close_cam, close_cam_by, close_cam_note")
+    .eq("store", store)
+    .in("day", days);
+  if (error) return out;
+  for (const r of (data ?? []) as Record<string, string | null>[]) {
+    const one = (k: "open" | "close"): CamCheck | null =>
+      r[`${k}_cam`] === "ok" || r[`${k}_cam`] === "proxy" ? { verdict: r[`${k}_cam`] as "ok" | "proxy", by: r[`${k}_cam_by`], note: r[`${k}_cam_note`] } : null;
+    out.set(String(r.day), { open: one("open"), close: one("close") });
+  }
+  return out;
+}
+
 /** Director / Super Admin approves an SOP violation (opening or closing) with a note. */
 export async function approveSop(day: string, store: string, kind: "open" | "close", by: string, note: string) {
   const col = kind === "open" ? "open" : "close";

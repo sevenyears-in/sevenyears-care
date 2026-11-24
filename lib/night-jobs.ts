@@ -42,6 +42,14 @@ async function dayTick() {
   const { openCloseTick } = await import("@/lib/store-open-close");
   const oc = await openCloseTick().catch((e) => `open/close error: ${e instanceof Error ? e.message : e}`);
   if (!/nothing due|already running|no store devices/.test(oc)) console.log("Store open/close:", oc);
+  // CCTV photos: keep the ones at opening / closing punches, delete the rest after a few days (hourly).
+  const { cctvCleanupTick } = await import("@/lib/cctv");
+  const { punchMoments } = await import("@/lib/store-open-close");
+  const cam = await cctvCleanupTick(async (store, day) => {
+    const m = (await punchMoments(store, [day])).get(day);
+    return [m?.open, m?.close].filter((x): x is number => typeof x === "number");
+  }).catch((e) => `cctv clean-up error: ${e instanceof Error ? e.message : e}`);
+  if (cam) console.log(cam);
   const { applyDueStores } = await import("@/lib/assignments");
   const moved = await applyDueStores().catch(() => 0);
   if (moved) console.log("Transfers applied:", moved);

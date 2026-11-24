@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
 import NotInAppStaff, { type NotInAppPerson } from "@/components/NotInAppStaff";
+import CctvSettings from "@/components/CctvSettings";
 
 type Status = {
   hasKey: boolean;
@@ -187,6 +188,8 @@ export default function AttendanceSetupPage() {
       {status?.notInApp && (
         <NotInAppStaff people={status.notInApp} stores={status.stores ?? []} namesAt={status.namesAt ?? null} scriptVersion={status.scriptVersion} onAdded={load} />
       )}
+
+      {status?.devices && <CctvSettings />}
 
       {status?.devices && (
         <div className={card}>
