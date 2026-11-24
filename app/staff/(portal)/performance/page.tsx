@@ -218,7 +218,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const view = myStores.length && (sp.view === "team" || (!access.eligible && !sp.u)) ? "team" : "person";
   const teamStore = view === "team" ? (myStores.includes((sp.store ?? "").toUpperCase()) ? (sp.store ?? "").toUpperCase() : myStores[0]) : null;
   // Store opened / closed today (from the punching machine).
-  const openClose = teamStore && month === thisMonth ? await loadOpenClose(teamStore, istNow().date).catch(() => null) : null;
+  const openToday = teamStore && month === thisMonth ? await loadOpenClose(teamStore, istNow().date).catch(() => null) : null;
+  // Before the store opens (e.g. after midnight) show yesterday's opening & closing, so the link to the history stays.
+  const openYesterday =
+    teamStore && month === thisMonth && !openToday?.openedAt
+      ? await loadOpenClose(teamStore, new Date(Date.parse(`${istNow().date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)).catch(() => null)
+      : null;
+  const openClose = openToday?.openedAt ? openToday : openYesterday?.openedAt ? openYesterday : null;
+  const openCloseDay = openToday?.openedAt ? "today" : "yesterday";
 
   // A person moved stores this month is listed in each store: show the latest one.
   let found: { person: PersonReport; store: StoreReport } | null = null;
@@ -258,6 +265,15 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           {monthLabel(month)} · Bills up to {report.lastBillDate ? formatDate(report.lastBillDate) : "—"}
           {report.settings.lastSyncAt ? ` · updated ${formatDateTime(report.settings.lastSyncAt)}` : ""}
         </p>
+        {teamStore && month === thisMonth && !openClose?.openedAt && (
+          <Link
+            href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}
+            className="mt-1 inline-flex flex-wrap gap-x-3 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-black/70 hover:opacity-90"
+          >
+            <span>Not opened yet today</span>
+            <span className="underline">Opening & closing history →</span>
+          </Link>
+        )}
         {openClose?.openedAt && teamStore && (
           <Link
             href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}
@@ -266,7 +282,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
             }`}
           >
             <span>
-              🟢 Opened today {clockIST(openClose.openedAt)}
+              🟢 Opened {openCloseDay} {clockIST(openClose.openedAt)}
               {openClose.openedBy ? ` by ${openClose.openedBy}` : ""}
               {openClose.openSop === "violation" ? " ⚠ SOP violation" : openClose.openSop === "approved" ? " (approved)" : ""}
             </span>
@@ -277,7 +293,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                 {openClose.closeSop === "violation" ? " ⚠ SOP violation" : openClose.closeSop === "approved" ? " (approved)" : ""}
               </span>
             )}
-            <span className="underline">History →</span>
+            <span className="underline">Opening & closing history →</span>
           </Link>
         )}
       </div>
