@@ -250,13 +250,14 @@ export default function RolesAccessPage() {
       {config && (
         <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
           <div className="h-1.5 bg-[linear-gradient(90deg,#ff5e79,#8883d7,#f39237,#0fa8bf)]" aria-hidden />
-          <table className="w-full min-w-[960px] table-fixed text-sm">
+          <table className="w-full min-w-[1560px] table-fixed text-sm">
             <thead className="border-b border-black/5">
               <tr>
                 <th className={`${th} w-[190px] whitespace-nowrap pl-6 text-left`}>Role</th>
-                <th className={`${th} w-[170px] text-left`}>Work &amp; alerts</th>
+                <th className={`${th} w-[160px] text-left`}>Work &amp; alerts</th>
                 {SECTIONS.map((s) => (
-                  <th key={s.key} className={`${th} whitespace-normal text-center leading-tight`}>
+                  // Each section gets its own width, so two-word headings wrap instead of running into the next column.
+                  <th key={s.key} title={s.label} className={`${th} w-[92px] whitespace-normal break-words text-center leading-tight`}>
                     {s.label}
                   </th>
                 ))}
