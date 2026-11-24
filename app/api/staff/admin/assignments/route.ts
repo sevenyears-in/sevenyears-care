@@ -10,6 +10,7 @@ import { applyDueStores, forgetAssignments, loadAssignments, parseShiftReport, t
 import { loadPerformanceSettings, savePerformanceSettings } from "@/lib/performance-settings";
 import { forgetMonthReport } from "@/lib/performance";
 import { readFirstSheet } from "@/lib/xlsx-read";
+import { addPtPerson, ptStaffIn } from "@/lib/pt-staff";
 
 // Settings → Shifts & transfers: each person's shift and store over time ("valid from").
 
@@ -54,7 +55,26 @@ export async function GET(request: Request) {
         editable: inScope(scope, store, code),
       };
     })
+    .map((p) => ({ ...p, partTime: false }))
     .filter((p) => scope.stores === null || (p.store && scope.stores.includes(p.store)));
+  // Part-time salespeople (no login): their store this month; targets only (no shift or transfer here).
+  const partTime = (await ptStaffIn(m).catch(() => []))
+    .filter((p) => scope.stores === null || (p.store && scope.stores.includes(p.store)))
+    .map((p) => {
+      const t = tgt.get(p.code);
+      return {
+        userId: p.code,
+        name: p.name,
+        store: p.store,
+        shift: [],
+        stores: [],
+        target: t?.sales_target ? Number(t.sales_target) : null,
+        abvTarget: t?.abv_target ? Number(t.abv_target) : null,
+        editable: scope.stores === null || inScope(scope, p.store, p.code),
+        partTime: true,
+      };
+    });
+  people.push(...partTime);
   const stores = new Set<string>(Object.keys(settings.storeTargets).map((x) => x.toUpperCase()));
   for (const p of people) if (p.store) stores.add(p.store);
   const { openCloseStores } = await import("@/lib/store-open-close");
@@ -75,9 +95,14 @@ export async function POST(request: Request) {
   const scope = await teamScope(auth.staff);
   if (!scope.allowed) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const by = auth.staff.fullName;
-  // The person's current store decides whether this user may change them.
-  const allowedFor = async (userId: string) => {
+  // The person's current store decides whether this user may change them
+  // (a part-time person: their store in the month of the target).
+  const allowedFor = async (userId: string, month?: string) => {
     if (scope.stores === null) return true;
+    if (/^PT\d+$/.test(userId)) {
+      const pt = (await ptStaffIn(month ?? todayISO().slice(0, 7))).find((p) => p.code === userId);
+      return inScope(scope, pt?.store ?? null, userId);
+    }
     const { data } = await supabaseAdmin.from("staff_users").select("user_id, store_name").eq("is_active", true);
     const row = ((data ?? []) as { user_id: string; store_name: string | null }[]).find((r) => attendanceCode(r.user_id) === userId);
     return inScope(scope, row?.store_name ?? null, userId);
@@ -128,7 +153,7 @@ export async function POST(request: Request) {
       for (const r of rows) {
         const userId = attendanceCode(r.userId);
         if (!userId) continue;
-        if (!(await allowedFor(userId))) return NextResponse.json({ error: "You can set targets only for your own team." }, { status: 403 });
+        if (!(await allowedFor(userId, month))) return NextResponse.json({ error: "You can set targets only for your own team." }, { status: 403 });
         const sales = money(r.sales);
         const abv = money(r.abv);
         if (Number.isNaN(sales) || Number.isNaN(abv)) return NextResponse.json({ error: "Targets must be amounts in rupees." }, { status: 400 });
@@ -143,6 +168,17 @@ export async function POST(request: Request) {
       await logAudit(auth.staff, "targets", "set", null, { month, rows }).catch(() => undefined);
       forgetMonthReport();
       return NextResponse.json({ ok: true });
+    }
+
+    if (body.action === "pt_add") {
+      // A part-time salesperson (no login), so their target can be set before their first bill.
+      const month = isMonth(body.month) ? String(body.month) : todayISO().slice(0, 7);
+      const store = scope.stores === null ? String(body.store ?? "").trim().toUpperCase() : scope.stores[0];
+      if (!store) return NextResponse.json({ error: "Choose the store." }, { status: 400 });
+      const r = await addPtPerson(String(body.name ?? ""), store, month);
+      if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
+      await logAudit(auth.staff, "part_time", r.added ? "add" : "assign_store", null, { code: r.code, name: body.name, store, month }).catch(() => undefined);
+      return NextResponse.json({ ok: true, code: r.code, added: r.added });
     }
 
     if (body.action === "shifts") {

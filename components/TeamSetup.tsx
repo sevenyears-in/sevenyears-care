@@ -4,7 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { ErrorBox } from "@/components/SiteChrome";
 
 type Row = { id: number; userId: string; kind: "shift" | "store"; value: string; validFrom: string; note: string | null; createdBy: string | null };
-type Person = { userId: string; name: string; store: string | null; shift: Row[]; stores: Row[]; target: number | null; abvTarget: number | null; editable: boolean };
+type Person = {
+  userId: string;
+  name: string;
+  store: string | null;
+  shift: Row[];
+  stores: Row[];
+  target: number | null;
+  abvTarget: number | null;
+  editable: boolean;
+  /** Part-time salesperson without a login (PT code): target only. */
+  partTime: boolean;
+};
 type Shift = { name: string; start: string; end?: string };
 type Data = { people: Person[]; shifts: Shift[]; grace: number; stores: string[]; month: string; can: { manage: boolean; transfer: boolean; delete: boolean; allStores: boolean } };
 
@@ -238,8 +249,28 @@ function PeopleCard({ data, reload, month, setMonth }: { data: Data; reload: () 
   };
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return data.people.filter((p) => !s || p.name.toLowerCase().includes(s) || p.userId.includes(s));
+    return data.people.filter((p) => !s || p.name.toLowerCase().includes(s) || p.userId.toLowerCase().includes(s));
   }, [data.people, q]);
+
+  // Add a part-time salesperson (no login) so their target can be set before their first bill.
+  const [adding, setAdding] = useState(false);
+  const [ptName, setPtName] = useState("");
+  const [ptStore, setPtStore] = useState("");
+  const addPt = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await post({ action: "pt_add", name: ptName, store: ptStore, month });
+      setSavedMsg(r.added ? `✓ ${ptName.toUpperCase()} added as ${r.code}. Set their target with ✎ Edit targets.` : `✓ ${ptName.toUpperCase()} (${r.code}) is now in this store.`);
+      setAdding(false);
+      setPtName("");
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className={card}>
@@ -271,6 +302,40 @@ function PeopleCard({ data, reload, month, setMonth }: { data: Data; reload: () 
       </div>
       <ErrorBox message={error} />
       {savedMsg && <p className="mt-2 text-sm font-semibold text-green-700">{savedMsg}</p>}
+      <div className="mt-3">
+        {!adding ? (
+          <button className={ghost} disabled={editT} onClick={() => { setAdding(true); setError(""); setSavedMsg(""); }}>
+            + Add part-time person
+          </button>
+        ) : (
+          <div className="rounded-2xl bg-black/[0.02] p-4 ring-1 ring-black/5">
+            <p className="text-sm font-semibold">Add a part-time person</p>
+            <p className="mt-1 text-xs text-black/55">
+              Part-time staff don&apos;t log in, so they aren&apos;t in Staff Users. Type the name exactly as it is in Zoho POS (salesperson), so their bills count for them.
+              {data.can.allStores ? "" : " They are added to your store."} Someone who already billed shows here by themselves.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input className={`${input} w-64`} placeholder="Name as in Zoho POS" value={ptName} onChange={(e) => setPtName(e.target.value)} />
+              {data.can.allStores && (
+                <select className={input} value={ptStore} onChange={(e) => setPtStore(e.target.value)}>
+                  <option value="">Choose the store…</option>
+                  {data.stores.map((x) => (
+                    <option key={x} value={x}>
+                      {x}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button className={primary} disabled={busy || ptName.trim().length < 3 || (data.can.allStores && !ptStore)} onClick={addPt}>
+                {busy ? "Adding…" : "Add"}
+              </button>
+              <button className={ghost} disabled={busy} onClick={() => setAdding(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -343,8 +408,9 @@ function PersonRows({
       <tr className="border-t border-black/5">
         <td className="px-2 py-2">
           <span className="font-semibold">{p.name}</span> <span className="text-xs text-black/45">{p.userId}</span>
+          {p.partTime && <span className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Part-time</span>}
         </td>
-        <td className="px-2 py-2">{storeNow ?? "—"}</td>
+        <td className="px-2 py-2">{(p.partTime ? p.store : storeNow) ?? "—"}</td>
         <td className="px-2 py-2">
           {editT && p.editable ? (
             <input className={`${input} w-28`} inputMode="numeric" placeholder="₹" value={draft?.sales ?? ""} onChange={(e) => setDraft({ sales: e.target.value.replace(/[^\d]/g, ""), abv: draft?.abv ?? "" })} />
@@ -360,14 +426,16 @@ function PersonRows({
           )}
         </td>
         <td className="px-2 py-2">
-          {shiftNow}
-          {shiftDef ? <span className="text-xs text-black/45"> {nice(shiftDef.start)}{shiftDef.end ? `–${nice(shiftDef.end)}` : ""}</span> : null}
+          {p.partTime ? <span className="text-xs text-black/40">—</span> : shiftNow}
+          {shiftDef && !p.partTime ? <span className="text-xs text-black/45"> {nice(shiftDef.start)}{shiftDef.end ? `–${nice(shiftDef.end)}` : ""}</span> : null}
           {upcoming ? <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">{upcoming} coming</span> : null}
         </td>
         <td className="px-2 py-2 text-right">
-          <button className={ghost} onClick={toggle}>
-            {open ? "Close" : p.editable ? "History / change" : "History"}
-          </button>
+          {!p.partTime && (
+            <button className={ghost} onClick={toggle}>
+              {open ? "Close" : p.editable ? "History / change" : "History"}
+            </button>
+          )}
         </td>
       </tr>
       {open && (
