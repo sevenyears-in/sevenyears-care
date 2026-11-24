@@ -28,6 +28,8 @@ type Props = {
   offersWaiting?: number | null;
   /** CRE of a store: shows the walk-in counter. */
   walkinCounter?: boolean;
+  /** Warning letters: null = not shown; otherwise letters waiting (to read or approve). */
+  lettersWaiting?: number | null;
 };
 
 type NavLink = { href: string; label: string; icon: string; badge?: number };
@@ -40,6 +42,7 @@ function staffNav({
   performanceLabel,
   offersWaiting,
   walkinCounter,
+  lettersWaiting,
 }: {
   role: Role;
   sections: Section[];
@@ -47,6 +50,7 @@ function staffNav({
   performanceLabel?: string | null;
   offersWaiting?: number | null;
   walkinCounter?: boolean;
+  lettersWaiting?: number | null;
 }) {
   const can = (s: Section) => sections.includes(s);
   const links: NavLink[] = [
@@ -65,6 +69,16 @@ function staffNav({
             label: explanationsWaiting > 0 ? `Explanations (${explanationsWaiting})` : "Explanations",
             icon: "📝",
             badge: explanationsWaiting || undefined,
+          },
+        ]
+      : []),
+    ...(lettersWaiting != null
+      ? [
+          {
+            href: "/staff/letters",
+            label: lettersWaiting > 0 ? `Warning letters (${lettersWaiting})` : "Warning letters",
+            icon: "✉️",
+            badge: lettersWaiting || undefined,
           },
         ]
       : []),
@@ -102,7 +116,7 @@ function staffNav({
   return { links, settings };
 }
 
-export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter }: Props) {
+export function StaffHeader({ fullName, userId, role, roleLabel, sections, storeName, unreadAlerts, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter, lettersWaiting }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -131,7 +145,7 @@ export function StaffHeader({ fullName, userId, role, roleLabel, sections, store
   }, [menuOpen]);
 
   // Roles & Access decides which sections each person sees.
-  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter });
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter, lettersWaiting });
   const settingsActive = settings.some((l) => pathname.startsWith(l.href));
 
   const initials =
@@ -304,6 +318,7 @@ export function StaffBottomNav({
   performanceLabel,
   offersWaiting,
   walkinCounter,
+  lettersWaiting,
 }: {
   role: Role;
   sections: Section[];
@@ -312,11 +327,12 @@ export function StaffBottomNav({
   performanceLabel?: string | null;
   offersWaiting?: number | null;
   walkinCounter?: boolean;
+  lettersWaiting?: number | null;
 }) {
   const pathname = usePathname();
   const unread = useUnreadCount(unreadAlerts);
   const [moreOpen, setMoreOpen] = useState(false);
-  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter });
+  const { links, settings } = staffNav({ role, sections, explanationsWaiting, performanceLabel, offersWaiting, walkinCounter, lettersWaiting });
 
   const main = [
     { href: "/staff", label: "Home", icon: "🏠" },

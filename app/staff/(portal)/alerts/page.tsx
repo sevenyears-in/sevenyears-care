@@ -44,6 +44,8 @@ export default async function AlertsPage() {
           {alerts.map((a) => {
             const href = /explanation is needed/i.test(a.title)
               ? "/staff/explanations"
+              : /^Warning letter/.test(a.title)
+                ? a.ticket_id ? `/staff/letters/${a.ticket_id}` : "/staff/letters"
               : /extended warranty/i.test(a.title)
                 ? "/staff/extended-warranty"
               : /^(TEST · )?(Updated: )?End of day /.test(a.title)

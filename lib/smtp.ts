@@ -20,6 +20,8 @@ export type MailMessage = {
   subject: string;
   text: string;
   html: string;
+  /** Files sent with the e-mail (e.g. a PDF letter). */
+  attachments?: { filename: string; contentType: string; content: Uint8Array }[];
 };
 
 type Conn = {
@@ -90,13 +92,50 @@ function base64Lines(value: string) {
 function buildMessage(m: MailMessage) {
   const boundary = `sy_${randomBytes(12).toString("hex")}`;
   const domain = m.from.split("@")[1] ?? "localhost";
-  return [
+  const headers = [
     `From: ${encodeHeader(m.fromName)} <${m.from}>`,
     `To: <${m.to}>`,
     `Subject: ${encodeHeader(m.subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${randomBytes(16).toString("hex")}@${domain}>`,
     "MIME-Version: 1.0",
+  ];
+  if (m.attachments?.length) {
+    // multipart/mixed: the text / HTML body, then each file.
+    const mixed = `sym_${randomBytes(12).toString("hex")}`;
+    const fileB64 = (bytes: Uint8Array) => (Buffer.from(bytes).toString("base64").match(/.{1,76}/g) ?? []).join("\r\n");
+    return [
+      ...headers,
+      `Content-Type: multipart/mixed; boundary="${mixed}"`,
+      "",
+      `--${mixed}`,
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(m.text),
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(m.html),
+      `--${boundary}--`,
+      ...m.attachments.flatMap((a) => [
+        `--${mixed}`,
+        `Content-Type: ${a.contentType}; name="${a.filename.replace(/"/g, "")}"`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Disposition: attachment; filename="${a.filename.replace(/"/g, "")}"`,
+        "",
+        fileB64(a.content),
+      ]),
+      `--${mixed}--`,
+      "",
+    ].join("\r\n");
+  }
+  return [
+    ...headers,
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",
     `--${boundary}`,
