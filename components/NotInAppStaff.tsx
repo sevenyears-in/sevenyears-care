@@ -25,8 +25,10 @@ const CORPORATE = "CORPORATE OFFICE";
  * Each is added with User ID = employee code and a temporary password = the same code;
  * they choose their own password at their first login.
  */
-export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, onAdded }: {
+export default function NotInAppStaff({ people, hidden = [], stores, namesAt, scriptVersion, onAdded }: {
   people: NotInAppPerson[];
+  /** Codes left out of this list (old codes of people who rejoined, people who left …). */
+  hidden?: { code: string; note: string; by: string; at: string }[];
   stores: string[];
   namesAt: string | null;
   scriptVersion: number;
@@ -37,6 +39,29 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
+  const [hiding, setHiding] = useState("");
+  const [hideNote, setHideNote] = useState("");
+
+  const hideOrShow = async (action: "hideCode" | "showCode", code: string, note = "") => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/staff/admin/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, code, note }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save.");
+      setHiding("");
+      setHideNote("");
+      onAdded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // New people (or names that arrived from eTimeTrackLite) fill their row; what was typed stays.
   useEffect(() => {
@@ -52,7 +77,7 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
     });
   }, [people]);
 
-  if (people.length === 0) return null;
+  if (people.length === 0 && hidden.length === 0) return null;
   const set = (code: string, change: Partial<Row>) => setRows((r) => ({ ...r, [code]: { ...r[code], ...change } }));
   const picked = people.filter((p) => rows[p.code]?.pick);
   const storeChoices = [...new Set([...stores, CORPORATE])];
@@ -123,7 +148,7 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wider text-black/45">
               <th className="py-2 pr-2"></th>
@@ -132,7 +157,8 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
               <th className="py-2 pr-3">In eTimeTrackLite</th>
               <th className="py-2 pr-3">Store</th>
               <th className="py-2 pr-3">Role</th>
-              <th className="py-2">Last punch</th>
+              <th className="py-2 pr-3">Last punch</th>
+              <th className="py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -171,9 +197,32 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
                       ))}
                     </select>
                   </td>
-                  <td className="py-2 text-black/60">
+                  <td className="py-2 pr-3 text-black/60">
                     {formatDateTime(p.lastPunch)}
                     <span className="block text-xs text-black/40">{p.punches} punches</span>
+                  </td>
+                  <td className="py-2 text-right">
+                    {hiding === p.code ? (
+                      <span className="flex items-center justify-end gap-1.5">
+                        <input
+                          value={hideNote}
+                          onChange={(e) => setHideNote(e.target.value)}
+                          maxLength={120}
+                          placeholder="Why? e.g. old code of 1043"
+                          className={`${inputClass} !w-48 !py-1.5 text-xs`}
+                        />
+                        <button type="button" disabled={busy} onClick={() => hideOrShow("hideCode", p.code, hideNote)} className="rounded-lg bg-[#161616] px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-40">
+                          Hide
+                        </button>
+                        <button type="button" onClick={() => setHiding("")} className="text-xs font-semibold text-black/50">
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" onClick={() => { setHiding(p.code); setHideNote(""); }} className="whitespace-nowrap text-xs font-semibold text-black/50 underline">
+                        Not needed
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
@@ -189,6 +238,25 @@ export default function NotInAppStaff({ people, stores, namesAt, scriptVersion, 
         {result && <p className="text-sm font-semibold text-green-700">{result}</p>}
       </div>
       <ErrorBox message={error} />
+      {hidden.length > 0 && (
+        <details className="mt-5 text-sm">
+          <summary className="cursor-pointer font-semibold text-black/60">Codes left out of this list ({hidden.length})</summary>
+          <ul className="mt-2 divide-y divide-black/5">
+            {hidden.map((h) => (
+              <li key={h.code} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <span className="font-mono font-bold">{h.code}</span>
+                  {h.note ? <span className="ml-2 text-black/60">{h.note}</span> : null}
+                  <span className="ml-2 text-xs text-black/40">by {h.by}</span>
+                </span>
+                <button type="button" disabled={busy} onClick={() => hideOrShow("showCode", h.code)} className="text-xs font-semibold text-black/50 underline">
+                  Show again
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

@@ -774,7 +774,7 @@ function TargetsCard(props: {
   const router = useRouter();
   const { month, settings } = props;
   const groups = groupList(settings);
-  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string };
+  type RowState = { sales: string; abv: string; group: IncentiveGroup; store: string; salary: string; staffId: string };
   // One row (or one store target) is changed at a time, each with its own Save.
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RowState | null>(null);
@@ -794,6 +794,7 @@ function TargetsCard(props: {
     group: p.group,
     store: p.chosenStore ?? "",
     salary: props.salaries[p.userId] ? String(props.salaries[p.userId]) : "",
+    staffId: "",
   });
   const groupNow = (p: Person) => (editId === p.userId && draft ? draft.group : p.group);
   const set = (change: Partial<RowState>) => setDraft((d) => (d ? { ...d, ...change } : d));
@@ -837,6 +838,25 @@ function TargetsCard(props: {
   async function saveRow(p: Person) {
     if (!draft) return;
     const was = current(p);
+    // A temporary code that is really a permanent staff member: everything moves to their User ID.
+    if (p.isPt && draft.staffId) {
+      const who = props.people.find((x) => x.userId === draft.staffId);
+      if (!confirm(`${p.name} (${p.userId}) is ${who?.name ?? draft.staffId} (${draft.staffId})?\n\nTheir Zoho POS name, bills, returns and targets move to ${draft.staffId}, and ${p.userId} is removed.`)) return;
+      setBusy(true);
+      setError("");
+      try {
+        await post({ action: "pt_to_staff", code: p.userId, userId: draft.staffId });
+        setEditId(null);
+        setDraft(null);
+        setMsg(`${p.name}: now counted as ${who?.name ?? draft.staffId} (${draft.staffId}).`);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not save.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -935,6 +955,18 @@ function TargetsCard(props: {
             ))}
           </select>
           <span className="mt-0.5 block text-[11px] text-black/45">Store from {monthLabel(month)} on.</span>
+          <select className={`${input} mt-2 w-56 py-1 text-xs`} value={draft?.staffId ?? ""} onChange={(e) => set({ staffId: e.target.value })}>
+            <option value="">Not a permanent staff member</option>
+            {props.people
+              .filter((x) => !x.isPt)
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((x) => (
+                <option key={x.userId} value={x.userId}>
+                  Permanent: {x.name} ({x.userId})
+                </option>
+              ))}
+          </select>
+          <span className="mt-0.5 block text-[11px] text-black/45">Permanent staff with a User ID? Choose them: their bills and targets move there.</span>
         </span>
       ) : (
         <span className="ml-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Temporary{p.chosenStore ? "" : " · where they sell most"}</span>

@@ -11,6 +11,8 @@ import { getStores } from "@/lib/stores";
 // GET  → status (last sync, punches today, codes not linked to a staff user)
 // POST { action: "newKey" } → a new sync key, shown once (the old one stops working)
 // POST { action: "backfill", from } → the office PC sends all punches from that day at its next run
+// POST { action: "hideCode", code, note } / { action: "showCode", code } → leave a machine code out of
+//      "On the punching machine, not in the app" (e.g. an old code of someone who rejoined)
 
 /** A role from the eTimeTrackLite designation (the person adding them can change it). */
 function roleFrom(designation: string): string {
@@ -23,21 +25,31 @@ function roleFrom(designation: string): string {
   return "csa";
 }
 
+const HIDDEN_KEY = "attendance_hidden_codes";
+type Hidden = Record<string, { note: string; by: string; at: string }>;
+
+async function hiddenCodes(): Promise<Hidden> {
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", HIDDEN_KEY).maybeSingle();
+  return ((data?.value ?? {}) as Hidden) || {};
+}
+
 /**
  * People who punched in the last 45 days but have no staff account (User ID = employee code),
  * with their name from eTimeTrackLite and the store of the machine they punch on most.
  */
 async function notInApp() {
   const since = new Date(Date.now() - 45 * 86_400_000).toISOString();
-  const [punches, staff, machines, emps] = await Promise.all([
+  const [punches, staff, machines, emps, hidden] = await Promise.all([
     fetchAll<{ emp_code: string; device: string | null; punch_time: string }>((a, b) =>
       supabaseAdmin.from("attendance_punches").select("emp_code, device, punch_time").gte("punch_time", since).order("id").range(a, b)
     ),
     supabaseAdmin.from("staff_users").select("user_id"),
     deviceStores().catch(() => ({}) as Record<string, string>),
     machineEmployees(),
+    hiddenCodes().catch(() => ({}) as Hidden),
   ]);
   const have = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
+  for (const c of Object.keys(hidden)) have.add(attendanceCode(c));
   const byCode = new Map<string, { punches: number; last: string; devices: Map<string, number> }>();
   for (const p of punches) {
     const code = attendanceCode(p.emp_code);
@@ -65,7 +77,7 @@ async function notInApp() {
     };
   });
   list.sort((a, b) => b.lastPunch.localeCompare(a.lastPunch));
-  return { list, namesAt: emps.at };
+  return { list, namesAt: emps.at, hidden: Object.entries(hidden).map(([code, h]) => ({ code, ...h })) };
 }
 
 export async function GET() {
@@ -81,7 +93,7 @@ export async function GET() {
     supabaseAdmin.from("staff_users").select("user_id").eq("is_active", true),
     listDevices().catch(() => []),
     getStores().catch(() => null),
-    notInApp().catch(() => ({ list: [], namesAt: null })),
+    notInApp().catch(() => ({ list: [], namesAt: null, hidden: [] })),
   ]);
   const userIds = new Set((staff.data ?? []).map((s) => attendanceCode(s.user_id)));
   const codesToday = [...new Set((punches.data ?? []).map((p) => attendanceCode(p.emp_code)))];
@@ -105,13 +117,23 @@ export async function GET() {
     stores: (storeList?.stores ?? []).map((st) => st.name),
     notInApp: missing.list,
     namesAt: missing.namesAt,
+    hiddenCodes: missing.hidden,
   });
 }
 
 export async function POST(request: Request) {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const body = (await request.json().catch(() => ({}))) as { action?: string; from?: string; device?: string; store?: string };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; from?: string; device?: string; store?: string; code?: string; note?: string };
+  if (body.action === "hideCode" || body.action === "showCode") {
+    const code = attendanceCode(body.code);
+    if (!code || code.length > 20) return NextResponse.json({ error: "Unknown code." }, { status: 400 });
+    const hidden = await hiddenCodes();
+    if (body.action === "hideCode") hidden[code] = { note: String(body.note ?? "").trim().slice(0, 120), by: auth.staff.fullName, at: new Date().toISOString() };
+    else delete hidden[code];
+    await supabaseAdmin.from("app_settings").upsert({ key: HIDDEN_KEY, value: hidden, updated_at: new Date().toISOString() });
+    return NextResponse.json({ ok: true });
+  }
   if (body.action === "deviceStore") {
     // Which store a punching machine is in (for store opening / closing).
     const device = String(body.device ?? "").trim();

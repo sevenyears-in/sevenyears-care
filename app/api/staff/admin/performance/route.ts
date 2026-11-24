@@ -402,6 +402,37 @@ async function handle(body: Body, staff: StaffUser): Promise<Response> {
       return NextResponse.json({ ok: true });
     }
 
+    case "pt_to_staff": {
+      // A "part-time" code that is really a permanent staff member: their Zoho POS name, bills,
+      // returns and targets move to the staff account; the PT code is removed.
+      const code = String(body.code ?? "").trim().toUpperCase();
+      const userId = String(body.userId ?? "").trim();
+      if (!isPtCode(code)) return bad("Choose the part-time person.");
+      const { data: staffRow } = await supabaseAdmin.from("staff_users").select("user_id, full_name").eq("user_id", userId).eq("is_active", true).maybeSingle();
+      if (!staffRow) return bad(`No active staff member has User ID ${userId}. Add them in Staff Users first.`);
+      const current = await loadPerformanceSettings();
+      const pt = current.ptPeople[code];
+      if (!pt) return bad("Person not found.");
+      const links = { ...current.salespersonLinks };
+      const names = new Set<string>([pt.name.toUpperCase()]);
+      for (const [name, v] of Object.entries(links)) if (v === code) names.add(name.toUpperCase());
+      for (const name of names) links[name] = userId;
+      const people = { ...current.ptPeople };
+      delete people[code];
+      await savePerformanceSettings({ salespersonLinks: links, ptPeople: people });
+      for (const name of names) await setSalespersonOwner(name, userId);
+      // Monthly targets: kept where the staff member has none for that month.
+      const { data: tgts } = await supabaseAdmin.from("staff_sales_targets").select("month").eq("user_id", userId);
+      const have = new Set(((tgts ?? []) as { month: string }[]).map((t) => t.month));
+      const { data: ptTargets } = await supabaseAdmin.from("staff_sales_targets").select("*").eq("user_id", code);
+      for (const t of (ptTargets ?? []) as Record<string, unknown>[]) {
+        if (!have.has(String(t.month))) await supabaseAdmin.from("staff_sales_targets").insert({ ...t, user_id: userId, updated_at: new Date().toISOString(), updated_by: staff.fullName });
+      }
+      await supabaseAdmin.from("staff_sales_targets").delete().eq("user_id", code);
+      await logAudit(staff, "part_time", "to_staff", { code, names: [...names] }, { userId }).catch(() => undefined);
+      return NextResponse.json({ ok: true, names: [...names] });
+    }
+
     case "pt_store": {
       // Temporary (daily-wages) staff: their store from this month on. Empty = where they sell most.
       const code = String(body.userId ?? "").trim();

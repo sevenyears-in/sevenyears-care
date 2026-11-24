@@ -25,6 +25,7 @@ type Status = {
   devices?: { device: string; store: string | null; punches: number; people: number; lastPunch: string | null; guess: string | null }[];
   stores?: string[];
   notInApp?: NotInAppPerson[];
+  hiddenCodes?: { code: string; note: string; by: string; at: string }[];
   namesAt?: string | null;
 };
 
@@ -186,7 +187,7 @@ export default function AttendanceSetupPage() {
       )}
 
       {status?.notInApp && (
-        <NotInAppStaff people={status.notInApp} stores={status.stores ?? []} namesAt={status.namesAt ?? null} scriptVersion={status.scriptVersion} onAdded={load} />
+        <NotInAppStaff people={status.notInApp} hidden={status.hiddenCodes ?? []} stores={status.stores ?? []} namesAt={status.namesAt ?? null} scriptVersion={status.scriptVersion} onAdded={load} />
       )}
 
       {status?.devices && <CctvSettings />}
