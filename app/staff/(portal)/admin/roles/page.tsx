@@ -147,6 +147,9 @@ export default function RolesAccessPage() {
     });
 
   const th = "px-1.5 py-3 align-bottom text-[10px] font-bold uppercase tracking-wide text-black/45";
+  // Role and Work & alerts stay in place while the rest of the table scrolls sideways.
+  const freeze1 = "sticky left-0 z-10";
+  const freeze2 = "sticky left-[190px] z-10 border-r border-black/5 shadow-[8px_0_10px_-8px_rgba(0,0,0,0.18)]";
   const cols = SECTIONS.length + 5;
   const pickBase = (r: Role) => {
     // Choosing the work also offers that role's usual sections (they can still be changed).
@@ -159,7 +162,7 @@ export default function RolesAccessPage() {
     const builtinRow = isBuiltIn(d.key);
     return (
       <tr key={`edit-${d.key}`} className="bg-[#fff8f9]">
-        <td className="px-4 py-3 align-top">
+        <td className={`${freeze1} bg-[#fff8f9] px-4 py-3 align-top`}>
           {builtinRow ? (
             <p className="font-bold">{ROLE_LABELS[d.key as Role]}</p>
           ) : (
@@ -168,7 +171,7 @@ export default function RolesAccessPage() {
             </div>
           )}
         </td>
-        <td className="px-2 py-3 align-top">
+        <td className={`${freeze2} bg-[#fff8f9] px-2 py-3 align-top`}>
           {builtinRow ? (
             <p className="text-xs text-black/60">{workLabel(d.key as Role)}</p>
           ) : (
@@ -253,8 +256,8 @@ export default function RolesAccessPage() {
           <table className="w-full min-w-[1560px] table-fixed text-sm">
             <thead className="border-b border-black/5">
               <tr>
-                <th className={`${th} w-[190px] whitespace-nowrap pl-6 text-left`}>Role</th>
-                <th className={`${th} w-[160px] text-left`}>Work &amp; alerts</th>
+                <th className={`${th} ${freeze1} z-20 w-[190px] whitespace-nowrap bg-white pl-6 text-left`}>Role</th>
+                <th className={`${th} ${freeze2} z-20 w-[160px] bg-white text-left`}>Work &amp; alerts</th>
                 {SECTIONS.map((s) => (
                   // Each section gets its own width, so two-word headings wrap instead of running into the next column.
                   <th key={s.key} title={s.label} className={`${th} w-[92px] whitespace-normal break-words text-center leading-tight`}>
@@ -272,8 +275,8 @@ export default function RolesAccessPage() {
                   editRow(draft)
                 ) : (
                   <Fragment key={row.key}>
-                    <tr className={`transition hover:bg-[#fafbfd] ${draft ? "opacity-50" : ""}`}>
-                      <td className="py-3 pl-6 pr-3">
+                    <tr className={`group transition hover:bg-[#fafbfd] ${draft ? "opacity-50" : ""}`}>
+                      <td className={`${freeze1} bg-white py-3 pl-6 pr-3 group-hover:bg-[#fafbfd]`}>
                         <div className="flex items-center gap-3">
                           <span className="h-9 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: DOTS[idx % DOTS.length] }} aria-hidden />
                           <div>
@@ -287,7 +290,7 @@ export default function RolesAccessPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-2 py-2.5 text-xs text-black/65">{workLabel(row.baseRole)}</td>
+                      <td className={`${freeze2} bg-white px-2 py-2.5 text-xs text-black/65 group-hover:bg-[#fafbfd]`}>{workLabel(row.baseRole)}</td>
                       {SECTIONS.map((s) => (
                         <td key={s.key} className="px-2 py-2.5 text-center">
                           {row.access.sections.includes(s.key) ? <Yes /> : <No />}
