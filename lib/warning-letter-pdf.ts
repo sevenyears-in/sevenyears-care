@@ -1,6 +1,7 @@
-// Warning letter PDF on the Seven Years letterhead (public/letterhead.jpg). Server only.
-// Page size follows the letterhead (612 × 797 pt); the text sits between the logo at the top
-// and the purple line at the bottom, and runs onto more pages if needed.
+// Warning letter PDF on the Seven Years letterhead, A4 (595 × 842 pt). Server only.
+// public/letterhead-a4.jpg is the letterhead laid out on A4: the header at the top, the footer at
+// the bottom and the watermark centred (made from public/letterhead.jpg without stretching). The
+// text sits between the logo and the purple line, and runs onto more pages if needed.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,12 +25,12 @@ export type LetterPdfData = {
   ackNote: string | null;
 };
 
-const W = 612;
-const H = 797;
+const W = 595.28;
+const H = 841.89;
 const LEFT = 60;
 const RIGHT = W - 60;
-const TOP = H - 135; // below the logo
-const BOTTOM = 92; // above the purple line
+const TOP = H - 132; // below the logo
+const BOTTOM = 80; // above the purple line
 const DARK = rgb(0.086, 0.086, 0.086);
 const GREY = rgb(0.42, 0.42, 0.42);
 const PINK = rgb(0.937, 0.373, 0.475);
@@ -123,7 +124,7 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
 
   let head: PDFImage | null = null;
   try {
-    head = await pdf.embedJpg(await readFile(path.join(process.cwd(), "public", "letterhead.jpg")));
+    head = await pdf.embedJpg(await readFile(path.join(process.cwd(), "public", "letterhead-a4.jpg")));
   } catch {
     head = null;
   }
