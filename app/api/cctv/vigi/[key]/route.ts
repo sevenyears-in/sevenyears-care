@@ -12,22 +12,68 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ key: string }> };
 
+/** Finds `needle` in `hay` from `from`; -1 if not there. */
+function indexOf(hay: Uint8Array, needle: Uint8Array, from = 0) {
+  outer: for (let i = from; i <= hay.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+const isJpeg = (b: Uint8Array) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+
+/**
+ * Multipart read from the raw bytes. The VIGI NVR sends the JPEG in a part without a file name,
+ * which the standard form reader turns into (broken) text; reading the bytes keeps the photo intact.
+ */
+function readMultipart(buf: Uint8Array, boundary: string) {
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+  const delim = enc.encode(`--${boundary}`);
+  const sep = enc.encode("\r\n\r\n");
+  const out: { name: string; type: string; data: Uint8Array }[] = [];
+  let pos = indexOf(buf, delim);
+  while (pos >= 0) {
+    const start = pos + delim.length;
+    if (buf[start] === 0x2d && buf[start + 1] === 0x2d) break; // closing --boundary--
+    const next = indexOf(buf, delim, start);
+    const end = next >= 0 ? next : buf.length;
+    const headEnd = indexOf(buf, sep, start);
+    if (headEnd < 0 || headEnd > end) break;
+    const head = dec.decode(buf.subarray(start, headEnd));
+    let dataEnd = end;
+    if (buf[dataEnd - 2] === 0x0d && buf[dataEnd - 1] === 0x0a) dataEnd -= 2; // CRLF before the next boundary
+    const name = /name="?([^";\r\n]+)"?/i.exec(head)?.[1] ?? "";
+    const type = /content-type:\s*([^\r\n;]+)/i.exec(head)?.[1]?.trim() ?? "";
+    out.push({ name, type, data: buf.slice(headEnd + sep.length, dataEnd) });
+    pos = next;
+  }
+  return out;
+}
+
 async function readBody(request: Request): Promise<{ body: unknown; photo: Blob | null; parts: string[]; text: string }> {
   const type = request.headers.get("content-type") ?? "";
-  if (/multipart\/form-data/i.test(type)) {
-    const form = await request.formData();
+  const boundary = /boundary="?([^";]+)"?/i.exec(type)?.[1];
+  if (/multipart\/form-data/i.test(type) && boundary) {
+    const buf = new Uint8Array(await request.arrayBuffer());
     const parts: string[] = [];
     let text = "";
     let photo: Blob | null = null;
-    for (const [name, v] of form.entries()) {
-      if (typeof v === "string") {
-        parts.push(`${name} (text ${v.length})`);
-        if (!text || name === "event") text = v;
+    for (const p of readMultipart(buf, boundary)) {
+      let data = p.data;
+      // A photo sent as base64 text.
+      if (!isJpeg(data) && data.length > 1000 && /^[A-Za-z0-9+/=\s]+$/.test(new TextDecoder().decode(data.subarray(0, 200)))) {
+        const b = Buffer.from(new TextDecoder().decode(data).replace(/\s+/g, ""), "base64");
+        if (isJpeg(b)) data = new Uint8Array(b);
+      }
+      if (isJpeg(data) || /image/i.test(p.type)) {
+        parts.push(`${p.name} (${p.type || "jpeg"} ${data.length} bytes)`);
+        if (!photo || p.name === "snapshot") photo = new Blob([new Uint8Array(data)], { type: "image/jpeg" });
       } else {
-        parts.push(`${name} (${v.type || "file"} ${v.size} bytes)`);
-        const isImage = /image|jpe?g/i.test(v.type) || /snapshot|image|pic|jpg/i.test(name);
-        if (isImage && (!photo || name === "snapshot")) photo = v;
-        else if (!isImage && (!text || name === "event")) text = await v.text();
+        const v = new TextDecoder().decode(data);
+        parts.push(`${p.name} (text ${v.length})`);
+        if (!text || p.name === "event") text = v;
       }
     }
     let body: unknown = {};

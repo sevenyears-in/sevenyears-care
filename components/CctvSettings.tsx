@@ -98,8 +98,8 @@ export default function CctvSettings() {
                   {[
                     ["Host IP / Domain", host],
                     ["URL", path],
-                    ["Protocol", "HTTPS"],
-                    ["Port", "443"],
+                    ["Protocol", "HTTP"],
+                    ["Port", "80"],
                     ["Attach image", "On (tick)"],
                   ].map(([k, v]) => (
                     <tr key={k}>
