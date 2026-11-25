@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { canWriteLetters, setSignature, setSignatureImage, signatureFor } from "@/lib/warning-letters";
 
-// The name and title printed under "For Seven Years," on the letters this person issues.
+// The name and title printed under "For Seven Years Kids Care LLP," on the letters this person issues.
 export async function GET() {
   const auth = await requireStaff();
   if (auth.response) return auth.response;

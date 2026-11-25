@@ -93,7 +93,7 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           )}
         </div>
         <div className="mt-8 text-sm">
-          <p>For Seven Years,</p>
+          <p>For Seven Years Kids Care LLP,</p>
           {sigUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={sigUrl} alt="Signature" className="my-1 h-14 w-auto" />

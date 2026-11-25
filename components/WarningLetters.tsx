@@ -399,7 +399,7 @@ export function LetterActions({
   );
 }
 
-/** The issuer's own signature on letters (name and title under "For Seven Years,"). */
+/** The issuer's own signature on letters (name and title under "For Seven Years Kids Care LLP,"). */
 export function LetterSignature({ name: name0, title: title0, imageUrl }: { name: string; title: string; imageUrl: string | null }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -453,7 +453,7 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
           <p className="text-xs font-bold uppercase text-black/50">Your signature on letters</p>
           {!editing && (
             <p className="mt-1 text-sm">
-              For Seven Years,
+              For Seven Years Kids Care LLP,
               <br />
               {imageUrl && (
                 // eslint-disable-next-line @next/next/no-img-element

@@ -1,13 +1,22 @@
 // Warning letter PDF on the Seven Years letterhead, A4 (595 × 842 pt). Server only.
-// public/letterhead-a4.jpg is the letterhead laid out on A4: the header at the top, the footer at
-// the bottom and the watermark centred (made from public/letterhead.jpg without stretching). The
-// text sits between the logo and the purple line, and runs onto more pages if needed.
+// public/letterhead-a4.jpg is the letterhead laid out on A4 (logo and watermark, made from
+// public/letterhead.jpg without stretching); the footer (company name, address, contacts) is drawn
+// here as text so it stays sharp and easy to change. The letter text sits between the logo and the
+// purple line, and runs onto more pages if needed.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { embedPoppins } from "@/lib/pdf-fonts";
 import { formatDate } from "@/lib/helpers";
+
+/** Footer on every page of the letter. */
+const FOOTER = {
+  line1: "SEVEN YEARS KIDS CARE LLP  ·  Near Passport Seva Kendra, Edodi, Vatakara  ·  T +91 8330 070707",
+  line2: "sevenyears070707@gmail.com   ·   www.sevenyears.in   ·   Instagram: seven_years_babyshop   ·   Facebook: sevenyearsbabyshop",
+};
+const FOOTER_PURPLE = rgb(137 / 255, 133 / 255, 210 / 255);
+const FOOTER_TEAL = rgb(40 / 255, 176 / 255, 192 / 255);
 
 export type LetterPdfData = {
   number: string | null;
@@ -35,7 +44,7 @@ const H = 841.89;
 const LEFT = 60;
 const RIGHT = W - 60;
 const TOP = H - 118; // below the logo
-const BOTTOM = 80; // above the purple line
+const BOTTOM = 72; // above the purple line (drawn at 50–55 pt)
 const DARK = rgb(0.086, 0.086, 0.086);
 const GREY = rgb(0.42, 0.42, 0.42);
 const PINK = rgb(0.937, 0.373, 0.475);
@@ -226,7 +235,7 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
   // Signature
   y -= 16;
   ensure(70);
-  text("For Seven Years,", { size: 10.5 });
+  text("For Seven Years Kids Care LLP,", { size: 10.5 });
   let sigImg: PDFImage | null = null;
   if (d.signature) {
     try {
@@ -270,6 +279,19 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
     y -= 12;
   }
   text(sigImg ? "This letter was issued through the Seven Years Care app." : "This letter was issued through the Seven Years Care app and is valid without a signature.", { size: 8, color: GREY });
+
+  // Footer on every page: purple line, company name and address, contacts (shrunk to fit).
+  for (const pg of pdf.getPages()) {
+    pg.drawRectangle({ x: 0, y: 50, width: W, height: 5, color: FOOTER_PURPLE });
+    const line = (t: string, font: PDFFont, size0: number, yy: number, color: ReturnType<typeof rgb>) => {
+      const txt = safe(t, font);
+      let size = size0;
+      while (size > 6 && font.widthOfTextAtSize(txt, size) > W - 60) size -= 0.25;
+      pg.drawText(txt, { x: (W - font.widthOfTextAtSize(txt, size)) / 2, y: yy, size, font, color });
+    };
+    line(FOOTER.line1, bold, 8.5, 34, FOOTER_TEAL);
+    line(FOOTER.line2, regular, 8, 20, GREY);
+  }
 
   // Revoked: a stamp across every page and a note at the end.
   if (d.revokedAt) {

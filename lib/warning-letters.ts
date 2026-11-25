@@ -449,7 +449,7 @@ export async function createLetter(
   if (subject.length < 4) throw new Error("Write the subject of the letter.");
   if (body.length < 20) throw new Error("Write the letter.");
   if (/\[(dates?|details|date, place|achieved)/i.test(body)) throw new Error("Replace the [ ... ] parts of the letter with the real details first.");
-  // Name and title printed under "For Seven Years," (Settings on the Warning letters page).
+  // Name and title printed under "For Seven Years Kids Care LLP," (Settings on the Warning letters page).
   const sig = await signatureFor(me);
   const { data, error } = await supabaseAdmin
     .from("warning_letters")
