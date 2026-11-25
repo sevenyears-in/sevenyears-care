@@ -43,7 +43,7 @@ export type CctvLink = {
   /** Secret part of the URL path the NVR sends to. */
   key: string;
   store: string;
-  /** Cameras (NVR channel numbers) that look at the punching machine. Empty = every camera. */
+  /** Cameras (NVR channel numbers) facing the staff entrance. Empty = every camera. */
   channels: number[];
   createdAt: string;
   createdBy: string;
@@ -402,4 +402,22 @@ export async function cctvCleanupTick(punchesOf: (store: string, day: string) =>
     }
   }
   return kept || removed ? `cctv: kept ${kept} photo(s) at punches, removed ${removed} old event(s)` : "";
+}
+
+/** Signed photo links (1 hour) for event ids. */
+export async function eventPhotos(ids: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const list = [...new Set(ids.filter((n) => Number.isFinite(n)))];
+  if (!list.length) return out;
+  const { data } = await supabaseAdmin.from("cctv_events").select("id, photo_path").in("id", list);
+  const rows = ((data ?? []) as { id: number; photo_path: string | null }[]).filter((r) => r.photo_path);
+  if (!rows.length) return out;
+  const { data: signed } = await supabaseAdmin.storage.from(CCTV_BUCKET).createSignedUrls(rows.map((r) => r.photo_path!), 60 * 60);
+  const byPath = new Map<string, string>();
+  for (const x of (signed ?? []) as { path: string | null; signedUrl: string | null }[]) if (x.path && x.signedUrl) byPath.set(x.path, x.signedUrl);
+  for (const r of rows) {
+    const u = byPath.get(r.photo_path!);
+    if (u) out.set(r.id, u);
+  }
+  return out;
 }

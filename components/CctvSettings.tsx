@@ -126,7 +126,7 @@ export default function CctvSettings() {
 
               {l.cameras.length > 0 && (
                 <>
-                  <p className="mt-4 text-sm font-semibold">Which camera looks at the punching machine?</p>
+                  <p className="mt-4 text-sm font-semibold">Which camera faces the staff entrance?</p>
                   <p className="text-xs text-black/50">Tick it. Photos from other cameras are then not kept. Nothing ticked = every camera.</p>
                   <div className="mt-2 flex flex-wrap gap-3">
                     {l.cameras.map((c) => {

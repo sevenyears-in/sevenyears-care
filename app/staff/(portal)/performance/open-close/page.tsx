@@ -4,12 +4,12 @@ import { getCurrentStaff } from "@/lib/auth";
 import { formatDate, todayISO } from "@/lib/helpers";
 import { monthReport } from "@/lib/performance";
 import { merchStores } from "@/lib/merch-access";
-import { clockIST, loadCamChecks, loadOpenCloseHistory, openCloseStores, punchMoments, type CamCheck as Check, type OpenClose, type Sop } from "@/lib/store-open-close";
+import { CAM_MATCH_MIN, clockIST, loadCamChecks, loadCamEdges, loadOpenCloseHistory, openCloseStores, punchMoments, type CamCheck as Check, type CamEdge, type OpenClose, type Sop } from "@/lib/store-open-close";
 import { ApproveSop } from "@/components/ApproveSop";
 import { CamCheck, type CamPhotoView } from "@/components/CamCheck";
-import { cctvSince, photosAtPunches } from "@/lib/cctv";
+import { cctvSince, eventPhotos, photosAtPunches } from "@/lib/cctv";
 import { loadKeyHolders } from "@/lib/store-keyholders";
-import { canWriteLetters } from "@/lib/warning-letters";
+import { canWriteLetters, smOfStore } from "@/lib/warning-letters";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Store opening & closing" };
@@ -22,12 +22,32 @@ const BADGE: Record<Sop, { text: string; cls: string }> = {
 
 type Cam = { photos: CamPhotoView[]; check: Check | null; missing: boolean } | null;
 
-function Cell({ r, kind, canApprove, cam, canWarn }: { r: OpenClose; kind: "open" | "close"; canApprove: boolean; cam: Cam; canWarn: boolean }) {
+/** First person the entrance camera saw (opening) / last person (closing), matched with the punches. */
+function EntryExit({ kind, edge, photo }: { kind: "open" | "close"; edge: CamEdge; photo: string | null }) {
+  if (!edge.flag) return null;
+  if (edge.flag === "none") return <p className="mt-1 text-[11px] text-black/40">🎥 No entrance-camera picture {kind === "open" ? "in the morning" : "at night"}</p>;
+  const ok = edge.flag === "ok";
+  return (
+    <div className={`mt-2 rounded-xl p-2 ring-1 ${ok ? "bg-green-50/60 ring-green-100" : "bg-red-50 ring-red-100"}`}>
+      <p className={`text-[11px] font-bold ${ok ? "text-green-800" : "text-red-800"}`}>
+        🎥 {kind === "open" ? "First in" : "Last out"} {edge.at ? clockIST(edge.at) : ""} · {ok ? `matches an allowed person's punch (±${CAM_MATCH_MIN} min)` : kind === "open" ? "entered before an allowed person" : "left after the allowed person"}
+      </p>
+      {edge.note && <p className="mt-0.5 text-[11px] text-red-800/80">{edge.note}</p>}
+      {photo && (
+        <a href={photo} target="_blank" rel="noreferrer" className="mt-1 block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photo} alt={kind === "open" ? "First person in" : "Last person out"} className="h-24 w-auto rounded-lg object-cover" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function Cell({ r, kind, canApprove, cam, warnTo, edge, edgePhoto }: { r: OpenClose; kind: "open" | "close"; canApprove: boolean; cam: Cam; warnTo: string | null; edge: CamEdge | null; edgePhoto: string | null }) {
   const at = kind === "open" ? r.openedAt : r.closedAt;
   const by = kind === "open" ? r.openedBy : r.closedBy;
   const sop = kind === "open" ? r.openSop : r.closeSop;
   const approval = kind === "open" ? r.openApproval : r.closeApproval;
-  const code = kind === "open" ? r.openedByCode : r.closedByCode;
   if (!at) return <td className="px-3 py-2 text-black/40">—</td>;
   return (
     <td className="px-3 py-2 align-top">
@@ -40,12 +60,13 @@ function Cell({ r, kind, canApprove, cam, canWarn }: { r: OpenClose; kind: "open
           <ApproveSop day={r.day} store={r.store} kind={kind} />
         </div>
       )}
-      {sop === "violation" && canWarn && code && (
+      {edge && <EntryExit kind={kind} edge={edge} photo={edgePhoto} />}
+      {(sop === "violation" || edge?.flag === "early" || edge?.flag === "late") && warnTo && (
         <Link
-          href={`/staff/letters?code=${encodeURIComponent(code)}&kind=sop`}
+          href={`/staff/letters?code=${encodeURIComponent(warnTo)}&kind=sop`}
           className="mt-1 inline-block text-[11px] font-bold text-[#ff5e79] hover:underline"
         >
-          ✉️ Warning letter
+          ✉️ Warning letter to the SM
         </Link>
       )}
       {cam && by && (
@@ -97,6 +118,18 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
     const recent = at !== null && Date.now() - at < 10 * 60_000;
     return { photos: list, check: checks.get(day)?.[kind] ?? null, missing: at !== null && !list.length && !recent };
   };
+  // Entrance camera vs punches (first in / last out): Directors, SM, Super Admin, HR (and management).
+  const seesEdges = seesCamera || ["hr_head", "hr_executive", "store_manager"].includes(staff.role);
+  const edges = seesEdges && since ? await loadCamEdges(store, camDays).catch(() => new Map<string, { open: CamEdge; close: CamEdge }>()) : new Map<string, { open: CamEdge; close: CamEdge }>();
+  const edgeUrls = await eventPhotos([...edges.values()].flatMap((e) => [e.open.event, e.close.event]).filter((x): x is number => typeof x === "number")).catch(() => new Map<number, string>());
+  const edgeOf = (day: string, kind: "open" | "close") => edges.get(day)?.[kind] ?? null;
+  const edgePhotoOf = (day: string, kind: "open" | "close") => {
+    const id = edges.get(day)?.[kind]?.event;
+    return typeof id === "number" ? edgeUrls.get(id) ?? null : null;
+  };
+  // SOP warnings go to the store's SM (the SM answers for who opens and closes the store).
+  const sm = canWarn ? (report?.stores.find((s) => s.store === store)?.people.find((p) => p.group === "sm") ?? null) : null;
+  const smCode = sm?.userId ?? (canWarn ? await smOfStore(store).catch(() => null) : null);
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
   const allowed = (await loadKeyHolders().catch(() => [])).filter((k) => k.store === store && (!k.to || k.to >= today));
   const proxies = [...checks.values()].filter((c) => c.open?.verdict === "proxy" || c.close?.verdict === "proxy").length;
@@ -154,7 +187,7 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
       )}
       {seesCamera && since && (
         <p className="text-sm text-black/55">
-          📷 Camera photos from {formatDate(since)}: taken by the camera at the punching machine just before and after the opener&apos;s and closer&apos;s own punch.
+          📷 Entrance camera from {formatDate(since)}: the first person in each morning and the last person out each night must match an allowed person&apos;s punch within {CAM_MATCH_MIN} minutes; photos near the opener&apos;s and closer&apos;s own punch show who was at the door.
           {canApprove ? " Check that the photo shows that person; mark it if someone else punched for them." : ""}
         </p>
       )}
@@ -172,8 +205,8 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
             {rows.map((r) => (
               <tr key={r.day} className="border-t border-black/5">
                 <td className="px-3 py-2 align-top font-semibold">{formatDate(r.day)}</td>
-                <Cell r={r} kind="open" canApprove={canApprove} cam={camOf(r.day, "open")} canWarn={canWarn} />
-                <Cell r={r} kind="close" canApprove={canApprove} cam={camOf(r.day, "close")} canWarn={canWarn} />
+                <Cell r={r} kind="open" canApprove={canApprove} cam={camOf(r.day, "open")} warnTo={smCode} edge={edgeOf(r.day, "open")} edgePhoto={edgePhotoOf(r.day, "open")} />
+                <Cell r={r} kind="close" canApprove={canApprove} cam={camOf(r.day, "close")} warnTo={smCode} edge={edgeOf(r.day, "close")} edgePhoto={edgePhotoOf(r.day, "close")} />
               </tr>
             ))}
             {!rows.length && (

@@ -122,23 +122,49 @@ export async function letterTemplate(kind: LetterKind, person: { id: string; use
   const close =
     "\nYou are instructed to correct this immediately. Any repetition will lead to stricter disciplinary action as per company policy.";
   if (kind === "sop") {
+    // The Store Manager answers for who opens and closes the store: the letter lists every
+    // deviation at their store from Care's records (punches, SOP check, camera check).
     const since = new Date(Date.now() - 60 * 86_400_000).toISOString().slice(0, 10);
     const code = attendanceCode(person.userId);
-    const { data } = await supabaseAdmin
+    const smStore = await smStoreOf(person.userId);
+    type R = {
+      day: string; store: string;
+      opened_at: string | null; opened_by: string | null; opened_by_name: string | null; open_sop: string | null; open_cam: string | null; open_cam_flag: string | null; open_cam_flag_note: string | null;
+      closed_at: string | null; closed_by: string | null; closed_by_name: string | null; close_sop: string | null; close_cam: string | null; close_cam_flag: string | null; close_cam_flag_note: string | null;
+    };
+    let q = supabaseAdmin
       .from("store_open_close")
-      .select("day, store, opened_at, opened_by, open_sop, closed_at, closed_by, close_sop")
+      .select("day, store, opened_at, opened_by, opened_by_name, open_sop, open_cam, open_cam_flag, open_cam_flag_note, closed_at, closed_by, closed_by_name, close_sop, close_cam, close_cam_flag, close_cam_flag_note")
       .gte("day", since)
-      .or("open_sop.eq.violation,close_sop.eq.violation")
       .order("day");
-    const rows = (data ?? []) as { day: string; store: string; opened_at: string | null; opened_by: string | null; open_sop: string | null; closed_at: string | null; closed_by: string | null; close_sop: string | null }[];
+    if (smStore) q = q.eq("store", smStore);
+    const { data } = await q;
+    const rows = (data ?? []) as R[];
     const lines: string[] = [];
+    const who = (name: string | null) => (name ?? "").replace(/\s*\([^)]*\)\s*$/, "") || "someone";
     for (const r of rows) {
-      if (attendanceCode(r.opened_by) === code && r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: opened ${r.store} at ${r.opened_at ? clockIST(r.opened_at) : "-"}`);
-      if (attendanceCode(r.closed_by) === code && r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: closed ${r.store} at ${r.closed_at ? clockIST(r.closed_at) : "-"}`);
+      const mine = (c: string | null) => attendanceCode(c) === code;
+      if (smStore) {
+        if (r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was opened at ${r.opened_at ? clockIST(r.opened_at) : "-"} by ${who(r.opened_by_name)}, who is not allowed to open it`);
+        if (r.open_cam_flag === "early" && r.open_cam_flag_note) lines.push(`- ${formatDate(r.day)} (entrance camera): ${r.open_cam_flag_note}`);
+        if (r.open_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${who(r.opened_by_name)} at the opening`);
+        if (r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was closed at ${r.closed_at ? clockIST(r.closed_at) : "-"} by ${who(r.closed_by_name)}, who is not allowed to close it`);
+        if (r.close_cam_flag === "late" && r.close_cam_flag_note) lines.push(`- ${formatDate(r.day)} (entrance camera): ${r.close_cam_flag_note}`);
+        if (r.close_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${who(r.closed_by_name)} at the closing`);
+      } else {
+        if (mine(r.opened_by) && r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: opened ${r.store} at ${r.opened_at ? clockIST(r.opened_at) : "-"}`);
+        if (mine(r.closed_by) && r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: closed ${r.store} at ${r.closed_at ? clockIST(r.closed_at) : "-"}`);
+      }
+    }
+    if (smStore) {
+      return {
+        subject: `Warning for not following the store opening / closing SOP at ${smStore}`,
+        body: `Dear ${first},\n\nAs the Store Manager of ${smStore}, you are responsible for making sure that the store is opened and closed only by the Store Manager or the ASM / Floor Manager, or by a person the management has allowed in advance. The records in Seven Years Care (punching machine and entrance camera) show the following deviations in the last 60 days:\n\n${lines.length ? lines.join("\n") : "- No deviations recorded in the last 60 days."}\n\nThis is a serious lapse in the control of the store. You must personally open and close the store (or ensure the ASM / Floor Manager does) and must not hand over the keys to anyone else without the management's approval.\n${close}`,
+      };
     }
     return {
       subject: "Warning for not following the store opening / closing SOP",
-      body: `Dear ${first},\n\nThis letter is a formal warning about the following deviations from the Standard Operating Procedure (SOP) for opening and closing the store:\n\n${lines.length ? lines.join("\n") : "- [dates and details]"}\n\nAs per the SOP, only the Store Manager or the ASM / Floor Manager may open and close the store, unless the management has allowed someone else in advance. These deviations are serious.\n${close}`,
+      body: `Dear ${first},\n\nThis letter is a formal warning about the following deviations from the Standard Operating Procedure (SOP) for opening and closing the store, as recorded in Seven Years Care:\n\n${lines.length ? lines.join("\n") : "- No deviations recorded in the last 60 days."}\n\nAs per the SOP, only the Store Manager or the ASM / Floor Manager may open and close the store, unless the management has allowed someone else in advance. These deviations are serious.\n${close}`,
     };
   }
   if (kind === "performance") {
@@ -490,4 +516,19 @@ export async function acknowledgeLetter(me: StaffUser, l: Letter, note: string) 
       `${l.staff_name} has read the letter${reply ? ` and replied: ${reply.slice(0, 200)}` : "."}`
     );
   }
+}
+
+/** Store of a Store Manager (incentive group "sm"); null when the person is not an SM. */
+export async function smStoreOf(userId: string): Promise<string | null> {
+  const { loadStaffForPerformance } = await import("@/lib/performance");
+  const code = attendanceCode(userId);
+  const p = (await loadStaffForPerformance()).find((x) => x.userId === code);
+  return p && p.group === "sm" && p.store ? p.store : null;
+}
+
+/** Employee code of the Store Manager of a store (for SOP warnings). */
+export async function smOfStore(store: string): Promise<string | null> {
+  const { loadStaffForPerformance } = await import("@/lib/performance");
+  const p = (await loadStaffForPerformance()).find((x) => x.group === "sm" && x.store === store.toUpperCase());
+  return p?.userId ?? null;
 }

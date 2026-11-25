@@ -580,6 +580,9 @@ export async function openCloseTick(at = new Date()): Promise<string> {
         }
       }
     }
+    // Entrance camera vs punches (first entry / last exit).
+    const cam = await cameraCheckTick(at, staff).catch((e) => `camera check error: ${e instanceof Error ? e.message : e}`);
+    if (cam) notes.push(cam);
     // Earlier days recorded before the SOP check (or still missing who opened / closed): fill in
     // quietly, without notices. Every 10 minutes is enough.
     if (now.minutes % 10 === 0) {
@@ -628,4 +631,216 @@ async function fillPastSop(staff: Map<string, Person>, devices: Record<string, s
     }
   }
   return n ? `filled who opened / closed for ${n} earlier day(s)` : "";
+}
+
+// ------------------------------------------------------------------
+// Camera check: entrance camera vs punches
+// ------------------------------------------------------------------
+//
+// Only the SM / ASM (or someone the Super Admin allowed) may open and close a store, so they must
+// be the first in and the last out. Opening: the first person the entrance camera saw that morning
+// must be matched by an allowed person's punch within 2 minutes. Closing: the last person the
+// camera saw that night must leave within 2 minutes of an allowed person's last punch. Anything
+// else is flagged to the Directors, the store's SM, the Super Admin and HR, with the photo.
+
+/** Allowed gap between the camera and an allowed person's punch. */
+export const CAM_MATCH_MIN = 2;
+/** Camera windows (India time, minutes of the day) for the first entry and the last exit. */
+const CAM_OPEN_FROM = 6 * 60;
+const CAM_OPEN_TO = 10 * 60 + 30;
+const CAM_CLOSE_FROM = 20 * 60 + 30;
+const CAM_CLOSE_TO = 24 * 60 + 90; // 1:30 next morning
+/** Wait this long after the first entry before judging (punches reach Care every few minutes). */
+const CAM_OPEN_WAIT_MIN = 10;
+
+export type CamFlag = "ok" | "early" | "late" | "none";
+
+type CamRow = {
+  day: string;
+  store: string;
+  closed_at: string | null;
+  closed_notified_at: string | null;
+  open_cam_flag: CamFlag | null;
+  open_entry_at: string | null;
+  open_cam_alerted_at: string | null;
+  close_cam_flag: CamFlag | null;
+  close_exit_at: string | null;
+  close_cam_alerted_at: string | null;
+};
+
+/** Is this code allowed to open (close) this store on this day? */
+function allowedFor(staff: Map<string, Person>, store: string, day: string, kind: "open" | "close", code: string) {
+  const p = staff.get(code);
+  if (p && (p.group === "sm" || p.group === "asm") && (!p.store || p.store === store)) return true;
+  return Boolean(keyHolderFor(keyHolders, store, day, kind, code));
+}
+
+const nameOf = (staff: Map<string, Person>, code: string) => staff.get(code)?.name ?? machineNames.get(code) ?? `User ID ${code}`;
+const mins = (ms: number) => Math.max(1, Math.round(ms / 60_000));
+
+/** First (or last) entrance-camera detection of a store in a window. */
+async function edgeEvent(store: string, channels: number[], fromMs: number, toMs: number, last: boolean) {
+  let q = supabaseAdmin
+    .from("cctv_events")
+    .select("id, event_at, photo_path")
+    .eq("store", store)
+    .gte("event_at", new Date(fromMs).toISOString())
+    .lt("event_at", new Date(toMs).toISOString())
+    .order("event_at", { ascending: !last })
+    .limit(1);
+  if (channels.length) q = q.in("channel", channels);
+  const { data } = await q;
+  const e = (data ?? [])[0] as { id: number; event_at: string; photo_path: string | null } | undefined;
+  return e ? { id: e.id, at: Date.parse(e.event_at) } : null;
+}
+
+async function camAlert(store: string, title: string, body: string) {
+  const { findDirectors } = await import("@/lib/notify");
+  const [{ data }, directors] = await Promise.all([
+    supabaseAdmin.from("staff_users").select("id, role, store_name, incentive_group").eq("is_active", true),
+    findDirectors(store).catch(() => []),
+  ]);
+  const ids = new Set<string>(directors.map((d) => d.id));
+  for (const s of (data ?? []) as { id: string; role: string; store_name: string | null; incentive_group: string | null }[]) {
+    const own = (s.store_name ?? "").toUpperCase() === store;
+    if (["super_admin", "hr_head", "hr_executive"].includes(s.role)) ids.add(s.id);
+    else if (own && (s.role === "store_manager" || s.incentive_group === "sm")) ids.add(s.id);
+  }
+  if (!ids.size) return 0;
+  const list = [...ids];
+  await supabaseAdmin.from("staff_notifications").insert(list.map((staff_id) => ({ staff_id, ticket_type: null, ticket_id: null, ticket_number: null, title, body })));
+  await pushToStaff(list, { title, body, url: `${siteUrl()}/staff/performance/open-close?store=${encodeURIComponent(store)}` }).catch(() => undefined);
+  return list.length;
+}
+
+/** Runs every minute (from openCloseTick): judges today's opening and the last closing. */
+export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Person>): Promise<string> {
+  const { loadCctv } = await import("@/lib/cctv");
+  const { links } = await loadCctv();
+  if (!links.length) return "";
+  const now = istNow(at);
+  const days = [shiftDay(now.date, -1), now.date];
+  const { data } = await supabaseAdmin
+    .from("store_open_close")
+    .select("day, store, closed_at, closed_notified_at, open_cam_flag, open_entry_at, open_cam_alerted_at, close_cam_flag, close_exit_at, close_cam_alerted_at")
+    .in("day", days)
+    .in("store", links.map((l) => l.store));
+  const rows = (data ?? []) as CamRow[];
+  if (!rows.length) return "";
+  const staff = staffIn ?? (await staffByCode());
+  const att = await attendanceSettings();
+  const syncedTo = att.lastSyncAt ? Date.parse(att.lastSyncAt) : 0;
+  const devices = await deviceStores();
+  const notes: string[] = [];
+
+  for (const r of rows) {
+    const link = links.find((l) => l.store === r.store);
+    if (!link) continue;
+    const start = dayStartUtc(r.day);
+    const deviceIds = Object.entries(devices).filter(([, st]) => st === r.store).map(([d]) => d);
+    if (!deviceIds.length) continue;
+    const punchList = async () => {
+      const { data: p } = await supabaseAdmin
+        .from("attendance_punches")
+        .select("emp_code, punch_time")
+        .in("device", deviceIds)
+        .gte("punch_time", new Date(start + EARLIEST_OPEN * 60_000).toISOString())
+        .lt("punch_time", new Date(start + 86_400_000).toISOString())
+        .order("punch_time")
+        .limit(3000);
+      return ((p ?? []) as { emp_code: string; punch_time: string }[]).map((x) => ({ code: attendanceCode(x.emp_code), at: Date.parse(x.punch_time) }));
+    };
+
+    // Opening: judged once, 10 minutes after the first entry (punches synced past it).
+    if (!r.open_cam_flag && r.day === now.date) {
+      const openEnd = start + CAM_OPEN_TO * 60_000;
+      const entry = await edgeEvent(r.store, link.channels, start + CAM_OPEN_FROM * 60_000, openEnd, false);
+      if (!entry) {
+        if (at.getTime() > openEnd) await supabaseAdmin.from("store_open_close").update({ open_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
+      } else if (at.getTime() >= entry.at + CAM_OPEN_WAIT_MIN * 60_000 && syncedTo >= entry.at + (CAM_MATCH_MIN + 1) * 60_000) {
+        const punches = await punchList();
+        const allowed = punches.find((p) => allowedFor(staff, r.store, r.day, "open", p.code));
+        const ok = Boolean(allowed && allowed.at <= entry.at + CAM_MATCH_MIN * 60_000);
+        const firstPunch = punches.find((p) => p.at >= entry.at - CAM_MATCH_MIN * 60_000);
+        const note = ok
+          ? null
+          : allowed
+            ? `First person entered at ${clockIST(entry.at)}; the first allowed person (${nameOf(staff, allowed.code)}) punched at ${clockIST(allowed.at)}, ${mins(allowed.at - entry.at)} min later.${firstPunch && firstPunch.code !== allowed.code ? ` First punch after the entry: ${nameOf(staff, firstPunch.code)} at ${clockIST(firstPunch.at)}.` : ""}`
+            : `First person entered at ${clockIST(entry.at)}; no SM / ASM / allowed person punched.${firstPunch ? ` First punch: ${nameOf(staff, firstPunch.code)} at ${clockIST(firstPunch.at)}.` : ""}`;
+        await supabaseAdmin
+          .from("store_open_close")
+          .update({ open_entry_at: new Date(entry.at).toISOString(), open_entry_event: entry.id, open_cam_flag: ok ? "ok" : "early", open_cam_flag_note: note })
+          .eq("day", r.day)
+          .eq("store", r.store);
+        await supabaseAdmin.from("cctv_events").update({ keep: true }).eq("id", entry.id);
+        if (!ok && !r.open_cam_alerted_at) {
+          const { data: claimed } = await supabaseAdmin
+            .from("store_open_close")
+            .update({ open_cam_alerted_at: at.toISOString() })
+            .eq("day", r.day)
+            .eq("store", r.store)
+            .is("open_cam_alerted_at", null)
+            .select("store");
+          if (claimed?.length) notes.push(`${r.store} opening flagged → ${await camAlert(r.store, `⚠ Camera check · ${r.store} opening`, note ?? "")}`);
+        }
+      }
+    }
+
+    // Closing: once the closing is known (closing notice sent) and 20 minutes after the last punch;
+    // checked again while the night window lasts, in case someone is seen later.
+    const closeEnd = start + CAM_CLOSE_TO * 60_000;
+    if (r.closed_notified_at && r.closed_at && at.getTime() >= Date.parse(r.closed_at) + 20 * 60_000 && (!r.close_cam_flag || (r.close_cam_flag === "ok" && at.getTime() <= closeEnd + 5 * 60_000))) {
+      const exit = await edgeEvent(r.store, link.channels, start + CAM_CLOSE_FROM * 60_000, closeEnd, true);
+      if (!exit) {
+        if (!r.close_cam_flag && at.getTime() > closeEnd) await supabaseAdmin.from("store_open_close").update({ close_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
+        continue;
+      }
+      if (r.close_exit_at && Date.parse(r.close_exit_at) >= exit.at) continue; // nothing new
+      const punches = await punchList();
+      const allowed = [...punches].reverse().find((p) => allowedFor(staff, r.store, r.day, "close", p.code));
+      const ok = Boolean(allowed && exit.at <= allowed.at + CAM_MATCH_MIN * 60_000);
+      const lastPunch = punches[punches.length - 1];
+      const note = ok
+        ? null
+        : allowed
+          ? `Last person seen leaving at ${clockIST(exit.at)}, ${mins(exit.at - allowed.at)} min after the last allowed person (${nameOf(staff, allowed.code)}) punched at ${clockIST(allowed.at)}.${lastPunch && lastPunch.code !== allowed.code ? ` Last punch: ${nameOf(staff, lastPunch.code)} at ${clockIST(lastPunch.at)}.` : ""}`
+          : `Last person seen leaving at ${clockIST(exit.at)}; no SM / ASM / allowed person punched out.${lastPunch ? ` Last punch: ${nameOf(staff, lastPunch.code)} at ${clockIST(lastPunch.at)}.` : ""}`;
+      await supabaseAdmin
+        .from("store_open_close")
+        .update({ close_exit_at: new Date(exit.at).toISOString(), close_exit_event: exit.id, close_cam_flag: ok ? "ok" : "late", close_cam_flag_note: note })
+        .eq("day", r.day)
+        .eq("store", r.store);
+      await supabaseAdmin.from("cctv_events").update({ keep: true }).eq("id", exit.id);
+      if (!ok && !r.close_cam_alerted_at) {
+        const { data: claimed } = await supabaseAdmin
+          .from("store_open_close")
+          .update({ close_cam_alerted_at: at.toISOString() })
+          .eq("day", r.day)
+          .eq("store", r.store)
+          .is("close_cam_alerted_at", null)
+          .select("store");
+        if (claimed?.length) notes.push(`${r.store} closing flagged → ${await camAlert(r.store, `⚠ Camera check · ${r.store} closing`, note ?? "")}`);
+      }
+    }
+  }
+  return notes.join("; ");
+}
+
+/** Camera check of the days shown (first entry / last exit, flag, note). */
+export type CamEdge = { at: string | null; event: number | null; flag: CamFlag | null; note: string | null };
+export async function loadCamEdges(store: string, days: string[]): Promise<Map<string, { open: CamEdge; close: CamEdge }>> {
+  const out = new Map<string, { open: CamEdge; close: CamEdge }>();
+  if (!days.length) return out;
+  const { data } = await supabaseAdmin
+    .from("store_open_close")
+    .select("day, open_entry_at, open_entry_event, open_cam_flag, open_cam_flag_note, close_exit_at, close_exit_event, close_cam_flag, close_cam_flag_note")
+    .eq("store", store)
+    .in("day", days);
+  for (const r of (data ?? []) as Record<string, string | number | null>[]) {
+    out.set(String(r.day), {
+      open: { at: (r.open_entry_at as string) ?? null, event: (r.open_entry_event as number) ?? null, flag: (r.open_cam_flag as CamFlag) ?? null, note: (r.open_cam_flag_note as string) ?? null },
+      close: { at: (r.close_exit_at as string) ?? null, event: (r.close_exit_event as number) ?? null, flag: (r.close_cam_flag as CamFlag) ?? null, note: (r.close_cam_flag_note as string) ?? null },
+    });
+  }
+  return out;
 }
