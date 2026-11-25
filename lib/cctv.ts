@@ -23,6 +23,19 @@ const KEEP_LINKED_DAYS = 90;
 const KEEP_OTHER_DAYS = 3;
 /** An NVR clock further off than this: the time the event arrived is used instead. */
 const CLOCK_TOLERANCE_MIN = 10;
+/**
+ * Only detections around opening and closing are kept (IST minutes of the day): the recorders send
+ * a detection every few seconds all day, and only the opening / closing punches need a photo.
+ */
+const KEEP_WINDOWS: [number, number][] = [
+  [6 * 60, 10 * 60 + 30], // opening: 6:00–10:30
+  [20 * 60 + 30, 24 * 60], // closing: 20:30–midnight
+  [0, 90], // late closing: midnight–1:30
+];
+const inKeepWindow = (ms: number) => {
+  const m = istNow(new Date(ms)).minutes;
+  return KEEP_WINDOWS.some(([a, b]) => m >= a && m < b);
+};
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 
 export type CctvLink = {
@@ -175,6 +188,7 @@ export async function saveEvents(link: CctvLink, body: unknown, photo: Blob | nu
     const timeRaw = pick(m, ["localtime", "datetime", "eventtime", "time", "timestamp"]);
     const t = nvrTime(timeRaw);
     const at = t !== null && Math.abs(t - received) <= CLOCK_TOLERANCE_MIN * 60_000 ? t : received;
+    if (!inKeepWindow(at)) continue;
     rows.push({
       store: link.store,
       link_id: link.id,

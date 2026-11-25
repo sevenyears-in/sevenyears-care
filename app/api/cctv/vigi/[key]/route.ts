@@ -107,7 +107,8 @@ async function receive(request: Request, ctx: Ctx) {
     parts = r.parts;
     sample = r.text.slice(0, 600);
     const saved = await saveEvents(link, r.body, r.photo);
-    await logCctvRequest({ ...note, store: link.store, parts, sample, saved, photo: Boolean(r.photo) });
+    // Detections outside the opening / closing hours (or from other cameras) are not kept or noted.
+    if (saved > 0) await logCctvRequest({ ...note, store: link.store, parts, sample, saved, photo: Boolean(r.photo) });
     return NextResponse.json({ ok: true, saved });
   } catch (e) {
     const error = e instanceof Error ? e.message : typeof e === "object" ? JSON.stringify(e) : String(e);
