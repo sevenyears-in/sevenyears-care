@@ -103,7 +103,22 @@ export type CctvRequest = {
   saved?: number;
   photo?: boolean;
   error?: string;
+  /** How the request reached the app (x-forwarded-proto) and the path, for checking the hosting. */
+  proto?: string | null;
+  path?: string;
 };
+
+/** Notes common to every call: method, type, size, client, protocol, path. */
+export function requestNote(request: Request) {
+  return {
+    method: request.method,
+    contentType: (request.headers.get("content-type") ?? "").slice(0, 120),
+    length: Number(request.headers.get("content-length") ?? 0) || null,
+    userAgent: (request.headers.get("user-agent") ?? "").slice(0, 80),
+    proto: request.headers.get("x-forwarded-proto"),
+    path: new URL(request.url).pathname.replace(/(\/api\/cctv\/vigi\/)([A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/, "$1$2…").slice(0, 120),
+  };
+}
 
 export async function logCctvRequest(r: Omit<CctvRequest, "at">) {
   try {

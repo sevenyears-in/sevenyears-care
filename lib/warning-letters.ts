@@ -183,7 +183,7 @@ export async function letterTemplate(kind: LetterKind, person: { id: string; use
           lateCount++;
           lateTotal += d.late;
           const start = shiftOn(settings, assignments, person.userId, d.date).start;
-          lines.push(`- ${formatDate(d.date)}: came at ${d.first} (shift starts ${minutesToTime(start)}) - ${lateTime(d.late)} late`);
+          lines.push(`- ${formatDate(d.date)}: came at ${d.first} (shift starts ${minutesToTime(start)}, ${settings.lateGraceMinutes} min grace) - ${lateTime(d.late)} late`);
         } else if (d.status === "absent") {
           absentCount++;
           lines.push(`- ${formatDate(d.date)}: absent without permission (no punch, not justified)`);

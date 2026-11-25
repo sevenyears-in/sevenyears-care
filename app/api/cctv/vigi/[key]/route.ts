@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { linkByKey, logCctvRequest, saveEvents } from "@/lib/cctv";
+import { linkByKey, logCctvRequest, requestNote, saveEvents } from "@/lib/cctv";
 
 // TP-Link VIGI NVR → Alarm Server (Settings → Event → Alarm Server on the NVR).
 // URL path: /api/cctv/vigi/<link key from Settings → Attendance → CCTV>.
@@ -49,12 +49,7 @@ async function readBody(request: Request): Promise<{ body: unknown; photo: Blob 
 async function receive(request: Request, ctx: Ctx) {
   const { key } = await ctx.params;
   const link = await linkByKey(key);
-  const note = {
-    method: request.method,
-    contentType: (request.headers.get("content-type") ?? "").slice(0, 120),
-    length: Number(request.headers.get("content-length") ?? 0) || null,
-    userAgent: (request.headers.get("user-agent") ?? "").slice(0, 80),
-  };
+  const note = requestNote(request);
   if (!link) {
     await logCctvRequest({ ...note, store: null, key: key.slice(0, 6), error: "Unknown link" });
     return NextResponse.json({ error: "Unknown link." }, { status: 404 });
@@ -84,11 +79,21 @@ export const PUT = receive;
 export async function GET(request: Request, ctx: Ctx) {
   const { key } = await ctx.params;
   const link = await linkByKey(key);
-  await logCctvRequest({ method: "GET", store: link?.store ?? null, key: key.slice(0, 6), userAgent: (request.headers.get("user-agent") ?? "").slice(0, 80) });
+  await logCctvRequest({ ...requestNote(request), store: link?.store ?? null, key: key.slice(0, 6) });
   if (!link) return NextResponse.json({ error: "Unknown link." }, { status: 404 });
   return NextResponse.json({ ok: true, store: link.store });
 }
 
-export async function HEAD() {
+export async function HEAD(request: Request, ctx: Ctx) {
+  const { key } = await ctx.params;
+  const link = await linkByKey(key);
+  await logCctvRequest({ ...requestNote(request), store: link?.store ?? null, key: key.slice(0, 6) });
   return new Response(null, { status: 200 });
+}
+
+export async function OPTIONS(request: Request, ctx: Ctx) {
+  const { key } = await ctx.params;
+  const link = await linkByKey(key);
+  await logCctvRequest({ ...requestNote(request), store: link?.store ?? null, key: key.slice(0, 6) });
+  return new Response(null, { status: 204, headers: { Allow: "GET, HEAD, POST, PUT, OPTIONS" } });
 }

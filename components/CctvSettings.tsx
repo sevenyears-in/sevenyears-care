@@ -17,7 +17,7 @@ type Link = {
   clockOffMin: number | null;
 };
 
-type Req = { at: string; method: string; store: string | null; contentType?: string; length?: number | null; userAgent?: string; parts?: string[]; sample?: string; saved?: number; photo?: boolean; error?: string };
+type Req = { at: string; method: string; store: string | null; contentType?: string; length?: number | null; userAgent?: string; parts?: string[]; sample?: string; saved?: number; photo?: boolean; error?: string; proto?: string | null; path?: string };
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 
@@ -208,9 +208,12 @@ export default function CctvSettings() {
                   <span>{r.store ?? "unknown link"}</span>
                   <span>{r.method}</span>
                   {r.contentType && <span className="text-black/50">{r.contentType}</span>}
+                  {r.proto && <span className="text-black/50">{r.proto.toUpperCase()}</span>}
+                  {r.userAgent && <span className="text-black/40">{r.userAgent.slice(0, 40)}</span>}
                   {typeof r.saved === "number" && <span className="font-semibold text-green-700">saved {r.saved}{r.photo ? " + photo" : ""}</span>}
                   {r.error && <span className="font-semibold text-red-700">{r.error}</span>}
                 </div>
+                {r.path && <p className="mt-1 font-mono text-[11px] text-black/45">{r.path}</p>}
                 {r.parts && r.parts.length > 0 && <p className="mt-1 text-[11px] text-black/50">Parts: {r.parts.join(", ")}</p>}
                 {r.sample && <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all text-[11px] text-black/60">{r.sample}</pre>}
               </li>
