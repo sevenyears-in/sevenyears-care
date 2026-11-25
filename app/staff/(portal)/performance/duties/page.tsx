@@ -9,6 +9,7 @@ import { isMonth, lateTime, minutesToTime, pct } from "@/lib/performance-rules";
 import { loadAssignments, shiftOn, storeOn } from "@/lib/assignments";
 import { dutyAccess, dutyDays, JUSTIFY_KINDS } from "@/lib/duties";
 import { JustifyDay, RemoveJustification } from "@/components/DutyJustify";
+import { canWriteLetters } from "@/lib/warning-letters";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Duties" };
@@ -110,6 +111,14 @@ export default async function DutiesPage({ searchParams }: { searchParams: Promi
               {shift.end !== null ? `–${minutesToTime(shift.end)}` : ""} · {report.settings.lateGraceMinutes} min grace
               {lateDays.length ? ` · ${lateTime(lateDays.reduce((s, d) => s + (d.late ?? 0), 0))} in all` : ""}
             </p>
+            {(lateDays.length > 0 || absent > 0) && canWriteLetters(staff.role) && attendanceCode(staff.userId) !== userId && (
+              <Link
+                href={`/staff/letters?code=${encodeURIComponent(userId)}&kind=attendance&m=${month}`}
+                className="mt-1 inline-block text-xs font-bold text-[#ff5e79] hover:underline"
+              >
+                ✉️ Warning letter
+              </Link>
+            )}
           </div>
           <div className="rounded-2xl bg-white p-4 soft-card ring-1 ring-black/5">
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45">Days left</p>

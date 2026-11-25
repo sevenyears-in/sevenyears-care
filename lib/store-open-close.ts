@@ -53,6 +53,9 @@ export type OpenClose = {
   firstPunch: string | null;
   lastPunch: string | null;
   openedBy: string | null;
+  /** Employee code of the person who opened / closed. */
+  openedByCode?: string | null;
+  closedByCode?: string | null;
   openSop: Sop | null;
   openApproval: string | null;
   closedBy: string | null;
@@ -251,6 +254,8 @@ const toOpenClose = (d: OcRow): OpenClose => ({
   firstPunch: d.first_punch,
   lastPunch: d.last_punch,
   openedBy: d.opened_by_name,
+  openedByCode: d.opened_by,
+  closedByCode: d.closed_by,
   openSop: (d.open_sop as Sop | null) ?? null,
   openApproval: d.open_approved_by ? `${d.open_approved_by}${d.open_approval_note ? ` — ${d.open_approval_note}` : ""}` : null,
   closedBy: d.closed_by_name,

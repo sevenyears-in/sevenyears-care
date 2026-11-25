@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const box = "w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none focus:border-[#ff5e79]";
@@ -28,13 +28,24 @@ const lastMonth = () => {
 };
 
 /** Write a new warning letter (template filled in from the records, all editable). */
-export function NewLetterForm({ people, kinds, direct }: { people: Person[]; kinds: Record<string, string>; direct: boolean }) {
+export function NewLetterForm({
+  people,
+  kinds,
+  direct,
+  start,
+}: {
+  people: Person[];
+  kinds: Record<string, string>;
+  direct: boolean;
+  /** Opened from a record in Care (e.g. an SOP violation): the person, reason and month to start with. */
+  start?: { staffId: string; kind: string; month?: string } | null;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(start));
   const [query, setQuery] = useState("");
-  const [staffId, setStaffId] = useState("");
+  const [staffId, setStaffId] = useState(start?.staffId ?? "");
   const [kind, setKind] = useState("");
-  const [month, setMonth] = useState(lastMonth());
+  const [month, setMonth] = useState(start?.month ?? lastMonth());
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,6 +72,15 @@ export function NewLetterForm({ people, kinds, direct }: { people: Person[]; kin
     }
     setBusy(false);
   };
+
+  // Started from a record: fill the letter in from Care straight away.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !start?.staffId || !start.kind) return;
+    started.current = true;
+    void fill(start.kind, start.staffId, start.month ?? month);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const send = async () => {
     setBusy(true);
@@ -161,13 +181,13 @@ export function NewLetterForm({ people, kinds, direct }: { people: Person[]; kin
               </button>
             ))}
           </div>
-          {kind === "performance" && (
+          {(kind === "performance" || kind === "attendance") && (
             <div className="mt-2 flex items-center gap-2 text-sm">
               <span className="text-black/55">Month:</span>
-              <input type="month" className="rounded-xl border border-black/10 px-3 py-1.5" value={month} onChange={(e) => { setMonth(e.target.value); fill("performance", staffId, e.target.value); }} />
+              <input type="month" className="rounded-xl border border-black/10 px-3 py-1.5" value={month} onChange={(e) => { setMonth(e.target.value); fill(kind, staffId, e.target.value); }} />
             </div>
           )}
-          {kind && <p className="mt-2 text-xs text-black/50">The text below is filled in from the records. Check it and change anything you need.</p>}
+          {kind && <p className="mt-2 text-xs text-black/50">The details below are taken from Care (opening & closing, sales, punching machine, explanations). Check them and change anything you need.</p>}
         </div>
       )}
 

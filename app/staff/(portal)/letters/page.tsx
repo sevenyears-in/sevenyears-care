@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
+import { attendanceCode } from "@/lib/attendance";
 import { formatDate } from "@/lib/helpers";
 import {
   canApproveLetters,
   canWriteLetters,
+  isLetterKind,
   LETTER_KINDS,
   letterRecipients,
   lettersFor,
@@ -16,7 +18,7 @@ import { NewLetterForm } from "@/components/WarningLetters";
 export const dynamic = "force-dynamic";
 
 // Warning letters: the ones I received, and (Super Admin / HR / Director / Store Manager) the ones I issue or approve.
-export default async function WarningLettersPage() {
+export default async function WarningLettersPage({ searchParams }: { searchParams: Promise<{ code?: string; kind?: string; m?: string }> }) {
   const staff = await getCurrentStaff();
   if (!staff) redirect("/staff/login");
 
@@ -28,6 +30,11 @@ export default async function WarningLettersPage() {
     lists = { mine: [], toApprove: [], issued: [] };
   }
   const people = writer ? await letterRecipients(staff) : [];
+  // Opened from a record in Care (e.g. "Warning letter" next to an SOP violation).
+  const sp = await searchParams;
+  const startPerson = sp.code ? people.find((p) => attendanceCode(p.userId) === attendanceCode(sp.code)) : undefined;
+  const start =
+    startPerson && isLetterKind(sp.kind) ? { staffId: startPerson.id, kind: sp.kind, month: sp.m && /^\d{4}-\d{2}$/.test(sp.m) ? sp.m : undefined } : null;
 
   return (
     <div className="space-y-8">
@@ -42,7 +49,7 @@ export default async function WarningLettersPage() {
         </p>
       </div>
 
-      {writer && <NewLetterForm people={people} kinds={LETTER_KINDS} direct={sendsDirectly(staff.role)} />}
+      {writer && <NewLetterForm people={people} kinds={LETTER_KINDS} direct={sendsDirectly(staff.role)} start={start} />}
 
       {lists.mine.length > 0 && <List title="Letters to me" letters={lists.mine} mine />}
       {canApproveLetters(staff.role) && (

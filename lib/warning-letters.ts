@@ -117,7 +117,7 @@ const prevMonth = () => {
 const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
 const money = (n: number) => `Rs. ${Math.round(n).toLocaleString("en-IN")}`;
 
-export async function letterTemplate(kind: LetterKind, person: { userId: string; name: string; store: string | null }, month?: string) {
+export async function letterTemplate(kind: LetterKind, person: { id: string; userId: string; name: string; store: string | null }, month?: string) {
   const first = person.name.split(" ")[0];
   const close =
     "\nYou are instructed to correct this immediately. Any repetition will lead to stricter disciplinary action as per company policy.";
@@ -159,15 +159,61 @@ export async function letterTemplate(kind: LetterKind, person: { userId: string;
     };
   }
   if (kind === "attendance") {
+    // Late arrivals and absences from the punching machine (the same rules as Duties).
+    const m = month ?? new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 7);
+    const lines: string[] = [];
+    let lateCount = 0;
+    let lateTotal = 0;
+    let absentCount = 0;
+    try {
+      const [{ dutyDays }, { loadAssignments, shiftOn, storeOn }, { loadPerformanceSettings }, { lateTime, minutesToTime }] = await Promise.all([
+        import("@/lib/duties"),
+        import("@/lib/assignments"),
+        import("@/lib/performance-settings"),
+        import("@/lib/performance-rules"),
+      ]);
+      const [settings, assignments] = await Promise.all([loadPerformanceSettings(), loadAssignments()]);
+      const days = await dutyDays(person.userId, m, {
+        shift: (day) => shiftOn(settings, assignments, person.userId, day),
+        grace: settings.lateGraceMinutes,
+        store: (day) => storeOn(assignments, person.userId, day) ?? (person.store ? person.store.toUpperCase() : null),
+      });
+      for (const d of days) {
+        if (d.late) {
+          lateCount++;
+          lateTotal += d.late;
+          const start = shiftOn(settings, assignments, person.userId, d.date).start;
+          lines.push(`- ${formatDate(d.date)}: came at ${d.first} (shift starts ${minutesToTime(start)}) - ${lateTime(d.late)} late`);
+        } else if (d.status === "absent") {
+          absentCount++;
+          lines.push(`- ${formatDate(d.date)}: absent without permission (no punch, not justified)`);
+        }
+      }
+      if (lines.length) lines.push("", `In all: ${lateCount} late arrival(s) (${lateTime(lateTotal)})${absentCount ? ` and ${absentCount} day(s) absent` : ""} in ${monthName(m)}.`);
+    } catch {
+      /* attendance not available: the writer fills it in */
+    }
     return {
-      subject: "Warning for attendance / punctuality",
-      body: `Dear ${first},\n\nThis letter is a formal warning about your attendance and punctuality:\n\n- [dates: late arrival / early leaving / absence without permission]\n\nRegular and punctual attendance is a basic requirement of your job.\n${close}`,
+      subject: `Warning for late coming${absentCount ? " and absence" : ""} in ${monthName(m)}`,
+      body: `Dear ${first},\n\nThis letter is a formal warning about your attendance and punctuality in ${monthName(m)}, as recorded by the punching machine:\n\n${lines.length ? lines.join("\n") : "- [dates: late arrival / early leaving / absence without permission]"}\n\nRegular and punctual attendance is a basic requirement of your job. You are expected to be on the floor before your shift starts.\n${close}`,
     };
   }
   if (kind === "conduct") {
+    // Explanations asked from this person in the last 60 days (complaints, delays) and their replies.
+    const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
+    const { data } = await supabaseAdmin
+      .from("ticket_explanations")
+      .select("ticket_number, reason, requested_at, explanation, explained_at")
+      .eq("staff_id", person.id)
+      .gte("requested_at", since)
+      .order("requested_at");
+    const rows = (data ?? []) as { ticket_number: string; reason: string; requested_at: string; explanation: string | null; explained_at: string | null }[];
+    const lines = rows
+      .filter((r) => !/^(Withdrawn by )/.test(r.explanation ?? ""))
+      .map((r) => `- ${formatDate(r.requested_at)} (${r.ticket_number}): ${r.reason}${r.explanation ? ` - your explanation: "${r.explanation.replace(/^Recorded by [^:]*:\s*/, "").slice(0, 300)}"` : " - no explanation given"}`);
     return {
       subject: "Warning for misconduct",
-      body: `Dear ${first},\n\nThis letter is a formal warning about the following incident:\n\n- [date, place and what happened]\n\nSuch behaviour is not acceptable and is against the company's code of conduct.\n${close}`,
+      body: `Dear ${first},\n\nThis letter is a formal warning about the following:\n\n${lines.length ? lines.join("\n") : "- [date, place and what happened]"}\n\nSuch behaviour is not acceptable and is against the company's code of conduct.\n${close}`,
     };
   }
   return { subject: "Warning letter", body: `Dear ${first},\n\n[details]\n${close}` };

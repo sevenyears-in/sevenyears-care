@@ -15,6 +15,7 @@ import { loadFollow, type Follow } from "@/lib/plan-follow";
 import { PlanFollow } from "@/components/PlanFollow";
 import { storePace } from "@/lib/store-pace";
 import { clockIST, loadOpenClose } from "@/lib/store-open-close";
+import { canWriteLetters } from "@/lib/warning-letters";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
 import { groupName, isMonth, lateTime, monthRange, pct, rupees, type IncentiveGroup, type PerformanceSettings } from "@/lib/performance-rules";
@@ -265,6 +266,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           {monthLabel(month)} · Bills up to {report.lastBillDate ? formatDate(report.lastBillDate) : "—"}
           {report.settings.lastSyncAt ? ` · updated ${formatDateTime(report.settings.lastSyncAt)}` : ""}
         </p>
+        {view === "person" && found && wanted !== me && canWriteLetters(staff.role) && (
+          <Link
+            href={`/staff/letters?code=${encodeURIComponent(wanted)}&kind=performance&m=${month}`}
+            className="mt-1 inline-flex rounded-full bg-[#ff5e79]/10 px-3 py-1 text-xs font-bold text-[#d63a57] hover:opacity-90"
+          >
+            ✉️ Warning letter for {monthLabel(month)}
+          </Link>
+        )}
         {teamStore && month === thisMonth && !openClose?.openedAt && (
           <Link
             href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}

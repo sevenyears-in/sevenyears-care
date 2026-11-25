@@ -9,6 +9,7 @@ import { ApproveSop } from "@/components/ApproveSop";
 import { CamCheck, type CamPhotoView } from "@/components/CamCheck";
 import { cctvSince, photosAtPunches } from "@/lib/cctv";
 import { loadKeyHolders } from "@/lib/store-keyholders";
+import { canWriteLetters } from "@/lib/warning-letters";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Store opening & closing" };
@@ -21,11 +22,12 @@ const BADGE: Record<Sop, { text: string; cls: string }> = {
 
 type Cam = { photos: CamPhotoView[]; check: Check | null; missing: boolean } | null;
 
-function Cell({ r, kind, canApprove, cam }: { r: OpenClose; kind: "open" | "close"; canApprove: boolean; cam: Cam }) {
+function Cell({ r, kind, canApprove, cam, canWarn }: { r: OpenClose; kind: "open" | "close"; canApprove: boolean; cam: Cam; canWarn: boolean }) {
   const at = kind === "open" ? r.openedAt : r.closedAt;
   const by = kind === "open" ? r.openedBy : r.closedBy;
   const sop = kind === "open" ? r.openSop : r.closeSop;
   const approval = kind === "open" ? r.openApproval : r.closeApproval;
+  const code = kind === "open" ? r.openedByCode : r.closedByCode;
   if (!at) return <td className="px-3 py-2 text-black/40">—</td>;
   return (
     <td className="px-3 py-2 align-top">
@@ -37,6 +39,14 @@ function Cell({ r, kind, canApprove, cam }: { r: OpenClose; kind: "open" | "clos
         <div className="mt-1">
           <ApproveSop day={r.day} store={r.store} kind={kind} />
         </div>
+      )}
+      {sop === "violation" && canWarn && code && (
+        <Link
+          href={`/staff/letters?code=${encodeURIComponent(code)}&kind=sop`}
+          className="mt-1 inline-block text-[11px] font-bold text-[#ff5e79] hover:underline"
+        >
+          ✉️ Warning letter
+        </Link>
       )}
       {cam && by && (
         <CamCheck
@@ -66,6 +76,7 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
   const store = stores.includes(want) ? want : stores[0];
   const rows = await loadOpenCloseHistory(store, 60).catch(() => []);
   const canApprove = staff.role === "director" || staff.role === "super_admin";
+  const canWarn = canWriteLetters(staff.role);
   const violations = rows.filter((r) => r.openSop === "violation" || r.closeSop === "violation").length;
 
   // CCTV photos at the opener's / closer's punch (management only), from the day the store's NVR started sending.
@@ -161,8 +172,8 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
             {rows.map((r) => (
               <tr key={r.day} className="border-t border-black/5">
                 <td className="px-3 py-2 align-top font-semibold">{formatDate(r.day)}</td>
-                <Cell r={r} kind="open" canApprove={canApprove} cam={camOf(r.day, "open")} />
-                <Cell r={r} kind="close" canApprove={canApprove} cam={camOf(r.day, "close")} />
+                <Cell r={r} kind="open" canApprove={canApprove} cam={camOf(r.day, "open")} canWarn={canWarn} />
+                <Cell r={r} kind="close" canApprove={canApprove} cam={camOf(r.day, "close")} canWarn={canWarn} />
               </tr>
             ))}
             {!rows.length && (
