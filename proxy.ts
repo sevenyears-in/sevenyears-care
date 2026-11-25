@@ -12,6 +12,8 @@ export function proxy(request: NextRequest) {
   return NextResponse.redirect(`https://${host}${request.nextUrl.pathname}${request.nextUrl.search}`, 308);
 }
 
+// Pages and API calls only: files (images, icons, …) and Next's own paths are left alone, so the
+// image optimiser's internal requests for /logo.png etc. are never redirected.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/|favicon.ico|.*\\.[a-zA-Z0-9]+$).*)"],
 };

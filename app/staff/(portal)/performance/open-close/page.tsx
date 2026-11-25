@@ -8,7 +8,6 @@ import { CAM_MATCH_MIN, clockIST, loadCamChecks, loadCamEdges, loadOpenCloseHist
 import { ApproveSop } from "@/components/ApproveSop";
 import { CamCheck, type CamPhotoView } from "@/components/CamCheck";
 import { cctvSince, eventPhotos, photosAtPunches } from "@/lib/cctv";
-import { loadKeyHolders } from "@/lib/store-keyholders";
 import { canWriteLetters, smOfStore } from "@/lib/warning-letters";
 
 export const dynamic = "force-dynamic";
@@ -130,8 +129,6 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
   // SOP warnings go to the store's SM (the SM answers for who opens and closes the store).
   const sm = canWarn ? (report?.stores.find((s) => s.store === store)?.people.find((p) => p.group === "sm") ?? null) : null;
   const smCode = sm?.userId ?? (canWarn ? await smOfStore(store).catch(() => null) : null);
-  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
-  const allowed = (await loadKeyHolders().catch(() => [])).filter((k) => k.store === store && (!k.to || k.to >= today));
   const proxies = [...checks.values()].filter((c) => c.open?.verdict === "proxy" || c.close?.verdict === "proxy").length;
 
   return (
@@ -166,32 +163,9 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
         </p>
       )}
 
-      <p className="text-sm text-black/60">
-        Allowed to open and close: the Store Manager and ASM / Floor Manager
-        {allowed.length
-          ? `; also ${allowed
-              .map((k) => `${k.name} (${k.kinds.length === 2 ? "open & close" : k.kinds[0]}${k.from || k.to ? `, ${k.from ? formatDate(k.from) : "…"} – ${k.to ? formatDate(k.to) : "no end"}` : ""})`)
-              .join(", ")}`
-          : ""}
-        .{staff.role === "super_admin" ? (
-          <>
-            {" "}
-            <a href="/staff/admin/attendance" className="font-semibold text-[#6f69c9] underline">
-              Change
-            </a>
-          </>
-        ) : null}
-      </p>
       {proxies > 0 && (
         <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">⚠ {proxies} day(s) marked as a proxy punch from the camera photos.</p>
       )}
-      {seesCamera && since && (
-        <p className="text-sm text-black/55">
-          📷 Entrance camera from {formatDate(since)}: the first person in each morning and the last person out each night must match an allowed person&apos;s punch within {CAM_MATCH_MIN} minutes; photos near the opener&apos;s and closer&apos;s own punch show who was at the door.
-          {canApprove ? " Check that the photo shows that person; mark it if someone else punched for them." : ""}
-        </p>
-      )}
-
       <div className="overflow-x-auto rounded-3xl bg-white soft-card ring-1 ring-black/5">
         <table className="w-full text-sm">
           <thead className="bg-black/[0.03] text-left text-[11px] font-bold uppercase tracking-wide text-black/50">
