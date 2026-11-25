@@ -6,6 +6,7 @@ import { markAlertsRead } from "@/lib/alerts";
 import { formatDate, formatDateTime } from "@/lib/helpers";
 import { canApproveLetters, canSeeLetter, getLetter, LETTER_KINDS, letterStores } from "@/lib/warning-letters";
 import { LetterActions } from "@/components/WarningLetters";
+import { letterBlocks } from "@/lib/warning-letter-pdf";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +68,22 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           {l.store && <p className="text-black/55">Store: {l.store}</p>}
         </div>
         <p className="mt-5 text-sm font-bold">Subject: {l.subject}</p>
-        <div className="mt-4 whitespace-pre-line text-sm leading-relaxed">{l.body}</div>
+        <div className="mt-4 text-sm leading-relaxed">
+          {letterBlocks(l.body).map((b, i) =>
+            b.kind === "gap" ? (
+              <div key={i} className="h-3" />
+            ) : b.kind === "li" ? (
+              <p key={i} className="relative mb-1 pl-6 text-justify hyphens-auto">
+                <span className="absolute left-2 font-bold text-[#ff5e79]">•</span>
+                {b.text}
+              </p>
+            ) : (
+              <p key={i} className="text-justify hyphens-auto">
+                {b.text}
+              </p>
+            )
+          )}
+        </div>
         <div className="mt-8 text-sm">
           <p>For Seven Years,</p>
           <p className="mt-6 font-bold">{l.issued_by_name ?? l.created_by_name}</p>

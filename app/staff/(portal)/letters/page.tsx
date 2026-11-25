@@ -11,9 +11,10 @@ import {
   letterRecipients,
   lettersFor,
   sendsDirectly,
+  signatureFor,
   type Letter,
 } from "@/lib/warning-letters";
-import { NewLetterForm } from "@/components/WarningLetters";
+import { LetterSignature, NewLetterForm } from "@/components/WarningLetters";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
     lists = { mine: [], toApprove: [], issued: [] };
   }
   const people = writer ? await letterRecipients(staff) : [];
+  const sig = writer ? await signatureFor(staff) : null;
   // Opened from a record in Care (e.g. "Warning letter" next to an SOP violation).
   const sp = await searchParams;
   const startPerson = sp.code ? people.find((p) => attendanceCode(p.userId) === attendanceCode(sp.code)) : undefined;
@@ -49,6 +51,7 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
         </p>
       </div>
 
+      {sig && <LetterSignature name={sig.name} title={sig.title} />}
       {writer && <NewLetterForm people={people} kinds={LETTER_KINDS} direct={sendsDirectly(staff.role)} start={start} />}
 
       {lists.mine.length > 0 && <List title="Letters to me" letters={lists.mine} mine />}

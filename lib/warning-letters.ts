@@ -434,6 +434,8 @@ export async function createLetter(
   if (subject.length < 4) throw new Error("Write the subject of the letter.");
   if (body.length < 20) throw new Error("Write the letter.");
   if (/\[(dates?|details|date, place|achieved)/i.test(body)) throw new Error("Replace the [ ... ] parts of the letter with the real details first.");
+  // Name and title printed under "For Seven Years," (Settings on the Warning letters page).
+  const sig = await signatureFor(me);
   const { data, error } = await supabaseAdmin
     .from("warning_letters")
     .insert({
@@ -447,14 +449,14 @@ export async function createLetter(
       body,
       status: "pending",
       created_by: me.id,
-      created_by_name: me.fullName,
-      created_by_role: me.access.roleLabel,
+      created_by_name: sig.name,
+      created_by_role: sig.title,
     })
     .select("*")
     .single();
   if (error) throw error;
   const letter = data as Letter;
-  if (sendsDirectly(me.role)) return sendLetter(letter.id, { name: me.fullName, role: me.access.roleLabel });
+  if (sendsDirectly(me.role)) return sendLetter(letter.id, { name: sig.name, role: sig.title });
   await notifyApprovers(letter);
   return letter;
 }
@@ -531,4 +533,32 @@ export async function smOfStore(store: string): Promise<string | null> {
   const { loadStaffForPerformance } = await import("@/lib/performance");
   const p = (await loadStaffForPerformance()).find((x) => x.group === "sm" && x.store === store.toUpperCase());
   return p?.userId ?? null;
+}
+
+// ------------------------------------------------------------------
+// Signature printed on letters (each issuer sets their own name and title)
+// ------------------------------------------------------------------
+
+const SIG_KEY = "letter_signatures";
+type Sig = { name: string; title: string };
+
+async function loadSignatures(): Promise<Record<string, Sig>> {
+  const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", SIG_KEY).maybeSingle();
+  const v = (data?.value ?? {}) as { list?: Record<string, Sig> };
+  return v.list && typeof v.list === "object" ? v.list : {};
+}
+
+/** The issuer's signature: what they set, else their account name and role. */
+export async function signatureFor(me: StaffUser): Promise<Sig & { custom: boolean }> {
+  const own = (await loadSignatures().catch(() => ({}) as Record<string, Sig>))[me.id];
+  return own?.name ? { name: own.name, title: own.title || me.access.roleLabel, custom: true } : { name: me.fullName, title: me.access.roleLabel, custom: false };
+}
+
+export async function setSignature(me: StaffUser, name: string, title: string) {
+  const list = await loadSignatures();
+  const n = name.trim().slice(0, 80);
+  const t = title.trim().slice(0, 80);
+  if (!n) delete list[me.id];
+  else list[me.id] = { name: n, title: t || me.access.roleLabel };
+  await supabaseAdmin.from("app_settings").upsert({ key: SIG_KEY, value: { list }, updated_at: new Date().toISOString() });
 }

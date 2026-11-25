@@ -372,3 +372,67 @@ export function LetterActions({
     </div>
   );
 }
+
+/** The issuer's own signature on letters (name and title under "For Seven Years,"). */
+export function LetterSignature({ name: name0, title: title0 }: { name: string; title: string }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(name0);
+  const [title, setTitle] = useState(title0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await call("/api/staff/letters/signature", "POST", { name, title });
+      setName(r.name);
+      setTitle(r.title);
+      setEditing(false);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
+
+  return (
+    <section className="soft-card rounded-3xl bg-white p-5 ring-1 ring-black/5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase text-black/50">Your signature on letters</p>
+          {!editing && (
+            <p className="mt-1 text-sm">
+              For Seven Years,
+              <br />
+              <span className="font-bold">{name}</span>
+              <br />
+              <span className="text-black/55">{title}</span>
+            </p>
+          )}
+        </div>
+        {!editing && (
+          <button type="button" className={plainBtn} onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+      </div>
+      {editing && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <input className={box} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name as printed" maxLength={80} />
+          <input className={box} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (e.g. Head of HR)" maxLength={80} />
+          <div className="flex gap-2 sm:col-span-2">
+            <button type="button" className={pinkBtn} disabled={busy || !name.trim()} onClick={save}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button type="button" className={plainBtn} disabled={busy} onClick={() => { setName(name0); setTitle(title0); setEditing(false); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p>}
+    </section>
+  );
+}
