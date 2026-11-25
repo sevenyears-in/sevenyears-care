@@ -141,16 +141,22 @@ export async function letterTemplate(kind: LetterKind, person: { id: string; use
     const { data } = await q;
     const rows = (data ?? []) as R[];
     const lines: string[] = [];
-    const who = (name: string | null) => (name ?? "").replace(/\s*\([^)]*\)\s*$/, "") || "someone";
+    // Names as in Care today (days saved before a person had an account show "User ID 1005").
+    const { data: accts } = await supabaseAdmin.from("staff_users").select("user_id, full_name");
+    const names = new Map(((accts ?? []) as { user_id: string; full_name: string | null }[]).filter((a) => a.full_name).map((a) => [attendanceCode(a.user_id), String(a.full_name)]));
+    const whoCode = (name: string | null, c: string | null) => {
+      const saved = (name ?? "").replace(/\s*\([^)]*\)\s*$/, "");
+      return (c ? names.get(attendanceCode(c)) : undefined) ?? (saved && !/^User ID /i.test(saved) ? saved : null) ?? saved ?? "someone";
+    };
     for (const r of rows) {
       const mine = (c: string | null) => attendanceCode(c) === code;
       if (smStore) {
-        if (r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was opened at ${r.opened_at ? clockIST(r.opened_at) : "-"} by ${who(r.opened_by_name)}, who is not allowed to open it`);
+        if (r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was opened at ${r.opened_at ? clockIST(r.opened_at) : "-"} by ${whoCode(r.opened_by_name, r.opened_by)}, who is not allowed to open it`);
         if (r.open_cam_flag === "early" && r.open_cam_flag_note) lines.push(`- ${formatDate(r.day)} (entrance camera): ${r.open_cam_flag_note}`);
-        if (r.open_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${who(r.opened_by_name)} at the opening`);
-        if (r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was closed at ${r.closed_at ? clockIST(r.closed_at) : "-"} by ${who(r.closed_by_name)}, who is not allowed to close it`);
+        if (r.open_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${whoCode(r.opened_by_name, r.opened_by)} at the opening`);
+        if (r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: the store was closed at ${r.closed_at ? clockIST(r.closed_at) : "-"} by ${whoCode(r.closed_by_name, r.closed_by)}, who is not allowed to close it`);
         if (r.close_cam_flag === "late" && r.close_cam_flag_note) lines.push(`- ${formatDate(r.day)} (entrance camera): ${r.close_cam_flag_note}`);
-        if (r.close_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${who(r.closed_by_name)} at the closing`);
+        if (r.close_cam === "proxy") lines.push(`- ${formatDate(r.day)} (entrance camera): someone else punched for ${whoCode(r.closed_by_name, r.closed_by)} at the closing`);
       } else {
         if (mine(r.opened_by) && r.open_sop === "violation") lines.push(`- ${formatDate(r.day)}: opened ${r.store} at ${r.opened_at ? clockIST(r.opened_at) : "-"}`);
         if (mine(r.closed_by) && r.close_sop === "violation") lines.push(`- ${formatDate(r.day)}: closed ${r.store} at ${r.closed_at ? clockIST(r.closed_at) : "-"}`);

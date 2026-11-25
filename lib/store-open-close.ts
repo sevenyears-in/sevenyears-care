@@ -759,6 +759,15 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
         if (at.getTime() > openEnd) await supabaseAdmin.from("store_open_close").update({ open_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
       } else if (at.getTime() >= entry.at + CAM_OPEN_WAIT_MIN * 60_000 && syncedTo >= entry.at + (CAM_MATCH_MIN + 1) * 60_000) {
         const punches = await punchList();
+        // Someone punched well before the camera saw anyone: the camera missed the opening.
+        if (punches.length && punches[0].at < entry.at - CAM_MATCH_MIN * 60_000) {
+          await supabaseAdmin
+            .from("store_open_close")
+            .update({ open_cam_flag: "none", open_cam_flag_note: `The entrance camera's first picture (${clockIST(entry.at)}) is after the first punch (${clockIST(punches[0].at)}): the opening was not seen.` })
+            .eq("day", r.day)
+            .eq("store", r.store);
+          continue;
+        }
         const allowed = punches.find((p) => allowedFor(staff, r.store, r.day, "open", p.code));
         const ok = Boolean(allowed && allowed.at <= entry.at + CAM_MATCH_MIN * 60_000);
         const firstPunch = punches.find((p) => p.at >= entry.at - CAM_MATCH_MIN * 60_000);
@@ -797,6 +806,17 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
       }
       if (r.close_exit_at && Date.parse(r.close_exit_at) >= exit.at) continue; // nothing new
       const punches = await punchList();
+      // The camera's last picture is well before the last punch: the closing was not seen.
+      const lastAny = punches[punches.length - 1];
+      if (lastAny && exit.at < lastAny.at - CAM_MATCH_MIN * 60_000 - 10 * 60_000) {
+        if (!r.close_cam_flag && at.getTime() > closeEnd)
+          await supabaseAdmin
+            .from("store_open_close")
+            .update({ close_cam_flag: "none", close_cam_flag_note: `The entrance camera's last picture (${clockIST(exit.at)}) is well before the last punch (${clockIST(lastAny.at)}): the closing was not seen.` })
+            .eq("day", r.day)
+            .eq("store", r.store);
+        continue;
+      }
       const allowed = [...punches].reverse().find((p) => allowedFor(staff, r.store, r.day, "close", p.code));
       const ok = Boolean(allowed && exit.at <= allowed.at + CAM_MATCH_MIN * 60_000);
       const lastPunch = punches[punches.length - 1];

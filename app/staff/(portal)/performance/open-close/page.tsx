@@ -24,7 +24,7 @@ type Cam = { photos: CamPhotoView[]; check: Check | null; missing: boolean } | n
 /** First person the entrance camera saw (opening) / last person (closing), matched with the punches. */
 function EntryExit({ kind, edge, photo }: { kind: "open" | "close"; edge: CamEdge; photo: string | null }) {
   if (!edge.flag) return null;
-  if (edge.flag === "none") return <p className="mt-1 text-[11px] text-black/40">🎥 No entrance-camera picture {kind === "open" ? "in the morning" : "at night"}</p>;
+  if (edge.flag === "none") return <p className="mt-1 text-[11px] text-black/40">🎥 {edge.note ?? `No entrance-camera picture ${kind === "open" ? "in the morning" : "at night"}`}</p>;
   const ok = edge.flag === "ok";
   return (
     <div className={`mt-2 rounded-xl p-2 ring-1 ${ok ? "bg-green-50/60 ring-green-100" : "bg-red-50 ring-red-100"}`}>
