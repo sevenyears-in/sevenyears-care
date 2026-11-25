@@ -4,7 +4,7 @@ import { after } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { markAlertsRead } from "@/lib/alerts";
 import { formatDate, formatDateTime } from "@/lib/helpers";
-import { canApproveLetters, canSeeLetter, getLetter, LETTER_KINDS, letterStores } from "@/lib/warning-letters";
+import { canApproveLetters, canSeeLetter, getLetter, LETTER_KINDS, letterStores, markLetterSeen, signatureImageUrlOf } from "@/lib/warning-letters";
 import { LetterActions } from "@/components/WarningLetters";
 import { letterBlocks } from "@/lib/warning-letter-pdf";
 
@@ -19,9 +19,11 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
   after(() => markAlertsRead(staff.id, { ticketId: l.id }));
 
   const mine = l.staff_id === staff.id;
+  if (mine && (l.status === "sent" || l.status === "revoked")) after(() => markLetterSeen(l));
   const stores = letterStores(staff);
   const approver = canApproveLetters(staff.role) && (stores === null || (!!l.store && stores.includes(l.store.toUpperCase())));
-  const draft = l.status !== "sent";
+  const draft = l.status !== "sent" && l.status !== "revoked";
+  const sigUrl = await signatureImageUrlOf(l.created_by).catch(() => null);
 
   return (
     <div className="space-y-6">
@@ -49,6 +51,12 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           <span className="font-semibold">Not approved</span> by {l.decided_by_name} on {formatDateTime(l.decided_at)}: {l.reject_reason}
         </p>
       )}
+      {l.status === "revoked" && (
+        <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span className="font-bold">Revoked</span> by {l.revoked_by_name} on {formatDateTime(l.revoked_at ?? null)}
+          {l.revoke_reason ? `: ${l.revoke_reason}` : ""}. This warning is no longer in force.
+        </p>
+      )}
       {l.status === "withdrawn" && (
         <p className="rounded-2xl bg-black/5 px-4 py-3 text-sm text-black/70">Withdrawn by {l.decided_by_name} on {formatDateTime(l.decided_at)}. It was not sent.</p>
       )}
@@ -68,12 +76,12 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           {l.store && <p className="text-black/55">Store: {l.store}</p>}
         </div>
         <p className="mt-5 text-sm font-bold">Subject: {l.subject}</p>
-        <div className="mt-4 text-sm leading-relaxed">
+        <div className="mt-4 text-sm leading-snug">
           {letterBlocks(l.body).map((b, i) =>
             b.kind === "gap" ? (
               <div key={i} className="h-3" />
             ) : b.kind === "li" ? (
-              <p key={i} className="relative mb-1 pl-6 text-justify hyphens-auto">
+              <p key={i} className="relative mb-0.5 pl-6 text-justify hyphens-auto">
                 <span className="absolute left-2 font-bold text-[#ff5e79]">•</span>
                 {b.text}
               </p>
@@ -86,7 +94,13 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
         </div>
         <div className="mt-8 text-sm">
           <p>For Seven Years,</p>
-          <p className="mt-6 font-bold">{l.issued_by_name ?? l.created_by_name}</p>
+          {sigUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={sigUrl} alt="Signature" className="my-1 h-14 w-auto" />
+          ) : (
+            <div className="h-6" />
+          )}
+          <p className="font-bold">{l.issued_by_name ?? l.created_by_name}</p>
           <p className="text-black/55">{l.issued_by_role ?? l.created_by_role}</p>
         </div>
         <p className="mt-6 border-t border-black/5 pt-3 text-xs text-black/45">
@@ -95,8 +109,15 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
         </p>
       </article>
 
-      {l.status === "sent" && (
+      {(l.status === "sent" || l.status === "revoked") && (
         <div className="mx-auto max-w-3xl space-y-2 text-sm">
+          {!mine && (
+            <p className={`rounded-2xl px-4 py-3 font-semibold ${l.seen_at ? "bg-blue-50 text-blue-800" : "bg-amber-50 text-amber-900"}`}>
+              {l.seen_at
+                ? `👁 ${l.staff_name} opened this letter on ${formatDateTime(l.seen_at)}${(l.seen_count ?? 0) > 1 ? ` (${l.seen_count} times, last ${formatDateTime(l.last_seen_at ?? null)})` : ""}.`
+                : `👁 ${l.staff_name} has not opened this letter yet.`}
+            </p>
+          )}
           {l.ack_at ? (
             <div className="rounded-2xl bg-green-50 px-4 py-3 text-green-800">
               <p className="font-semibold">
@@ -121,6 +142,7 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           canAck={mine && l.status === "sent" && !l.ack_at}
           canApprove={approver && l.status === "pending" && !mine}
           canWithdraw={l.status === "pending" && (l.created_by === staff.id || staff.role === "super_admin")}
+          canRevoke={approver && l.status === "sent" && !mine}
           subject={l.subject}
           body={l.body}
         />

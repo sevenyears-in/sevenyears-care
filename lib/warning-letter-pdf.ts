@@ -5,7 +5,7 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import { embedPoppins } from "@/lib/pdf-fonts";
 import { formatDate } from "@/lib/helpers";
 
@@ -23,13 +23,18 @@ export type LetterPdfData = {
   issuedByRole: string | null;
   ackAt: string | null;
   ackNote: string | null;
+  revokedAt?: string | null;
+  revokedBy?: string | null;
+  revokeReason?: string | null;
+  /** The issuer's handwritten signature (PNG / JPEG). */
+  signature?: { bytes: Uint8Array; type: string } | null;
 };
 
 const W = 595.28;
 const H = 841.89;
 const LEFT = 60;
 const RIGHT = W - 60;
-const TOP = H - 132; // below the logo
+const TOP = H - 118; // below the logo
 const BOTTOM = 80; // above the purple line
 const DARK = rgb(0.086, 0.086, 0.086);
 const GREY = rgb(0.42, 0.42, 0.42);
@@ -180,7 +185,7 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
 
   // Body: justified paragraphs, bullet points with a hanging indent.
   const SIZE = 10.5;
-  const LEAD = 15.5;
+  const LEAD = SIZE * 1.2; // single line spacing
   const justify = (words: string[], x: number, width: number, last: boolean) => {
     const ws = words.map((w) => safe(w, regular));
     if (last || ws.length < 2) {
@@ -200,11 +205,11 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
   let prev: string | null = null;
   for (const b of letterBlocks(d.body)) {
     if (b.kind === "gap") {
-      y -= 7;
+      y -= 6;
       prev = "gap";
       continue;
     }
-    if (b.kind === "li" && prev === "p") y -= 3;
+    if (b.kind === "li" && prev === "p") y -= 2;
     const x = b.kind === "li" ? BULLET_TEXT : LEFT;
     const width = RIGHT - x;
     const lines = layout(safe(b.text, regular), regular, SIZE, width);
@@ -214,7 +219,7 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
       justify(l.words, x, width, l.last);
       y -= LEAD;
     });
-    if (b.kind === "li") y -= 2;
+    if (b.kind === "li") y -= 1;
     prev = b.kind;
   }
 
@@ -222,7 +227,22 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
   y -= 16;
   ensure(70);
   text("For Seven Years,", { size: 10.5 });
-  y -= 34;
+  let sigImg: PDFImage | null = null;
+  if (d.signature) {
+    try {
+      sigImg = d.signature.type === "image/png" ? await pdf.embedPng(d.signature.bytes) : await pdf.embedJpg(d.signature.bytes);
+    } catch {
+      sigImg = null;
+    }
+  }
+  if (sigImg) {
+    const h = 50;
+    const w = Math.min(170, (sigImg.width / sigImg.height) * h);
+    const hh = (sigImg.height / sigImg.width) * w;
+    ensure(hh + 30);
+    page!.drawImage(sigImg, { x: LEFT - 4, y: y - hh - 2, width: w, height: hh });
+    y -= hh + 14;
+  } else y -= 34;
   text(d.issuedByName ?? "", { font: bold, size: 10.5 });
   y -= 14;
   if (d.issuedByRole) {
@@ -249,7 +269,26 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
     text("Please acknowledge this letter in the Seven Years Care app.", { size: 9, color: GREY });
     y -= 12;
   }
-  text("This letter was issued through the Seven Years Care app and is valid without a signature.", { size: 8, color: GREY });
+  text(sigImg ? "This letter was issued through the Seven Years Care app." : "This letter was issued through the Seven Years Care app and is valid without a signature.", { size: 8, color: GREY });
+
+  // Revoked: a stamp across every page and a note at the end.
+  if (d.revokedAt) {
+    const stamp = "REVOKED";
+    const red = rgb(0.86, 0.15, 0.2);
+    for (const pg of pdf.getPages()) {
+      const size = 72;
+      const w = bold.widthOfTextAtSize(stamp, size);
+      pg.drawText(stamp, { x: W / 2 - (w / 2) * Math.cos(Math.PI / 6), y: H / 2 - (w / 2) * Math.sin(Math.PI / 6), size, font: bold, color: red, opacity: 0.22, rotate: degrees(30) });
+    }
+    y -= 18;
+    ensure(30);
+    const note = `Revoked on ${formatDate(d.revokedAt)}${d.revokedBy ? ` by ${d.revokedBy}` : ""}${d.revokeReason ? `: ${d.revokeReason}` : ""}. This letter is no longer in force.`;
+    for (const l of wrap(safe(note, bold), bold, 9.5, RIGHT - LEFT)) {
+      ensure(12);
+      text(l, { font: bold, size: 9.5, color: red });
+      y -= 12.5;
+    }
+  }
 
   return pdf.save();
 }

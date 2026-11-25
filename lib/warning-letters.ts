@@ -38,7 +38,7 @@ export type Letter = {
   kind: LetterKind;
   subject: string;
   body: string;
-  status: "pending" | "sent" | "rejected" | "withdrawn";
+  status: "pending" | "sent" | "rejected" | "withdrawn" | "revoked";
   created_by: string | null;
   created_by_name: string | null;
   created_by_role: string | null;
@@ -52,6 +52,12 @@ export type Letter = {
   email_status: string | null;
   ack_at: string | null;
   ack_note: string | null;
+  revoked_at?: string | null;
+  revoked_by_name?: string | null;
+  revoke_reason?: string | null;
+  seen_at?: string | null;
+  last_seen_at?: string | null;
+  seen_count?: number | null;
 };
 
 const SENDS_DIRECTLY: Role[] = ["super_admin", "hr_head", "hr_executive", "director"];
@@ -72,7 +78,7 @@ const inStores = (stores: string[] | null, store: string | null) => stores === n
 
 /** Can this person see this letter? */
 export function canSeeLetter(me: StaffUser, l: Letter) {
-  if (l.staff_id === me.id) return l.status === "sent";
+  if (l.staff_id === me.id) return l.status === "sent" || l.status === "revoked";
   if (l.created_by === me.id) return true;
   return canApproveLetters(me.role) && inStores(letterStores(me), l.store);
 }
@@ -276,6 +282,9 @@ export function letterPdfData(l: Letter) {
     issuedByRole: l.issued_by_role ?? l.created_by_role,
     ackAt: l.ack_at,
     ackNote: l.ack_note,
+    revokedAt: l.status === "revoked" ? l.revoked_at ?? null : null,
+    revokedBy: l.revoked_by_name ?? null,
+    revokeReason: l.revoke_reason ?? null,
   };
 }
 
@@ -318,7 +327,7 @@ async function deliver(l: Letter) {
   let status = "no e-mail address";
   if (email) {
     try {
-      const pdf = await buildWarningLetterPdf(letterPdfData(l));
+      const pdf = await letterPdf(l);
       const r = await sendEmail(
         email,
         `${title}: ${l.subject} — Seven Years`,
@@ -408,7 +417,7 @@ export async function lettersFor(me: StaffUser) {
     .from("warning_letters")
     .select("*")
     .eq("staff_id", me.id)
-    .eq("status", "sent")
+    .in("status", ["sent", "revoked"])
     .order("sent_at", { ascending: false });
   const mine = (mineRaw ?? []) as Letter[];
   let others: Letter[] = [];
@@ -546,7 +555,9 @@ export async function smOfStore(store: string): Promise<string | null> {
 // ------------------------------------------------------------------
 
 const SIG_KEY = "letter_signatures";
-type Sig = { name: string; title: string };
+/** image: path of the handwritten signature in the private "letter-signatures" bucket. */
+type Sig = { name: string; title: string; image?: string | null };
+const SIG_BUCKET = "letter-signatures";
 
 async function loadSignatures(): Promise<Record<string, Sig>> {
   const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", SIG_KEY).maybeSingle();
@@ -555,16 +566,109 @@ async function loadSignatures(): Promise<Record<string, Sig>> {
 }
 
 /** The issuer's signature: what they set, else their account name and role. */
-export async function signatureFor(me: StaffUser): Promise<Sig & { custom: boolean }> {
+export async function signatureFor(me: StaffUser): Promise<Sig & { custom: boolean; imageUrl: string | null }> {
   const own = (await loadSignatures().catch(() => ({}) as Record<string, Sig>))[me.id];
-  return own?.name ? { name: own.name, title: own.title || me.access.roleLabel, custom: true } : { name: me.fullName, title: me.access.roleLabel, custom: false };
+  let imageUrl: string | null = null;
+  if (own?.image) {
+    const { data } = await supabaseAdmin.storage.from(SIG_BUCKET).createSignedUrl(own.image, 60 * 10);
+    imageUrl = data?.signedUrl ?? null;
+  }
+  const base = own?.name ? { name: own.name, title: own.title || me.access.roleLabel, custom: true } : { name: me.fullName, title: me.access.roleLabel, custom: false };
+  return { ...base, image: own?.image ?? null, imageUrl };
 }
 
 export async function setSignature(me: StaffUser, name: string, title: string) {
   const list = await loadSignatures();
   const n = name.trim().slice(0, 80);
   const t = title.trim().slice(0, 80);
-  if (!n) delete list[me.id];
-  else list[me.id] = { name: n, title: t || me.access.roleLabel };
+  const image = list[me.id]?.image ?? null;
+  if (!n && !image) delete list[me.id];
+  else list[me.id] = { name: n || me.fullName, title: t || me.access.roleLabel, image };
   await supabaseAdmin.from("app_settings").upsert({ key: SIG_KEY, value: { list }, updated_at: new Date().toISOString() });
+}
+
+/** Saves (or with null, removes) the issuer's handwritten signature image (PNG / JPEG, up to 1 MB). */
+export async function setSignatureImage(me: StaffUser, file: { bytes: Uint8Array; type: string } | null) {
+  const list = await loadSignatures();
+  const cur = list[me.id] ?? { name: me.fullName, title: me.access.roleLabel, image: null };
+  if (cur.image) await supabaseAdmin.storage.from(SIG_BUCKET).remove([cur.image]).catch(() => undefined);
+  if (file) {
+    if (!/^image\/(png|jpeg)$/.test(file.type)) throw new Error("Use a PNG or JPG picture of the signature.");
+    if (file.bytes.length > 1024 * 1024) throw new Error("The picture is too large (1 MB at most).");
+    const path = `${me.id}/${Date.now()}.${file.type === "image/png" ? "png" : "jpg"}`;
+    const { error } = await supabaseAdmin.storage.from(SIG_BUCKET).upload(path, file.bytes, { contentType: file.type, upsert: true });
+    if (error) throw error;
+    cur.image = path;
+  } else cur.image = null;
+  list[me.id] = cur;
+  await supabaseAdmin.from("app_settings").upsert({ key: SIG_KEY, value: { list }, updated_at: new Date().toISOString() });
+}
+
+/** The handwritten signature of the person a letter is issued by (its writer), if they uploaded one. */
+async function signatureImageOf(staffId: string | null): Promise<{ bytes: Uint8Array; type: string } | null> {
+  if (!staffId) return null;
+  const path = (await loadSignatures().catch(() => ({}) as Record<string, Sig>))[staffId]?.image;
+  if (!path) return null;
+  const { data } = await supabaseAdmin.storage.from(SIG_BUCKET).download(path);
+  if (!data) return null;
+  return { bytes: new Uint8Array(await data.arrayBuffer()), type: path.endsWith(".png") ? "image/png" : "image/jpeg" };
+}
+
+/** The letter as a PDF (with the issuer's handwritten signature when there is one). */
+export async function letterPdf(l: Letter): Promise<Uint8Array> {
+  const signature = await signatureImageOf(l.created_by).catch(() => null);
+  return buildWarningLetterPdf({ ...letterPdfData(l), signature });
+}
+
+/**
+ * Revokes a letter that was sent (Super Admin, HR, Directors for their stores). It stays on record,
+ * marked revoked; the staff member is told in the app, by phone notification and by e-mail.
+ */
+export async function revokeLetter(me: StaffUser, l: Letter, reason: string) {
+  if (!canApproveLetters(me.role) || !inStores(letterStores(me), l.store)) throw new Error("You can't revoke this letter.");
+  if (l.status !== "sent") throw new Error("Only a letter that was sent can be revoked.");
+  const why = reason.trim();
+  if (why.length < 3) throw new Error("Say why the warning is revoked.");
+  const { data } = await supabaseAdmin
+    .from("warning_letters")
+    .update({ status: "revoked", revoked_at: new Date().toISOString(), revoked_by_name: (await signatureFor(me)).name, revoke_reason: why.slice(0, 1000) })
+    .eq("id", l.id)
+    .eq("status", "sent")
+    .select("*")
+    .maybeSingle();
+  if (!data) throw new Error("This letter can no longer be revoked.");
+  const title = `Warning letter ${l.number} revoked`;
+  const body = `The warning letter "${l.subject}" dated ${formatDate(l.sent_at)} has been withdrawn by the management and is no longer in force.`;
+  await supabaseAdmin.from("staff_notifications").insert({ staff_id: l.staff_id, ticket_type: null, ticket_id: l.id, ticket_number: l.number, title, body });
+  await pushToStaff([l.staff_id], { title, body, url: `${siteUrl()}/staff/letters/${l.id}` }).catch(() => undefined);
+  const { data: who } = await supabaseAdmin.from("staff_users").select("email").eq("id", l.staff_id).maybeSingle();
+  const email = (who as { email: string | null } | null)?.email;
+  if (email) {
+    await sendEmail(
+      email,
+      `${title} — Seven Years`,
+      `Dear ${l.staff_name},\n\n${body}\n\nYou can see it in the Seven Years Care app:\n${siteUrl()}/staff/letters/${l.id}\n\n— Seven Years`,
+      { audience: "staff", ticketNumber: l.number ?? undefined }
+    ).catch(() => undefined);
+  }
+  if (l.created_by && l.created_by !== me.id) await notifyWriter(data as Letter, title, `${me.fullName} revoked the letter to ${l.staff_name}: ${why.slice(0, 200)}`);
+  return data as Letter;
+}
+
+/** Short-lived link to the issuer's signature picture (for the letter shown in the app). */
+export async function signatureImageUrlOf(staffId: string | null): Promise<string | null> {
+  if (!staffId) return null;
+  const path = (await loadSignatures().catch(() => ({}) as Record<string, Sig>))[staffId]?.image;
+  if (!path) return null;
+  const { data } = await supabaseAdmin.storage.from(SIG_BUCKET).createSignedUrl(path, 60 * 10);
+  return data?.signedUrl ?? null;
+}
+
+/** The staff member opened their letter (in the app, or its PDF): first and last time, and how often. */
+export async function markLetterSeen(l: Letter) {
+  const now = new Date().toISOString();
+  await supabaseAdmin
+    .from("warning_letters")
+    .update({ seen_at: l.seen_at ?? now, last_seen_at: now, seen_count: (l.seen_count ?? 0) + 1 })
+    .eq("id", l.id);
 }

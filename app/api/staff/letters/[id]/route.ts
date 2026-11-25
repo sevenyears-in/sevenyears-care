@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { acknowledgeLetter, approveLetter, canSeeLetter, getLetter, rejectLetter, withdrawLetter } from "@/lib/warning-letters";
+import { acknowledgeLetter, approveLetter, canSeeLetter, getLetter, rejectLetter, revokeLetter, withdrawLetter } from "@/lib/warning-letters";
 
-// POST { action: "approve", subject?, body? } | { action: "reject", reason } | { action: "withdraw" } | { action: "ack", note? }
+// POST { action: "approve", subject?, body? } | { action: "reject", reason } | { action: "withdraw" } | { action: "revoke", reason } | { action: "ack", note? }
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
@@ -25,6 +25,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (body.action === "withdraw") {
       await withdrawLetter(auth.staff, letter);
       await logAudit(auth.staff, "warning_letters", "withdraw", { id }, {}).catch(() => undefined);
+      return NextResponse.json({ ok: true });
+    }
+    if (body.action === "revoke") {
+      await revokeLetter(auth.staff, letter, String(body.reason ?? ""));
+      await logAudit(auth.staff, "warning_letters", "revoke", { id }, { number: letter.number, reason: body.reason }).catch(() => undefined);
       return NextResponse.json({ ok: true });
     }
     if (body.action === "ack") {

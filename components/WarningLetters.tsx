@@ -236,6 +236,7 @@ export function LetterActions({
   canAck,
   canApprove,
   canWithdraw,
+  canRevoke = false,
   subject: subject0,
   body: body0,
 }: {
@@ -243,11 +244,12 @@ export function LetterActions({
   canAck: boolean;
   canApprove: boolean;
   canWithdraw: boolean;
+  canRevoke?: boolean;
   subject: string;
   body: string;
 }) {
   const router = useRouter();
-  const [mode, setMode] = useState<"" | "ack" | "edit" | "reject" | "withdraw" | "approve">("");
+  const [mode, setMode] = useState<"" | "ack" | "edit" | "reject" | "withdraw" | "approve" | "revoke">("");
   const [note, setNote] = useState("");
   const [subject, setSubject] = useState(subject0);
   const [body, setBody] = useState(body0);
@@ -268,7 +270,7 @@ export function LetterActions({
     setBusy(false);
   };
 
-  if (!canAck && !canApprove && !canWithdraw) return null;
+  if (!canAck && !canApprove && !canWithdraw && !canRevoke) return null;
 
   return (
     <div className="soft-card space-y-3 rounded-3xl bg-white p-5 ring-1 ring-black/5 sm:p-6">
@@ -348,6 +350,30 @@ export function LetterActions({
         </>
       )}
 
+      {canRevoke && (
+        <>
+          <h2 className="text-lg font-bold">Revoke this warning</h2>
+          <p className="text-sm text-black/60">The letter stays on record, marked revoked. The staff member is told in the app and by e-mail that it is no longer in force.</p>
+          {mode === "revoke" ? (
+            <div className="space-y-2">
+              <textarea className={`${box} min-h-[80px]`} placeholder="Reason for revoking (the staff member sees this)" value={note} onChange={(e) => setNote(e.target.value)} />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={pinkBtn} disabled={busy || note.trim().length < 3} onClick={() => act({ action: "revoke", reason: note })}>
+                  {busy ? "Saving…" : "Yes, revoke the warning"}
+                </button>
+                <button type="button" className={plainBtn} disabled={busy} onClick={() => setMode("")}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className={plainBtn} onClick={() => { setNote(""); setMode("revoke"); }}>
+              Revoke warning
+            </button>
+          )}
+        </>
+      )}
+
       {canWithdraw && !canApprove && (
         <>
           <p className="text-sm text-black/60">This letter is waiting for HR / the Director to approve it.</p>
@@ -374,13 +400,36 @@ export function LetterActions({
 }
 
 /** The issuer's own signature on letters (name and title under "For Seven Years,"). */
-export function LetterSignature({ name: name0, title: title0 }: { name: string; title: string }) {
+export function LetterSignature({ name: name0, title: title0, imageUrl }: { name: string; title: string; imageUrl: string | null }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(name0);
   const [title, setTitle] = useState(title0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const [pic, setPic] = useState<string | null>(null);
+  const pickPicture = (f: File | null) => {
+    setError("");
+    if (!f) return setPic(null);
+    if (!/^image\/(png|jpeg)$/.test(f.type)) return setError("Use a PNG or JPG picture of the signature.");
+    if (f.size > 1024 * 1024) return setError("The picture is too large (1 MB at most).");
+    const reader = new FileReader();
+    reader.onload = () => setPic(String(reader.result));
+    reader.readAsDataURL(f);
+  };
+  const savePicture = async (remove = false) => {
+    setBusy(true);
+    setError("");
+    try {
+      await call("/api/staff/letters/signature", "POST", remove ? { removeImage: true } : { image: pic });
+      setPic(null);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
 
   const save = async () => {
     setBusy(true);
@@ -406,6 +455,11 @@ export function LetterSignature({ name: name0, title: title0 }: { name: string; 
             <p className="mt-1 text-sm">
               For Seven Years,
               <br />
+              {imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imageUrl} alt="Signature" className="my-1 h-12 w-auto" />
+              )}
+              {!imageUrl && <br />}
               <span className="font-bold">{name}</span>
               <br />
               <span className="text-black/55">{title}</span>
@@ -429,6 +483,29 @@ export function LetterSignature({ name: name0, title: title0 }: { name: string; 
             <button type="button" className={plainBtn} disabled={busy} onClick={() => { setName(name0); setTitle(title0); setEditing(false); }}>
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+      {editing && (
+        <div className="mt-4 rounded-2xl bg-[#f7f9fb] p-4">
+          <p className="text-xs font-bold uppercase text-black/50">Handwritten signature (optional)</p>
+          <p className="mt-1 text-xs text-black/50">A PNG or JPG of your signature on a white background. It is kept private and printed only on the letters you issue.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input type="file" accept="image/png,image/jpeg" className="text-xs" onChange={(e) => pickPicture(e.target.files?.[0] ?? null)} />
+            {pic && (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={pic} alt="New signature" className="h-12 w-auto rounded bg-white ring-1 ring-black/10" />
+                <button type="button" className={pinkBtn} disabled={busy} onClick={() => savePicture(false)}>
+                  {busy ? "Saving…" : "Save signature"}
+                </button>
+              </>
+            )}
+            {imageUrl && !pic && (
+              <button type="button" className={plainBtn} disabled={busy} onClick={() => savePicture(true)}>
+                Remove signature
+              </button>
+            )}
           </div>
         </div>
       )}

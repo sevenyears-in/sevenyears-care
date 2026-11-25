@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { attendanceCode } from "@/lib/attendance";
-import { formatDate } from "@/lib/helpers";
+import { formatDate, formatDateTime } from "@/lib/helpers";
 import {
   canApproveLetters,
   canWriteLetters,
@@ -51,7 +51,7 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
         </p>
       </div>
 
-      {sig && <LetterSignature name={sig.name} title={sig.title} />}
+      {sig && <LetterSignature name={sig.name} title={sig.title} imageUrl={sig.imageUrl} />}
       {writer && <NewLetterForm people={people} kinds={LETTER_KINDS} direct={sendsDirectly(staff.role)} start={start} />}
 
       {lists.mine.length > 0 && <List title="Letters to me" letters={lists.mine} mine />}
@@ -76,7 +76,10 @@ function state(l: Letter, mine = false) {
   if (l.status === "pending") return { label: "Waiting for approval", tone: "bg-amber-50 text-amber-800", bar: "bg-amber-400" };
   if (l.status === "rejected") return { label: "Not approved", tone: "bg-black/5 text-black/50", bar: "bg-black/20" };
   if (l.status === "withdrawn") return { label: "Withdrawn", tone: "bg-black/5 text-black/50", bar: "bg-black/20" };
-  if (!l.ack_at) return { label: mine ? "Please read & acknowledge" : "Not acknowledged yet", tone: "bg-[#ff5e79]/10 text-[#d63a57]", bar: "bg-[#ff5e79]" };
+  if (l.status === "revoked") return { label: "Revoked", tone: "bg-black/5 text-black/60", bar: "bg-black/30" };
+  if (!l.ack_at && mine) return { label: "Please read & acknowledge", tone: "bg-[#ff5e79]/10 text-[#d63a57]", bar: "bg-[#ff5e79]" };
+  if (!l.ack_at && !l.seen_at) return { label: "Not opened yet", tone: "bg-amber-50 text-amber-800", bar: "bg-amber-400" };
+  if (!l.ack_at) return { label: "Opened · not acknowledged", tone: "bg-[#ff5e79]/10 text-[#d63a57]", bar: "bg-[#ff5e79]" };
   return { label: "Acknowledged", tone: "bg-green-50 text-green-700", bar: "bg-green-500" };
 }
 
@@ -109,8 +112,8 @@ function List({ title, letters, empty, mine = false }: { title: string; letters:
                     <span className={mine ? "font-semibold" : ""}>{l.subject}</span>
                   </p>
                   <p className="mt-1 text-xs text-black/45">
-                    {l.status === "sent"
-                      ? `Issued ${formatDate(l.sent_at)} by ${l.issued_by_name ?? ""}${l.ack_at ? ` · read ${formatDate(l.ack_at)}` : ""}`
+                    {l.status === "sent" || l.status === "revoked"
+                      ? `Issued ${formatDate(l.sent_at)} by ${l.issued_by_name ?? ""}${!mine && l.seen_at ? ` · opened ${formatDateTime(l.seen_at)}` : ""}${l.ack_at ? ` · acknowledged ${formatDateTime(l.ack_at)}` : ""}`
                       : `Written ${formatDate(l.created_at)} by ${l.created_by_name ?? ""}`}
                   </p>
                 </Link>
