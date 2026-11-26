@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/auth";
 import { monthReport } from "@/lib/performance";
 import { istNow } from "@/lib/business-day";
-import { hourlyWalkins, loadWalkins, walkinStores } from "@/lib/walkins";
+import { cameraWalkins, hourlyWalkins, loadWalkins, walkinStores } from "@/lib/walkins";
 import { WalkinCounter } from "@/components/WalkinCounter";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function WalkinsPage({ searchParams }: { searchParams: Prom
   if (!stores.length) redirect("/staff");
   const want = (sp.store ?? "").toUpperCase();
   const store = stores.includes(want) ? want : stores[0];
-  const [w, hourly] = await Promise.all([loadWalkins(store, day), hourlyWalkins(store, day)]);
+  const [w, hourly, camera] = await Promise.all([loadWalkins(store, day), hourlyWalkins(store, day), cameraWalkins(store, day).catch(() => null)]);
   const bills = report?.stores.find((s) => s.store === store)?.today.bills ?? 0;
-  return <WalkinCounter key={store} store={store} stores={stores} day={day} startCount={w?.count ?? 0} startHourly={hourly} bills={bills} />;
+  return <WalkinCounter key={store} store={store} stores={stores} day={day} startCount={w?.count ?? 0} startHourly={hourly} bills={bills} camera={camera} />;
 }

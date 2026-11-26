@@ -85,3 +85,35 @@ export async function walkinStores(staff: StaffUser, allStores: string[]) {
   const managed = await merchStores(staff, allStores);
   return [...new Set([...(cre ? [cre] : []), ...managed])];
 }
+
+/**
+ * Walk-ins counted by the entrance camera: every crossing of the doorway line (inward) is a person;
+ * people crossing within groupSec seconds of the one before are one walk-in (they came together).
+ * Null when the camera count is not set up for the store.
+ */
+export async function cameraWalkins(store: string, day: string): Promise<{ walkins: number; people: number; lastAt: string | null } | null> {
+  const { loadCctv } = await import("@/lib/cctv");
+  const { links, watch } = await loadCctv();
+  const link = links.find((l) => l.store === store);
+  if (!link || !link.channels.length || !watch.walkinCode) return null;
+  const from = new Date(Date.parse(`${day}T00:00:00+05:30`)).toISOString();
+  const to = new Date(Date.parse(`${day}T00:00:00+05:30`) + 86_400_000).toISOString();
+  const { data } = await supabaseAdmin
+    .from("cctv_events")
+    .select("event_at")
+    .eq("store", store)
+    .in("channel", link.channels)
+    .gte("event_at", from)
+    .lt("event_at", to)
+    .filter("raw->sub_type", "cs", `[${watch.walkinCode}]`)
+    .order("event_at")
+    .limit(5000);
+  const times = ((data ?? []) as { event_at: string }[]).map((r) => Date.parse(r.event_at));
+  let walkins = 0;
+  let prev = -Infinity;
+  for (const t of times) {
+    if (t - prev > watch.groupSec * 1000) walkins++;
+    prev = t;
+  }
+  return { walkins, people: times.length, lastAt: times.length ? new Date(times[times.length - 1]).toISOString() : null };
+}

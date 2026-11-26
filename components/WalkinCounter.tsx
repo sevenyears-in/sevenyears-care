@@ -29,7 +29,9 @@ export function WalkinCounter({
   startCount,
   startHourly,
   bills,
+  camera = null,
 }: {
+  camera?: { walkins: number; people: number } | null;
   store: string;
   stores: string[];
   day: string;
@@ -210,6 +212,11 @@ export function WalkinCounter({
         <p className="mt-3 text-sm text-black/55">
           {bills} bill(s) today · conversion <b className="text-black">{conv === null ? "—" : conv > 100 ? "check count" : `${conv}%`}</b>
         </p>
+        {camera && (
+          <p className="mt-2 text-xs text-black/50">
+            📷 Camera count (trial): <b className="text-black">{camera.walkins}</b> walk-ins ({camera.people} people came in)
+          </p>
+        )}
         {pending.length > 0 && (
           <p className={`mt-2 text-xs font-semibold ${offline ? "text-amber-700" : "text-black/45"}`}>
             {offline ? `No internet — ${pending.length} press(es) saved on this phone, will be sent automatically.` : "Saving…"}

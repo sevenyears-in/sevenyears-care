@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const w = body.watch ?? {};
     for (const [k, [lo, hi]] of Object.entries(WATCH_LIMITS)) {
       const n = Number((w as Record<string, unknown>)[k]);
-      if (!Number.isFinite(n) || n < lo || n > hi) return NextResponse.json({ error: `Each number of minutes must be between ${lo} and ${hi}.` }, { status: 400 });
+      if (!Number.isFinite(n) || n < lo || n > hi) return NextResponse.json({ error: `${k === "groupSec" ? "The seconds" : k === "walkinCode" ? "The recorder code" : "Each number of minutes"} must be between ${lo} and ${hi}.` }, { status: 400 });
     }
     const before = (await loadCctv(true)).watch;
     await setCamWatch({ ...before, ...w } as CamWatch);

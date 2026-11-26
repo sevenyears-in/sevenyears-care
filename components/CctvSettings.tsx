@@ -17,7 +17,7 @@ type Link = {
   clockOffMin: number | null;
 };
 
-type Watch = { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number; humansOnly: boolean };
+type Watch = { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number; humansOnly: boolean; walkinCode: number; groupSec: number };
 
 type Req = { at: string; method: string; store: string | null; contentType?: string; length?: number | null; userAgent?: string; parts?: string[]; sample?: string; saved?: number; photo?: boolean; error?: string; proto?: string | null; path?: string };
 
@@ -228,6 +228,12 @@ export default function CctvSettings() {
             <input type="checkbox" disabled={!editWatch} checked={watch.humansOnly} onChange={(e) => setWatch({ ...watch, humansOnly: e.target.checked })} />
             Leave out detections the recorder marks as vehicles
           </label>
+          <p className="mt-4 font-bold">Walk-ins from the camera (trial)</p>
+          <p className="mt-1 leading-8 text-black/65">
+            Each person crossing the doorway line (set on the recorder: Smart Event → Line Crossing, inward only) is counted. People coming in within{" "}
+            <WatchNum k="groupSec" w={watch} edit={editWatch} set={setWatch} /> seconds of each other count as one walk-in. Recorder code of the doorway line:{" "}
+            <WatchNum k="walkinCode" w={watch} edit={editWatch} set={setWatch} /> {watch.walkinCode === 0 && <span className="text-amber-700">(not set: the camera count is off)</span>}
+          </p>
           {editWatch && (
             <div className="mt-3 flex gap-2">
               <button
@@ -282,8 +288,8 @@ function WatchNum({ k, w, edit, set }: { k: Exclude<keyof Watch, "humansOnly">; 
     <input
       type="number"
       min={0}
-      max={300}
-      step={5}
+      max={9999}
+      step={k === "walkinCode" || k === "groupSec" ? 1 : 5}
       value={w[k]}
       onChange={(e) => set({ ...w, [k]: Number(e.target.value) })}
       className="mx-0.5 w-16 rounded-lg border border-black/15 bg-white px-2 py-0.5 text-center font-bold"

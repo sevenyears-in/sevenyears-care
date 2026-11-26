@@ -54,14 +54,32 @@ export type CctvLink = {
  * time and until afterCloseMin after its closing time (people passing by at night are not counted),
  * and with humansOnly, detections the recorder marks as vehicles are left out.
  */
-export type CamWatch = { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number; humansOnly: boolean };
-export const DEFAULT_WATCH: CamWatch = { beforeOpenMin: 60, afterOpenMin: 60, beforeCloseMin: 30, afterCloseMin: 120, humansOnly: true };
+export type CamWatch = {
+  beforeOpenMin: number;
+  afterOpenMin: number;
+  beforeCloseMin: number;
+  afterCloseMin: number;
+  humansOnly: boolean;
+  /** Walk-ins from the camera: the recorder's code for "crossed the doorway line" (0 = not set yet). */
+  walkinCode: number;
+  /** People entering within this many seconds of each other are one walk-in (a family, friends). */
+  groupSec: number;
+};
+export const DEFAULT_WATCH: CamWatch = { beforeOpenMin: 60, afterOpenMin: 60, beforeCloseMin: 30, afterCloseMin: 120, humansOnly: true, walkinCode: 0, groupSec: 10 };
 export const WATCH_LIMITS: Record<Exclude<keyof CamWatch, "humansOnly">, [number, number]> = {
   beforeOpenMin: [0, 240],
   afterOpenMin: [15, 240],
   beforeCloseMin: [0, 240],
   afterCloseMin: [15, 300],
+  walkinCode: [0, 9999],
+  groupSec: [2, 60],
 };
+
+/** The recorder's detection codes of an event (VIGI: 2 = motion, 101 = person, 102 = vehicle; smart events have their own). */
+export function subCodes(raw: unknown): number[] {
+  const s = (raw as { sub_type?: unknown } | null)?.sub_type;
+  return (Array.isArray(s) ? s : s === undefined || s === null ? [] : [s]).map(Number).filter((n) => Number.isFinite(n));
+}
 export function cleanWatch(v: unknown): CamWatch {
   const r = (v ?? {}) as Record<string, unknown>;
   const out = { ...DEFAULT_WATCH, humansOnly: typeof r.humansOnly === "boolean" ? r.humansOnly : DEFAULT_WATCH.humansOnly };
@@ -216,7 +234,11 @@ export async function saveEvents(link: CctvLink, body: unknown, photo: Blob | nu
     const timeRaw = pick(m, ["localtime", "datetime", "eventtime", "time", "timestamp"]);
     const t = nvrTime(timeRaw);
     const at = t !== null && Math.abs(t - received) <= CLOCK_TOLERANCE_MIN * 60_000 ? t : received;
-    if (!inKeepWindow(at)) continue;
+    // Plain motion is kept only around opening / closing; smart events (the doorway line used for
+    // walk-ins) are kept all day.
+    const codes = subCodes(m);
+    const smart = codes.length > 0 && !codes.includes(2);
+    if (!inKeepWindow(at) && !smart) continue;
     rows.push({
       store: link.store,
       link_id: link.id,

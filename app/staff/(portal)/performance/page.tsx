@@ -1,5 +1,5 @@
 import { WalkinBox } from "@/components/WalkinBox";
-import { creStoreOf, loadWalkins } from "@/lib/walkins";
+import { cameraWalkins, creStoreOf, loadWalkins } from "@/lib/walkins";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -197,9 +197,10 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const walkinBox = async (store: string | null) => {
     if (!store || month !== thisMonth) return null;
     const st = report.stores.find((x) => x.store === store);
-    const w = await loadWalkins(store, istNow().date).catch(() => null);
+    const [w, cam] = await Promise.all([loadWalkins(store, istNow().date).catch(() => null), cameraWalkins(store, istNow().date).catch(() => null)]);
     return (
       <WalkinBox
+        camera={cam}
         store={store}
         bills={st?.today.bills ?? 0}
         count={w?.count ?? null}
