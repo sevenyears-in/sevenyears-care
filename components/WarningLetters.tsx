@@ -409,6 +409,7 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
   const [error, setError] = useState("");
 
   const [pic, setPic] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const pickPicture = (f: File | null) => {
     setError("");
     if (!f) return setPic(null);
@@ -424,6 +425,7 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
     try {
       await call("/api/staff/letters/signature", "POST", remove ? { removeImage: true } : { image: pic });
       setPic(null);
+      setUploading(false);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -467,11 +469,23 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
           )}
         </div>
         {!editing && (
-          <button type="button" className={plainBtn} onClick={() => setEditing(true)}>
-            Edit
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {!uploading && (
+              <button type="button" className={imageUrl ? plainBtn : pinkBtn} onClick={() => setUploading(true)}>
+                ✍️ {imageUrl ? "Change signature" : "Upload signature"}
+              </button>
+            )}
+            <button type="button" className={plainBtn} onClick={() => setEditing(true)}>
+              Edit name / title
+            </button>
+          </div>
         )}
       </div>
+      {!imageUrl && !uploading && !editing && (
+        <p className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+          Upload a picture of your signature: letters you issue are printed with your name, title and signature.
+        </p>
+      )}
       {editing && (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <input className={box} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name as printed" maxLength={80} />
@@ -486,10 +500,13 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
           </div>
         </div>
       )}
-      {editing && (
+      {(editing || uploading) && (
         <div className="mt-4 rounded-2xl bg-[#f7f9fb] p-4">
-          <p className="text-xs font-bold uppercase text-black/50">Handwritten signature (optional)</p>
-          <p className="mt-1 text-xs text-black/50">A PNG or JPG of your signature on a white background. It is kept private and printed only on the letters you issue.</p>
+          <p className="text-xs font-bold uppercase text-black/50">Your handwritten signature</p>
+          <p className="mt-1 text-xs text-black/50">
+            Sign on white paper, take a photo, crop it to the signature, and choose it here (PNG or JPG, up to 1 MB). It is kept private and printed only on the
+            letters you issue.
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input type="file" accept="image/png,image/jpeg" className="text-xs" onChange={(e) => pickPicture(e.target.files?.[0] ?? null)} />
             {pic && (
@@ -504,6 +521,11 @@ export function LetterSignature({ name: name0, title: title0, imageUrl }: { name
             {imageUrl && !pic && (
               <button type="button" className={plainBtn} disabled={busy} onClick={() => savePicture(true)}>
                 Remove signature
+              </button>
+            )}
+            {uploading && !editing && (
+              <button type="button" className={plainBtn} disabled={busy} onClick={() => { setPic(null); setUploading(false); }}>
+                Cancel
               </button>
             )}
           </div>

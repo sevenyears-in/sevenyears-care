@@ -702,6 +702,12 @@ async function loadSignatures(): Promise<Record<string, Sig>> {
 }
 
 /** The issuer's signature: what they set, else their account name and role. */
+/** Title printed by default: the role, and the store for a Store Manager ("Store Manager, Perambra"). */
+function defaultTitle(me: StaffUser) {
+  const store = me.role === "store_manager" && me.storeName ? me.storeName.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "";
+  return store ? `${me.access.roleLabel}, ${store}` : me.access.roleLabel;
+}
+
 export async function signatureFor(me: StaffUser): Promise<Sig & { custom: boolean; imageUrl: string | null }> {
   const own = (await loadSignatures().catch(() => ({}) as Record<string, Sig>))[me.id];
   let imageUrl: string | null = null;
@@ -709,7 +715,7 @@ export async function signatureFor(me: StaffUser): Promise<Sig & { custom: boole
     const { data } = await supabaseAdmin.storage.from(SIG_BUCKET).createSignedUrl(own.image, 60 * 10);
     imageUrl = data?.signedUrl ?? null;
   }
-  const base = own?.name ? { name: own.name, title: own.title || me.access.roleLabel, custom: true } : { name: me.fullName, title: me.access.roleLabel, custom: false };
+  const base = own?.name ? { name: own.name, title: own.title || defaultTitle(me), custom: true } : { name: me.fullName, title: defaultTitle(me), custom: false };
   return { ...base, image: own?.image ?? null, imageUrl };
 }
 
@@ -719,14 +725,14 @@ export async function setSignature(me: StaffUser, name: string, title: string) {
   const t = title.trim().slice(0, 80);
   const image = list[me.id]?.image ?? null;
   if (!n && !image) delete list[me.id];
-  else list[me.id] = { name: n || me.fullName, title: t || me.access.roleLabel, image };
+  else list[me.id] = { name: n || me.fullName, title: t || defaultTitle(me), image };
   await supabaseAdmin.from("app_settings").upsert({ key: SIG_KEY, value: { list }, updated_at: new Date().toISOString() });
 }
 
 /** Saves (or with null, removes) the issuer's handwritten signature image (PNG / JPEG, up to 1 MB). */
 export async function setSignatureImage(me: StaffUser, file: { bytes: Uint8Array; type: string } | null) {
   const list = await loadSignatures();
-  const cur = list[me.id] ?? { name: me.fullName, title: me.access.roleLabel, image: null };
+  const cur = list[me.id] ?? { name: me.fullName, title: defaultTitle(me), image: null };
   if (cur.image) await supabaseAdmin.storage.from(SIG_BUCKET).remove([cur.image]).catch(() => undefined);
   if (file) {
     if (!/^image\/(png|jpeg)$/.test(file.type)) throw new Error("Use a PNG or JPG picture of the signature.");
