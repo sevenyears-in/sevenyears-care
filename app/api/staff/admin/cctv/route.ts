@@ -1,23 +1,34 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
-import { addLink, cctvRequests, linkStatuses, removeLink, setLinkChannels } from "@/lib/cctv";
+import { addLink, cctvRequests, linkStatuses, loadCctv, removeLink, setCamWatch, setLinkChannels, WATCH_LIMITS, type CamWatch } from "@/lib/cctv";
 import { logAudit } from "@/lib/audit";
 import { openCloseStores } from "@/lib/store-open-close";
 
 // Settings → Attendance → CCTV (Super Admin): one link per store NVR.
-// GET → links with their status; POST { action: "add", store } | { action: "remove", id } | { action: "channels", id, channels }
+// GET → links with their status; POST { action: "add", store } | { action: "remove", id } | { action: "channels", id, channels } | { action: "watch", watch }
 
 export async function GET() {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const [links, stores, requests] = await Promise.all([linkStatuses(), openCloseStores(), cctvRequests().catch(() => [])]);
-  return NextResponse.json({ links, stores, requests });
+  const [links, stores, requests, saved] = await Promise.all([linkStatuses(), openCloseStores(), cctvRequests().catch(() => []), loadCctv(true)]);
+  return NextResponse.json({ links, stores, requests, watch: saved.watch, limits: WATCH_LIMITS });
 }
 
 export async function POST(request: Request) {
   const auth = await requireStaff("super_admin");
   if (auth.response) return auth.response;
-  const body = (await request.json().catch(() => ({}))) as { action?: string; store?: string; id?: string; channels?: unknown[] };
+  const body = (await request.json().catch(() => ({}))) as { action?: string; store?: string; id?: string; channels?: unknown[]; watch?: Partial<CamWatch> };
+  if (body.action === "watch") {
+    const w = body.watch ?? {};
+    for (const [k, [lo, hi]] of Object.entries(WATCH_LIMITS)) {
+      const n = Number((w as Record<string, unknown>)[k]);
+      if (!Number.isFinite(n) || n < lo || n > hi) return NextResponse.json({ error: `Each number of minutes must be between ${lo} and ${hi}.` }, { status: 400 });
+    }
+    const before = (await loadCctv(true)).watch;
+    await setCamWatch({ ...before, ...w } as CamWatch);
+    await logAudit(auth.staff, "cctv", "watch", before, w);
+    return NextResponse.json({ ok: true });
+  }
   if (body.action === "add") {
     const store = String(body.store ?? "").trim().toUpperCase();
     if (!store) return NextResponse.json({ error: "Choose a store." }, { status: 400 });

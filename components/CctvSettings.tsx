@@ -17,6 +17,8 @@ type Link = {
   clockOffMin: number | null;
 };
 
+type Watch = { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number; humansOnly: boolean };
+
 type Req = { at: string; method: string; store: string | null; contentType?: string; length?: number | null; userAgent?: string; parts?: string[]; sample?: string; saved?: number; photo?: boolean; error?: string; proto?: string | null; path?: string };
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
@@ -31,6 +33,9 @@ export default function CctvSettings() {
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<Record<string, number[]>>({});
   const [copied, setCopied] = useState("");
+  const [watch, setWatch] = useState<Watch | null>(null);
+  const [savedWatch, setSavedWatch] = useState<Watch | null>(null);
+  const [editWatch, setEditWatch] = useState(false);
   const host = typeof window === "undefined" ? "care.sevenyears.in" : window.location.host;
 
   const load = async () => {
@@ -41,6 +46,10 @@ export default function CctvSettings() {
     setRequests(data.requests ?? []);
     setStores(data.stores ?? []);
     setPicked(Object.fromEntries((data.links ?? []).map((l: Link) => [l.id, l.channels])));
+    if (data.watch) {
+      setWatch(data.watch);
+      setSavedWatch(data.watch);
+    }
   };
   useEffect(() => {
     void load();
@@ -127,7 +136,10 @@ export default function CctvSettings() {
               {l.cameras.length > 0 && (
                 <>
                   <p className="mt-4 text-sm font-semibold">Which camera faces the staff entrance?</p>
-                  <p className="text-xs text-black/50">Tick it. Photos from other cameras are then not kept. Nothing ticked = every camera.</p>
+                  <p className="text-xs text-black/50">
+                    Tick the camera that sees people come in through the store door (best: inside, facing the door). Photos from other cameras are then not kept.
+                    {chosen.length === 0 && <b className="text-red-700"> None ticked: the camera check is off for this store.</b>}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-3">
                     {l.cameras.map((c) => {
                       const on = c.channel !== null && chosen.includes(c.channel);
@@ -195,6 +207,45 @@ export default function CctvSettings() {
       )}
       <ErrorBox message={error} />
 
+      {watch && (
+        <div className="mt-6 rounded-2xl bg-[#f7f9fb] p-4 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-bold">Camera check: when to look</p>
+            {!editWatch && (
+              <button type="button" onClick={() => setEditWatch(true)} className="rounded-xl bg-black/5 px-4 py-2 text-sm font-bold text-black/70">
+                Edit
+              </button>
+            )}
+          </div>
+          <p className="mt-2 leading-8 text-black/65">
+            First person in: from <WatchNum k="beforeOpenMin" w={watch} edit={editWatch} set={setWatch} /> minutes before the store&apos;s opening time until{" "}
+            <WatchNum k="afterOpenMin" w={watch} edit={editWatch} set={setWatch} /> minutes after it. Last person out: from{" "}
+            <WatchNum k="beforeCloseMin" w={watch} edit={editWatch} set={setWatch} /> minutes before the closing time until{" "}
+            <WatchNum k="afterCloseMin" w={watch} edit={editWatch} set={setWatch} /> minutes after it. People passing by outside these times are not counted. (Opening and
+            closing times: Settings → Business day.)
+          </p>
+          <label className="mt-1 flex items-center gap-2 text-black/70">
+            <input type="checkbox" disabled={!editWatch} checked={watch.humansOnly} onChange={(e) => setWatch({ ...watch, humansOnly: e.target.checked })} />
+            Leave out detections the recorder marks as vehicles
+          </label>
+          {editWatch && (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => post({ action: "watch", watch }).then(() => setEditWatch(false))}
+                className="rounded-xl bg-[#161616] px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
+              >
+                Save
+              </button>
+              <button type="button" disabled={busy} onClick={() => { setWatch(savedWatch); setEditWatch(false); }} className="rounded-xl bg-black/5 px-4 py-2 text-sm font-bold text-black/70">
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <details className="mt-5 text-sm">
         <summary className="cursor-pointer font-semibold text-black/60">What the recorders sent ({requests.length}, newest first)</summary>
         {requests.length === 0 ? (
@@ -222,5 +273,20 @@ export default function CctvSettings() {
         )}
       </details>
     </div>
+  );
+}
+
+function WatchNum({ k, w, edit, set }: { k: Exclude<keyof Watch, "humansOnly">; w: Watch; edit: boolean; set: (w: Watch) => void }) {
+  if (!edit) return <b className="text-black/85">{w[k]}</b>;
+  return (
+    <input
+      type="number"
+      min={0}
+      max={300}
+      step={5}
+      value={w[k]}
+      onChange={(e) => set({ ...w, [k]: Number(e.target.value) })}
+      className="mx-0.5 w-16 rounded-lg border border-black/15 bg-white px-2 py-0.5 text-center font-bold"
+    />
   );
 }

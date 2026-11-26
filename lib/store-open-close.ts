@@ -645,11 +645,16 @@ async function fillPastSop(staff: Map<string, Person>, devices: Record<string, s
 
 /** Allowed gap between the camera and an allowed person's punch. */
 export const CAM_MATCH_MIN = 2;
-/** Camera windows (India time, minutes of the day) for the first entry and the last exit. */
-const CAM_OPEN_FROM = 6 * 60;
-const CAM_OPEN_TO = 10 * 60 + 30;
-const CAM_CLOSE_FROM = 20 * 60 + 30;
-const CAM_CLOSE_TO = 24 * 60 + 90; // 1:30 next morning
+/**
+ * Camera windows (India time, minutes of the day) for the first entry and the last exit: around the
+ * store's opening and closing times (Settings → Business day), widened by the camera check settings
+ * (Settings → Attendance → CCTV). Outside them, people passing by are not counted.
+ */
+function camWindows(hours: { open: string; close: string }, w: { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number }) {
+  const open = timeToMinutes(hours.open) || 9 * 60 + 30;
+  const close = timeToMinutes(hours.close) || 22 * 60;
+  return { openFrom: Math.max(EARLIEST_OPEN, open - w.beforeOpenMin), openTo: open + w.afterOpenMin, closeFrom: close - w.beforeCloseMin, closeTo: close + w.afterCloseMin };
+}
 /** Wait this long after the first entry before judging (punches reach Care every few minutes). */
 const CAM_OPEN_WAIT_MIN = 10;
 
@@ -679,7 +684,7 @@ const nameOf = (staff: Map<string, Person>, code: string) => staff.get(code)?.na
 const mins = (ms: number) => Math.max(1, Math.round(ms / 60_000));
 
 /** First (or last) entrance-camera detection of a store in a window. */
-async function edgeEvent(store: string, channels: number[], fromMs: number, toMs: number, last: boolean) {
+async function edgeEvent(store: string, channels: number[], fromMs: number, toMs: number, last: boolean, humansOnly = true) {
   let q = supabaseAdmin
     .from("cctv_events")
     .select("id, event_at, photo_path")
@@ -689,6 +694,8 @@ async function edgeEvent(store: string, channels: number[], fromMs: number, toMs
     .order("event_at", { ascending: !last })
     .limit(1);
   if (channels.length) q = q.in("channel", channels);
+  // Leave out what the recorder marks as a vehicle (VIGI: 101 = person, 102 = vehicle).
+  if (humansOnly) q = q.or("raw->sub_type.is.null,raw->sub_type.not.cs.[102]");
   const { data } = await q;
   const e = (data ?? [])[0] as { id: number; event_at: string; photo_path: string | null } | undefined;
   return e ? { id: e.id, at: Date.parse(e.event_at) } : null;
@@ -716,8 +723,10 @@ async function camAlert(store: string, title: string, body: string) {
 /** Runs every minute (from openCloseTick): judges today's opening and the last closing. */
 export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Person>): Promise<string> {
   const { loadCctv } = await import("@/lib/cctv");
-  const { links } = await loadCctv();
+  const { links, watch } = await loadCctv();
   if (!links.length) return "";
+  const { hoursOf } = await import("@/lib/business-day");
+  const perf = await loadPerformanceSettings();
   const now = istNow(at);
   const days = [shiftDay(now.date, -1), now.date];
   const { data } = await supabaseAdmin
@@ -735,7 +744,9 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
 
   for (const r of rows) {
     const link = links.find((l) => l.store === r.store);
-    if (!link) continue;
+    // No entrance camera chosen: every camera (street, parking) would count, so nothing is judged.
+    if (!link || !link.channels.length) continue;
+    const win = camWindows(hoursOf(perf, r.store), watch);
     const start = dayStartUtc(r.day);
     const deviceIds = Object.entries(devices).filter(([, st]) => st === r.store).map(([d]) => d);
     if (!deviceIds.length) continue;
@@ -753,8 +764,8 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
 
     // Opening: judged once, 10 minutes after the first entry (punches synced past it).
     if (!r.open_cam_flag && r.day === now.date) {
-      const openEnd = start + CAM_OPEN_TO * 60_000;
-      const entry = await edgeEvent(r.store, link.channels, start + CAM_OPEN_FROM * 60_000, openEnd, false);
+      const openEnd = start + win.openTo * 60_000;
+      const entry = await edgeEvent(r.store, link.channels, start + win.openFrom * 60_000, openEnd, false, watch.humansOnly);
       if (!entry) {
         if (at.getTime() > openEnd) await supabaseAdmin.from("store_open_close").update({ open_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
       } else if (at.getTime() >= entry.at + CAM_OPEN_WAIT_MIN * 60_000 && syncedTo >= entry.at + (CAM_MATCH_MIN + 1) * 60_000) {
@@ -797,9 +808,9 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
 
     // Closing: once the closing is known (closing notice sent) and 20 minutes after the last punch;
     // checked again while the night window lasts, in case someone is seen later.
-    const closeEnd = start + CAM_CLOSE_TO * 60_000;
+    const closeEnd = start + win.closeTo * 60_000;
     if (r.closed_notified_at && r.closed_at && at.getTime() >= Date.parse(r.closed_at) + 20 * 60_000 && (!r.close_cam_flag || (r.close_cam_flag === "ok" && at.getTime() <= closeEnd + 5 * 60_000))) {
-      const exit = await edgeEvent(r.store, link.channels, start + CAM_CLOSE_FROM * 60_000, closeEnd, true);
+      const exit = await edgeEvent(r.store, link.channels, start + win.closeFrom * 60_000, closeEnd, true, watch.humansOnly);
       if (!exit) {
         if (!r.close_cam_flag && at.getTime() > closeEnd) await supabaseAdmin.from("store_open_close").update({ close_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
         continue;

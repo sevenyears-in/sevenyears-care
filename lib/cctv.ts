@@ -49,7 +49,30 @@ export type CctvLink = {
   createdBy: string;
 };
 
-type Saved = { links: CctvLink[] };
+/**
+ * Camera check settings: the camera is only looked at from beforeOpenMin before the store's opening
+ * time and until afterCloseMin after its closing time (people passing by at night are not counted),
+ * and with humansOnly, detections the recorder marks as vehicles are left out.
+ */
+export type CamWatch = { beforeOpenMin: number; afterOpenMin: number; beforeCloseMin: number; afterCloseMin: number; humansOnly: boolean };
+export const DEFAULT_WATCH: CamWatch = { beforeOpenMin: 60, afterOpenMin: 60, beforeCloseMin: 30, afterCloseMin: 120, humansOnly: true };
+export const WATCH_LIMITS: Record<Exclude<keyof CamWatch, "humansOnly">, [number, number]> = {
+  beforeOpenMin: [0, 240],
+  afterOpenMin: [15, 240],
+  beforeCloseMin: [0, 240],
+  afterCloseMin: [15, 300],
+};
+export function cleanWatch(v: unknown): CamWatch {
+  const r = (v ?? {}) as Record<string, unknown>;
+  const out = { ...DEFAULT_WATCH, humansOnly: typeof r.humansOnly === "boolean" ? r.humansOnly : DEFAULT_WATCH.humansOnly };
+  for (const [k, [lo, hi]] of Object.entries(WATCH_LIMITS)) {
+    const n = Math.round(Number(r[k]));
+    if (Number.isFinite(n) && n >= lo && n <= hi) (out as Record<string, unknown>)[k] = n;
+  }
+  return out;
+}
+
+type Saved = { links: CctvLink[]; watch: CamWatch };
 
 let cache: { at: number; value: Saved } | null = null;
 
@@ -57,7 +80,7 @@ export async function loadCctv(force = false): Promise<Saved> {
   if (!force && cache && Date.now() - cache.at < 60_000) return cache.value;
   const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", SETTINGS_KEY).maybeSingle();
   const v = (data?.value ?? {}) as Partial<Saved>;
-  const value: Saved = { links: Array.isArray(v.links) ? v.links : [] };
+  const value: Saved = { links: Array.isArray(v.links) ? v.links : [], watch: cleanWatch(v.watch) };
   cache = { at: Date.now(), value };
   return value;
 }
@@ -77,19 +100,24 @@ export async function addLink(store: string, by: string): Promise<CctvLink> {
     createdAt: new Date().toISOString(),
     createdBy: by,
   };
-  await saveCctv({ links: [...s.links, link] });
+  await saveCctv({ ...s, links: [...s.links, link] });
   return link;
 }
 
 export async function removeLink(id: string) {
   const s = await loadCctv(true);
-  await saveCctv({ links: s.links.filter((l) => l.id !== id) });
+  await saveCctv({ ...s, links: s.links.filter((l) => l.id !== id) });
+}
+
+export async function setCamWatch(w: CamWatch) {
+  const s = await loadCctv(true);
+  await saveCctv({ ...s, watch: cleanWatch(w) });
 }
 
 export async function setLinkChannels(id: string, channels: number[]) {
   const s = await loadCctv(true);
   const clean = [...new Set(channels.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 1000))].sort((a, b) => a - b);
-  await saveCctv({ links: s.links.map((l) => (l.id === id ? { ...l, channels: clean } : l)) });
+  await saveCctv({ ...s, links: s.links.map((l) => (l.id === id ? { ...l, channels: clean } : l)) });
 }
 
 export async function linkByKey(key: string): Promise<CctvLink | null> {
