@@ -53,13 +53,15 @@ export type DutyOptions = {
   grace: number;
   /** Store of the person on a day (for "no punching data" days). */
   store: (day: string) => string | null;
+  /** The month's punches, when already loaded (checking many people at once). */
+  index?: Awaited<ReturnType<typeof loadMonthPunches>>;
 };
 
 export async function dutyDays(personId: string, month: string, opts: DutyOptions): Promise<DutyDay[]> {
   const { from, to, days } = monthRange(month);
   const code = attendanceCode(personId);
   const [index, justRes] = await Promise.all([
-    loadMonthPunches(month),
+    opts.index ?? loadMonthPunches(month),
     supabaseAdmin.from("duty_justifications").select("day, kind, reason, by_name, created_at").eq("user_id", code).gte("day", from).lte("day", to),
   ]);
   const mins = index.byCode.get(code) ?? new Map<string, number[]>();

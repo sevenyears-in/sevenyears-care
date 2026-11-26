@@ -8,6 +8,7 @@ import {
   canWriteLetters,
   isLetterKind,
   LETTER_KINDS,
+  MANUAL_KINDS,
   letterRecipients,
   lettersFor,
   sendsDirectly,
@@ -15,6 +16,7 @@ import {
   type Letter,
 } from "@/lib/warning-letters";
 import { LetterSignature, NewLetterForm } from "@/components/WarningLetters";
+import { canControl, loadDisciplineSettings } from "@/lib/discipline";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,9 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
   }
   const people = writer ? await letterRecipients(staff) : [];
   const sig = writer ? await signatureFor(staff) : null;
+  const auto = await loadDisciplineSettings()
+    .then((d) => canControl(staff, d))
+    .catch(() => staff.role === "super_admin");
   // Opened from a record in Care (e.g. "Warning letter" next to an SOP violation).
   const sp = await searchParams;
   const startPerson = sp.code ? people.find((p) => attendanceCode(p.userId) === attendanceCode(sp.code)) : undefined;
@@ -41,7 +46,14 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Warning letters</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl font-bold">Warning letters</h1>
+          {auto && (
+            <Link href="/staff/letters/auto" className="rounded-full bg-[#161616] px-5 py-2.5 text-sm font-bold text-white">
+              ⚙️ Automatic letters
+            </Link>
+          )}
+        </div>
         <p className="mt-2 text-sm text-black/60">
           {writer
             ? sendsDirectly(staff.role)
@@ -52,7 +64,7 @@ export default async function WarningLettersPage({ searchParams }: { searchParam
       </div>
 
       {sig && <LetterSignature name={sig.name} title={sig.title} imageUrl={sig.imageUrl} />}
-      {writer && <NewLetterForm people={people} kinds={LETTER_KINDS} direct={sendsDirectly(staff.role)} start={start} />}
+      {writer && <NewLetterForm people={people} kinds={MANUAL_KINDS as Record<string, string>} direct={sendsDirectly(staff.role)} start={start} />}
 
       {lists.mine.length > 0 && <List title="Letters to me" letters={lists.mine} mine />}
       {canApproveLetters(staff.role) && (

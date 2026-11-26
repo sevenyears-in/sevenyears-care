@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseReport, reportSummary } from "@/lib/report-parse";
 import { registerWebPush, supported } from "@/components/WebPushButton";
+import { LETTER_ALERT } from "@/lib/letter-kinds";
 
 /** Short text for pop-ups and phone notifications (reports become one line per store). */
 function shortBody(body: string | null) {
@@ -29,7 +30,7 @@ const POLL_MS = 30_000;
 
 function alertHref(a: LiveAlert) {
   if (/explanation is needed/i.test(a.title)) return "/staff/explanations";
-  if (/^Warning letter/.test(a.title)) return a.ticket_id ? `/staff/letters/${a.ticket_id}` : "/staff/letters";
+  if (LETTER_ALERT.test(a.title)) return a.ticket_id ? `/staff/letters/${a.ticket_id}` : "/staff/letters";
   if (/extended warranty/i.test(a.title)) return "/staff/extended-warranty";
   if (/^(TEST · )?(Updated: )?End of day /.test(a.title)) return "/staff/performance/reports";
   const stockStore = /^(?:TEST · )?([A-Z][A-Z ]+) stock alert$/.exec(a.title);

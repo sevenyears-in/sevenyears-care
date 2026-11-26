@@ -50,6 +50,10 @@ async function dayTick() {
     return [m?.open, m?.close].filter((x): x is number => typeof x === "number");
   }).catch((e) => `cctv clean-up error: ${e instanceof Error ? e.message : e}`);
   if (cam) console.log(cam);
+  // Automatic reminders / warnings / PIP (once a day, after 11 am).
+  const { disciplineTick } = await import("@/lib/discipline");
+  const dis = await disciplineTick().catch((e) => `automatic letters error: ${e instanceof Error ? e.message : e}`);
+  if (!/^(not yet|already)$/.test(dis)) console.log("Automatic letters:", dis);
   const { applyDueStores } = await import("@/lib/assignments");
   const moved = await applyDueStores().catch(() => 0);
   if (moved) console.log("Transfers applied:", moved);

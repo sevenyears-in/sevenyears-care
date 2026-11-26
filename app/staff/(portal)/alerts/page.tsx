@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/helpers";
 import { MarkAlertsRead } from "@/components/MarkAlertsRead";
 import { AlertItem } from "@/components/AlertItem";
 import { SyncUnreadCount } from "@/components/LiveAlerts";
+import { LETTER_ALERT } from "@/lib/letter-kinds";
 
 export default async function AlertsPage() {
   const staff = await getCurrentStaff();
@@ -44,7 +45,7 @@ export default async function AlertsPage() {
           {alerts.map((a) => {
             const href = /explanation is needed/i.test(a.title)
               ? "/staff/explanations"
-              : /^Warning letter/.test(a.title)
+              : LETTER_ALERT.test(a.title)
                 ? a.ticket_id ? `/staff/letters/${a.ticket_id}` : "/staff/letters"
               : /extended warranty/i.test(a.title)
                 ? "/staff/extended-warranty"

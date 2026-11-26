@@ -19,6 +19,8 @@ const FOOTER_PURPLE = rgb(137 / 255, 133 / 255, 210 / 255);
 const FOOTER_TEAL = rgb(40 / 255, 176 / 255, 192 / 255);
 
 export type LetterPdfData = {
+  /** Heading ("WARNING LETTER", "REMINDER", …). */
+  title?: string;
   number: string | null;
   sentAt: string | null;
   createdAt: string;
@@ -130,7 +132,7 @@ export function letterBlocks(body: string): { kind: "p" | "li" | "gap"; text: st
 
 export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  pdf.setTitle(`Warning letter ${d.number ?? ""}`.trim());
+  pdf.setTitle(`${d.title ? d.title.charAt(0) + d.title.slice(1).toLowerCase() : "Warning letter"} ${d.number ?? ""}`.trim());
   pdf.setAuthor("Seven Years");
   const poppins = await embedPoppins(pdf);
   const regular = poppins?.regular ?? (await pdf.embedFont(StandardFonts.Helvetica));
@@ -168,7 +170,7 @@ export async function buildWarningLetterPdf(d: LetterPdfData): Promise<Uint8Arra
   y -= 30;
 
   // Title
-  const title = "WARNING LETTER";
+  const title = d.title ?? "WARNING LETTER";
   page!.drawText(title, { x: (W - bold.widthOfTextAtSize(title, 15)) / 2, y, size: 15, font: bold, color: PINK });
   y -= 30;
 

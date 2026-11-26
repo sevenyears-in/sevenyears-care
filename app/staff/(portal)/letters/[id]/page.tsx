@@ -4,7 +4,8 @@ import { after } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { markAlertsRead } from "@/lib/alerts";
 import { formatDate, formatDateTime } from "@/lib/helpers";
-import { canApproveLetters, canSeeLetter, getLetter, LETTER_KINDS, letterStores, markLetterSeen, signatureImageUrlOf } from "@/lib/warning-letters";
+import { canApproveLetters, canDecide, canSeeLetter, getLetter, LETTER_KINDS, letterStores, markLetterSeen, signatureImageUrlOf } from "@/lib/warning-letters";
+import { letterTitle } from "@/lib/letter-kinds";
 import { LetterActions } from "@/components/WarningLetters";
 import { letterBlocks } from "@/lib/warning-letter-pdf";
 
@@ -43,7 +44,9 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
 
       {l.status === "pending" && (
         <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-          Written by {l.created_by_name} ({l.created_by_role}) on {formatDateTime(l.created_at)} — waiting for HR / Director approval. The staff member has not received it.
+          {l.auto
+            ? `Prepared automatically on ${formatDateTime(l.created_at)} — waiting for the ${l.needs === "super_admin" ? "Super Admin" : "HR / Director"} to check it and send it. The staff member has not received it.`
+            : `Written by ${l.created_by_name} (${l.created_by_role}) on ${formatDateTime(l.created_at)} — waiting for HR / Director approval. The staff member has not received it.`}
         </p>
       )}
       {l.status === "rejected" && (
@@ -67,7 +70,7 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
           <span>Ref: {l.number ?? "DRAFT"}</span>
           <span>Date: {formatDate(l.sent_at ?? l.created_at)}</span>
         </div>
-        <h1 className="mt-5 text-center text-xl font-bold tracking-wide text-[#ff5e79]">WARNING LETTER</h1>
+        <h1 className="mt-5 text-center text-xl font-bold tracking-wide text-[#ff5e79]">{letterTitle(l.kind)}</h1>
         <div className="mt-5 text-sm">
           <p>To,</p>
           <p className="font-bold">{l.staff_name}</p>
@@ -105,6 +108,7 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
         </div>
         <p className="mt-6 border-t border-black/5 pt-3 text-xs text-black/45">
           {LETTER_KINDS[l.kind] ?? l.kind}
+          {l.auto ? " · issued automatically" : ""}
           {l.decided_by_name && l.status === "sent" ? ` · approved by ${l.decided_by_name}` : ""}
         </p>
       </article>
@@ -140,7 +144,7 @@ export default async function WarningLetterPage({ params }: { params: Promise<{ 
         <LetterActions
           id={l.id}
           canAck={mine && l.status === "sent" && !l.ack_at}
-          canApprove={approver && l.status === "pending" && !mine}
+          canApprove={canDecide(staff, l) && l.status === "pending" && !mine}
           canWithdraw={l.status === "pending" && (l.created_by === staff.id || staff.role === "super_admin")}
           canRevoke={approver && l.status === "sent" && !mine}
           subject={l.subject}

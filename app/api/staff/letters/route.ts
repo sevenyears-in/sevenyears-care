@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { createLetter, isLetterKind } from "@/lib/warning-letters";
+import { createLetter, MANUAL_KINDS } from "@/lib/warning-letters";
 
 // POST { staffId, kind, subject, body } → write a warning letter.
 // Super Admin / HR / Director: sent at once. Store Manager: waits for HR or a Director.
@@ -9,11 +9,12 @@ export async function POST(request: Request) {
   const auth = await requireStaff();
   if (auth.response) return auth.response;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!isLetterKind(body.kind)) return NextResponse.json({ error: "Choose the type of warning." }, { status: 400 });
+  const kind = typeof body.kind === "string" && body.kind in MANUAL_KINDS ? (body.kind as keyof typeof MANUAL_KINDS) : null;
+  if (!kind) return NextResponse.json({ error: "Choose the type of warning." }, { status: 400 });
   try {
     const letter = await createLetter(auth.staff, {
       staffId: String(body.staffId ?? ""),
-      kind: body.kind,
+      kind,
       subject: String(body.subject ?? ""),
       body: String(body.body ?? ""),
     });
