@@ -3,13 +3,30 @@ import { requireStaff } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import {
   canControl,
+  cleanSettings,
   controlCase,
+  LIMITS,
+  TRACKS,
   controlStores,
   loadDisciplineSettings,
   runDiscipline,
   saveDisciplineSettings,
   type DisciplineSettings,
 } from "@/lib/discipline";
+
+const LABELS: Record<string, string> = {
+  count: "The number of times",
+  days: "The number of days",
+  run: "Late days in a row",
+  minutes: "Late minutes",
+  threshold: "The % of target",
+  months: "Poor months in a row",
+  pipDays: "PIP days",
+  stepDays: "Days for each warning",
+  openDays: "Days a point may stay Open",
+  progressDays: "Days a point may stay In progress",
+  gapMinutes: "Minutes without walk-ins",
+};
 
 // Automatic letters (Warning letters → Automatic letters).
 // POST { action: "settings", settings }            — Super Admin: rules on / off, dates, signer, who has the controls
@@ -32,19 +49,16 @@ export async function POST(request: Request) {
     if (body.action === "settings") {
       if (me.role !== "super_admin") return NextResponse.json({ error: "Only the Super Admin can change the rules." }, { status: 403 });
       const s = (body.settings ?? {}) as Partial<DisciplineSettings>;
-      const r = (s.rules ?? {}) as Partial<DisciplineSettings["rules"]>;
-      const threshold = Number(r.performance?.threshold);
-      if (!(threshold > 0 && threshold <= 100)) return NextResponse.json({ error: "The performance limit must be between 1 and 100%." }, { status: 400 });
-      if (!isDay(r.sop_sm?.from) || !isDay(r.late?.from) || !isMonth(r.performance?.from)) return NextResponse.json({ error: "Fill in the 'count from' dates." }, { status: 400 });
-      const next: DisciplineSettings = {
-        rules: {
-          sop_sm: { on: Boolean(r.sop_sm?.on), from: r.sop_sm.from },
-          late: { on: Boolean(r.late?.on), from: r.late.from },
-          performance: { on: Boolean(r.performance?.on), from: r.performance.from, threshold: Math.round(threshold) },
-        },
-        signer: typeof s.signer === "string" && s.signer ? s.signer : null,
-        controllers: Array.isArray(s.controllers) ? [...new Set(s.controllers.filter((x): x is string => typeof x === "string"))].slice(0, 50) : [],
-      };
+      const r = (s.rules ?? {}) as Record<string, Record<string, unknown>>;
+      // Every number must be within its limits (no silent changes).
+      for (const [rule, fields] of Object.entries(LIMITS)) {
+        if (rule === "performance" ? !isMonth(r[rule]?.from) : !isDay(r[rule]?.from)) return NextResponse.json({ error: "Fill in the 'count from' dates." }, { status: 400 });
+        for (const [name, [lo, hi]] of Object.entries(fields as Record<string, readonly [number, number]>)) {
+          const n = Number(r[rule]?.[name]);
+          if (!Number.isFinite(n) || n < lo || n > hi) return NextResponse.json({ error: `${LABELS[name] ?? name} (${TRACKS[rule as keyof typeof TRACKS]}) must be between ${lo} and ${hi}.` }, { status: 400 });
+        }
+      }
+      const next = cleanSettings(s);
       await saveDisciplineSettings(next);
       await logAudit(me, "discipline", "settings", settings, next).catch(() => undefined);
       return NextResponse.json({ ok: true });

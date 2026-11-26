@@ -13,9 +13,11 @@ const card = "soft-card rounded-3xl bg-white p-5 ring-1 ring-black/5 sm:p-6";
 
 type Settings = {
   rules: {
-    sop_sm: { on: boolean; from: string };
-    late: { on: boolean; from: string };
-    performance: { on: boolean; from: string; threshold: number };
+    sop_sm: { on: boolean; from: string; count: number; days: number };
+    late: { on: boolean; from: string; run: number; minutes: number };
+    performance: { on: boolean; from: string; threshold: number; months: number; pipDays: number; stepDays: number };
+    plans: { on: boolean; from: string; openDays: number; progressDays: number; count: number };
+    walkins: { on: boolean; from: string; gapMinutes: number; count: number };
   };
   signer: string | null;
   controllers: string[];
@@ -37,7 +39,13 @@ type CaseRow = {
 };
 type Action = { track: string; staffId: string; name: string; store: string | null; what: string; kind: string | null; needs: string | null; subject: string | null; body: string | null };
 
-const TRACKS: Record<string, string> = { sop_sm: "SOP (Store Manager)", late: "Late coming", performance: "Sales performance" };
+const TRACKS: Record<string, string> = {
+  sop_sm: "SOP (Store Manager)",
+  late: "Late coming",
+  performance: "Sales performance",
+  plans: "Action plans (Store Manager)",
+  walkins: "Walk-in counter (Store Manager)",
+};
 const ROLE: Record<string, string> = { hr_executive: "HR Executive", hr_head: "HR Head", store_manager: "Store Manager" };
 
 async function call(body: unknown) {
@@ -148,66 +156,79 @@ function Rules({
       </div>
 
       <div className="space-y-4">
-        <div className="flex items-start gap-4 rounded-2xl bg-[#f7f9fb] p-4">
-          <Switch on={s.rules.sop_sm.on} disabled={off} onChange={(v) => rule("sop_sm", { on: v })} />
-          <div className="flex-1 space-y-2 text-sm">
-            <p className="font-bold">SOP — warning to the Store Manager</p>
-            <p className="text-black/60">
-              3 deviations at the store in 30 days (opened / closed by someone not allowed, camera early / late, proxy punch) that the Director has not approved by 11 am the
-              next day → warning letter to the Store Manager, sent automatically. The count starts again after each letter.
-            </p>
-            <label className="flex flex-wrap items-center gap-2 text-black/70">
-              Count from
-              <input type="date" className="rounded-xl border border-black/10 px-3 py-1.5" value={s.rules.sop_sm.from} disabled={off} onChange={(e) => rule("sop_sm", { from: e.target.value })} />
-            </label>
-          </div>
-        </div>
+        <RuleCard
+          title="SOP — warning to the Store Manager"
+          on={s.rules.sop_sm.on}
+          off={off}
+          onToggle={(v) => rule("sop_sm", { on: v })}
+          from={s.rules.sop_sm.from}
+          onFrom={(v) => rule("sop_sm", { from: v })}
+        >
+          <Num v={s.rules.sop_sm.count} off={off} min={1} max={20} set={(n) => rule("sop_sm", { count: n })} /> deviations at the store within{" "}
+          <Num v={s.rules.sop_sm.days} off={off} min={7} max={90} set={(n) => rule("sop_sm", { days: n })} /> days (opened / closed by someone not allowed, camera
+          early / late, proxy punch) that the Director has not approved by 11 am the next day → warning letter to the Store Manager, sent automatically. The count
+          starts again after each letter.
+        </RuleCard>
 
-        <div className="flex items-start gap-4 rounded-2xl bg-[#f7f9fb] p-4">
-          <Switch on={s.rules.late.on} disabled={off} onChange={(v) => rule("late", { on: v })} />
-          <div className="flex-1 space-y-2 text-sm">
-            <p className="font-bold">Late coming — reminder, then warning</p>
-            <p className="text-black/60">
-              In a calendar month: 3 late days in a row, or more than 45 minutes late in all → a polite reminder. When it happens again in the same or the next month →
-              warning letter. Both are sent automatically.
-            </p>
-            <label className="flex flex-wrap items-center gap-2 text-black/70">
-              Count from
-              <input type="date" className="rounded-xl border border-black/10 px-3 py-1.5" value={s.rules.late.from} disabled={off} onChange={(e) => rule("late", { from: e.target.value })} />
-            </label>
-          </div>
-        </div>
+        <RuleCard
+          title="Late coming — reminder, then warning"
+          on={s.rules.late.on}
+          off={off}
+          onToggle={(v) => rule("late", { on: v })}
+          from={s.rules.late.from}
+          onFrom={(v) => rule("late", { from: v })}
+        >
+          In a calendar month: <Num v={s.rules.late.run} off={off} min={2} max={10} set={(n) => rule("late", { run: n })} /> late days in a row, or more than{" "}
+          <Num v={s.rules.late.minutes} off={off} min={10} max={300} set={(n) => rule("late", { minutes: n })} /> minutes late in all → a polite reminder. When it
+          happens again in the same or the next month → warning letter. Both are sent automatically.
+        </RuleCard>
 
-        <div className="flex items-start gap-4 rounded-2xl bg-[#f7f9fb] p-4">
-          <Switch on={s.rules.performance.on} disabled={off} onChange={(v) => rule("performance", { on: v })} />
-          <div className="flex-1 space-y-2 text-sm">
-            <p className="font-bold">Sales performance — PIP, second warning, final warning, termination</p>
-            <p className="text-black/60">
-              Below the limit for 3 months in a row → Performance Improvement Plan for 60 days (sent automatically). Not improved → second warning (sent
-              automatically, 30 days). Not improved → final warning, prepared for the Super Admin to send (30 days). Not improved → termination letter, prepared for the
-              Super Admin. Reaching the limit in the last month of a step closes the case.
-            </p>
-            <div className="flex flex-wrap gap-4 text-black/70">
-              <label className="flex items-center gap-2">
-                Poor month: below
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  className="w-20 rounded-xl border border-black/10 px-3 py-1.5"
-                  value={s.rules.performance.threshold}
-                  disabled={off}
-                  onChange={(e) => rule("performance", { threshold: Number(e.target.value) })}
-                />
-                % of target
-              </label>
-              <label className="flex items-center gap-2">
-                First month that counts
-                <input type="month" className="rounded-xl border border-black/10 px-3 py-1.5" value={s.rules.performance.from} disabled={off} onChange={(e) => rule("performance", { from: e.target.value })} />
-              </label>
-            </div>
-          </div>
-        </div>
+        <RuleCard
+          title="Sales performance — PIP, second warning, final warning, termination"
+          on={s.rules.performance.on}
+          off={off}
+          onToggle={(v) => rule("performance", { on: v })}
+          from={s.rules.performance.from}
+          onFrom={(v) => rule("performance", { from: v })}
+          month
+        >
+          Below <Num v={s.rules.performance.threshold} off={off} min={1} max={100} set={(n) => rule("performance", { threshold: n })} />% of target for{" "}
+          <Num v={s.rules.performance.months} off={off} min={1} max={6} set={(n) => rule("performance", { months: n })} /> months in a row → Performance
+          Improvement Plan for <Num v={s.rules.performance.pipDays} off={off} min={15} max={180} set={(n) => rule("performance", { pipDays: n })} /> days (sent
+          automatically). Not improved → second warning (sent automatically), then{" "}
+          <Num v={s.rules.performance.stepDays} off={off} min={7} max={90} set={(n) => rule("performance", { stepDays: n })} /> days to improve. Not improved →
+          final warning, prepared for the Super Admin to send, then the same number of days. Not improved → termination letter, prepared for the Super Admin.
+          Reaching the limit in the last month of a step closes the case.
+        </RuleCard>
+
+        <RuleCard
+          title="Action plans — reminder, then warning to the Store Manager"
+          on={s.rules.plans.on}
+          off={off}
+          onToggle={(v) => rule("plans", { on: v })}
+          from={s.rules.plans.from}
+          onFrom={(v) => rule("plans", { from: v })}
+        >
+          A high-priority point (Performance → Action plans) still Open{" "}
+          <Num v={s.rules.plans.openDays} off={off} min={1} max={14} set={(n) => rule("plans", { openDays: n })} /> days after it appears, or In progress with no
+          update for <Num v={s.rules.plans.progressDays} off={off} min={2} max={30} set={(n) => rule("plans", { progressDays: n })} /> days, counts once.{" "}
+          <Num v={s.rules.plans.count} off={off} min={1} max={20} set={(n) => rule("plans", { count: n })} /> such points in a month → reminder to the Store
+          Manager; again in the same or the next month → warning letter.
+        </RuleCard>
+
+        <RuleCard
+          title="Walk-in counter — reminder, then warning to the Store Manager"
+          on={s.rules.walkins.on}
+          off={off}
+          onToggle={(v) => rule("walkins", { on: v })}
+          from={s.rules.walkins.from}
+          onFrom={(v) => rule("walkins", { from: v })}
+        >
+          A day counts when a bill is made but no walk-in was counted in the{" "}
+          <Num v={s.rules.walkins.gapMinutes} off={off} min={30} max={360} step={15} set={(n) => rule("walkins", { gapMinutes: n })} /> minutes before it (during
+          opening hours). <Num v={s.rules.walkins.count} off={off} min={1} max={20} set={(n) => rule("walkins", { count: n })} /> such days in a month → reminder to
+          the Store Manager; again in the same or the next month → warning letter.
+        </RuleCard>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -272,6 +293,62 @@ function Rules({
         </div>
       )}
     </section>
+  );
+}
+
+function Num({ v, off, min, max, step = 1, set }: { v: number; off: boolean; min: number; max: number; step?: number; set: (n: number) => void }) {
+  if (off) return <span className="font-bold text-black/80">{v}</span>;
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={Number.isFinite(v) ? v : ""}
+      onChange={(e) => set(Number(e.target.value))}
+      className="mx-0.5 w-16 rounded-lg border border-black/15 bg-white px-2 py-0.5 text-center font-bold"
+      title={`${min}–${max}`}
+    />
+  );
+}
+
+function RuleCard({
+  title,
+  on,
+  off,
+  onToggle,
+  from,
+  onFrom,
+  month,
+  children,
+}: {
+  title: string;
+  on: boolean;
+  off: boolean;
+  onToggle: (v: boolean) => void;
+  from: string;
+  onFrom: (v: string) => void;
+  month?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-4 rounded-2xl bg-[#f7f9fb] p-4">
+      <Switch on={on} disabled={off} onChange={onToggle} />
+      <div className="flex-1 space-y-2 text-sm">
+        <p className="font-bold">{title}</p>
+        <p className="leading-7 text-black/60">{children}</p>
+        <label className="flex flex-wrap items-center gap-2 text-black/70">
+          {month ? "First month that counts" : "Count from"}
+          <input
+            type={month ? "month" : "date"}
+            className="rounded-xl border border-black/10 px-3 py-1.5"
+            value={from}
+            disabled={off}
+            onChange={(e) => onFrom(e.target.value)}
+          />
+        </label>
+      </div>
+    </div>
   );
 }
 
