@@ -122,6 +122,8 @@ export async function cameraWalkins(
   let burst = 0;
   for (const r of rows) {
     const t = Date.parse(r.event_at);
+    // A photo the AI could not use (missing photo, other camera) is left out, not counted as waiting.
+    if (r.ai && typeof r.ai.people !== "number") continue;
     const ai = r.ai && typeof r.ai.people === "number" ? r.ai : null;
     let w: number;
     if (!ai) {
