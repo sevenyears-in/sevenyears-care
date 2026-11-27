@@ -19,7 +19,7 @@ const SETTINGS_KEY = "cctv";
 /** Photos this long before / after the opener's (closer's) punch are shown with it. */
 export const PUNCH_BEFORE_SEC = 180;
 export const PUNCH_AFTER_SEC = 120;
-const KEEP_LINKED_DAYS = 90;
+const KEEP_LINKED_DAYS = 30;
 const KEEP_OTHER_DAYS = 3;
 /** An NVR clock further off than this: the time the event arrived is used instead. */
 const CLOCK_TOLERANCE_MIN = 10;

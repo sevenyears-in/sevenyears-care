@@ -83,7 +83,7 @@ export default function CctvSettings() {
       <p className="mt-1 max-w-3xl text-sm text-black/60">
         Each store&apos;s VIGI recorder (NVR) sends a photo every time its camera sees a person. The photos taken just before and after the
         Store Manager&apos;s / ASM&apos;s opening and closing punch show on <b>Store opening &amp; closing</b>, so the Director can see whether it
-        was really them. Photos at those punches are kept 90 days; all other photos are deleted after 3 days.
+        was really them. Photos at those punches are kept 30 days; all other photos are deleted after 3 days.
       </p>
 
       <div className="mt-5 space-y-5">
