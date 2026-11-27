@@ -253,7 +253,7 @@ export async function cameraAiTick(): Promise<string> {
       .is("ai_at", null)
       .not("photo_path", "is", null)
       .filter("raw->sub_type", "cs", `[${watch.walkinCode}]`)
-      .gte("event_at", new Date(Date.now() - 3 * 3_600_000).toISOString())
+      .gte("event_at", dayStart) // today's photos only (oldest first, so a backlog catches up)
       .order("event_at")
       .limit(8);
     const rows = (data ?? []) as { id: number; store: string; channel: number | null; event_at: string; photo_path: string }[];
