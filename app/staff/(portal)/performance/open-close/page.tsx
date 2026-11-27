@@ -118,7 +118,7 @@ export default async function OpenClosePage({ searchParams }: { searchParams: Pr
     return { photos: list, check: checks.get(day)?.[kind] ?? null, missing: at !== null && !list.length && !recent };
   };
   // Entrance camera vs punches (first in / last out): Directors, SM, Super Admin, HR (and management).
-  const seesEdges = seesCamera || ["hr_head", "hr_executive", "store_manager"].includes(staff.role);
+  const seesEdges = seesCamera || ["hr_head", "hr_executive", "store_manager", "floor_incharge"].includes(staff.role);
   const edges = seesEdges && since ? await loadCamEdges(store, camDays).catch(() => new Map<string, { open: CamEdge; close: CamEdge }>()) : new Map<string, { open: CamEdge; close: CamEdge }>();
   const edgeUrls = await eventPhotos([...edges.values()].flatMap((e) => [e.open.event, e.close.event]).filter((x): x is number => typeof x === "number")).catch(() => new Map<number, string>());
   const edgeOf = (day: string, kind: "open" | "close") => edges.get(day)?.[kind] ?? null;

@@ -14,7 +14,7 @@ import { actionPlans, hourRange, peakLeanHours, personalPlan, planRoleOf, planVi
 import { loadFollow, type Follow } from "@/lib/plan-follow";
 import { PlanFollow } from "@/components/PlanFollow";
 import { storePace } from "@/lib/store-pace";
-import { clockIST, loadOpenClose } from "@/lib/store-open-close";
+import { clockIST, loadOpenClose, openCloseStores } from "@/lib/store-open-close";
 import { canWriteLetters } from "@/lib/warning-letters";
 import { loadSalaries, monthReport, personDetail, storePreviousPeriod, storeTrends, type StoreTrends, yearlyProgress, type YearlyLine, type PeriodTotals, type PersonReport, type StoreReport } from "@/lib/performance";
 import { performanceAccess } from "@/lib/performance-access";
@@ -219,12 +219,19 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const wanted = sp.u && myStores.length ? attendanceCode(sp.u) : me;
   const view = myStores.length && (sp.view === "team" || (!access.eligible && !sp.u)) ? "team" : "person";
   const teamStore = view === "team" ? (myStores.includes((sp.store ?? "").toUpperCase()) ? (sp.store ?? "").toUpperCase() : myStores[0]) : null;
-  // Store opened / closed today (from the punching machine).
-  const openToday = teamStore && month === thisMonth ? await loadOpenClose(teamStore, istNow().date).catch(() => null) : null;
+  // Store opened / closed today (from the punching machine): on the store dashboard, and on the
+  // Store Manager's / ASM's / Floor Manager's own page for their store (also stores without sales targets).
+  const ownStore = (staff.storeName ?? "").toUpperCase();
+  const ocStores =
+    month === thisMonth && !teamStore && wanted === me
+      ? await merchStores(staff, [...new Set([...allStores, ...(await openCloseStores().catch(() => [] as string[]))])]).catch(() => [] as string[])
+      : [];
+  const ocStore = teamStore ?? (ocStores.includes(ownStore) ? ownStore : ocStores[0] ?? null);
+  const openToday = ocStore && month === thisMonth ? await loadOpenClose(ocStore, istNow().date).catch(() => null) : null;
   // Before the store opens (e.g. after midnight) show yesterday's opening & closing, so the link to the history stays.
   const openYesterday =
-    teamStore && month === thisMonth && !openToday?.openedAt
-      ? await loadOpenClose(teamStore, new Date(Date.parse(`${istNow().date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)).catch(() => null)
+    ocStore && month === thisMonth && !openToday?.openedAt
+      ? await loadOpenClose(ocStore, new Date(Date.parse(`${istNow().date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)).catch(() => null)
       : null;
   const openClose = openToday?.openedAt ? openToday : openYesterday?.openedAt ? openYesterday : null;
   const openCloseDay = openToday?.openedAt ? "today" : "yesterday";
@@ -275,24 +282,24 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
             ✉️ Warning letter for {monthLabel(month)}
           </Link>
         )}
-        {teamStore && month === thisMonth && !openClose?.openedAt && (
+        {ocStore && month === thisMonth && !openClose?.openedAt && (
           <Link
-            href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}
+            href={`/staff/performance/open-close?store=${encodeURIComponent(ocStore)}`}
             className="mt-1 inline-flex flex-wrap gap-x-3 rounded-full bg-black/5 px-3 py-1 text-xs font-semibold text-black/70 hover:opacity-90"
           >
-            <span>Not opened yet today</span>
+            <span>{view !== "team" ? `${ocStore}: ` : ""}Not opened yet today</span>
             <span className="underline">Opening & closing history →</span>
           </Link>
         )}
-        {openClose?.openedAt && teamStore && (
+        {openClose?.openedAt && ocStore && (
           <Link
-            href={`/staff/performance/open-close?store=${encodeURIComponent(teamStore)}`}
+            href={`/staff/performance/open-close?store=${encodeURIComponent(ocStore)}`}
             className={`mt-1 inline-flex flex-wrap gap-x-3 rounded-full px-3 py-1 text-xs font-semibold hover:opacity-90 ${
               openClose.openSop === "violation" || openClose.closeSop === "violation" ? "bg-red-50 text-red-800" : "bg-green-50 text-green-800"
             }`}
           >
             <span>
-              🟢 Opened {openCloseDay} {clockIST(openClose.openedAt)}
+              🟢 {view !== "team" ? `${ocStore} ` : ""}Opened {openCloseDay} {clockIST(openClose.openedAt)}
               {openClose.openedBy ? ` by ${openClose.openedBy}` : ""}
               {openClose.openSop === "violation" ? " ⚠ SOP violation" : openClose.openSop === "approved" ? " (approved)" : ""}
             </span>
