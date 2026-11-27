@@ -215,7 +215,8 @@ export async function checkDoorPhoto(photo: Blob, s: CameraAiSettings, refs: (Im
 
 STAFF: ${s.uniform}
 Also treat as staff: anyone standing behind the billing counter, arranging, carrying or cleaning stock, and people in matching dark clothes standing together (a staff meeting).
-CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children). A woman in a loose black burqa / abaya with a head scarf and no logo is a customer, not staff.
+Women staff may also wear a long black dress / abaya with a scarf. A person dressed all in black counts as a customer ONLY if they are clearly a shopper: coming in through the entrance from outside, with family or children, or carrying a handbag / shopping bag.
+CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children).
 IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
 ${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
 Describe EVERY real person you can see in the store, then decide for each one:
