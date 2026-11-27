@@ -138,9 +138,9 @@ export async function cameraWalkins(
             : null;
     let w: number;
     if (!ai) {
-      w = 1;
+      // Not checked yet: not counted until the AI has looked (so staff are never counted meanwhile).
+      w = 0;
       pending++;
-      people++;
     } else if (ai.direction === "out" || !ai.customers) {
       w = 0;
       if (ai.direction !== "out") staff += ai.staff ?? 0;

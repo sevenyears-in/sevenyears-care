@@ -69,7 +69,7 @@ export function WalkinBox({
           <p className="text-[11px] font-bold uppercase tracking-wide text-black/45">📷 Camera count (trial)</p>
           <p className="text-2xl font-bold tabular-nums">{camera.walkins}</p>
           <p className="text-xs text-black/50">
-            {camera.pending ? `${camera.people - camera.pending} customer(s) checked by AI + ${camera.pending} photo(s) waiting for the AI (counted as 1 each for now)` : `${camera.people} customer(s) came in`} · conversion{" "}
+            {`${camera.people} customer(s) came in`}{camera.pending ? ` · ${camera.pending} photo(s) still being checked (not counted yet)` : ""} · conversion{" "}
             {camera.walkins > 0 ? `${Math.round((bills / camera.walkins) * 100)}%` : "—"}
           </p>
           {photosHref && (

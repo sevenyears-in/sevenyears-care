@@ -20,7 +20,7 @@ type Kind = "counted" | "same" | "waiting" | "staff" | "out" | "nobody" | "unusa
 const LABEL: Record<Kind, { text: string; cls: string }> = {
   counted: { text: "Counted", cls: "bg-green-100 text-green-800" },
   same: { text: "Same group as the photo before", cls: "bg-green-50 text-green-700" },
-  waiting: { text: "Waiting for the AI (counted as 1 for now)", cls: "bg-amber-100 text-amber-900" },
+  waiting: { text: "Being checked by the AI — not counted yet", cls: "bg-amber-100 text-amber-900" },
   staff: { text: "Staff only — not counted", cls: "bg-black/5 text-black/60" },
   out: { text: "Going out — not counted", cls: "bg-black/5 text-black/60" },
   nobody: { text: "Nobody walking in — not counted", cls: "bg-black/5 text-black/60" },
@@ -81,17 +81,16 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
     else if (!ai.customers) kind = ai.staff ? "staff" : "nobody";
     else kind = "counted";
     if (kind === "counted") customers = mark === "customer" ? Math.max(1, ai?.customers ?? 1) : ai?.customers ?? 0;
-    if (kind === "waiting") customers = 1;
     const sameBurst = t - prev <= watch.groupSec * 1000;
     if (kind !== "unusable") prev = t;
     if (!sameBurst) burstCounted = false;
-    const counts = kind === "counted" || kind === "waiting";
+    const counts = kind === "counted";
     if (counts && burstCounted) kind = "same";
     if (counts) burstCounted = true;
     items.push({ ...r, kind, customers, groups: kind === "counted" ? Math.max(1, ai?.groups ?? 1) : 0 });
   }
-  const counted = items.filter((i) => i.kind === "counted" || i.kind === "same" || i.kind === "waiting");
-  const list = show === "all" ? items : items.filter((i) => counted.includes(i) || i.kind === "markedStaff");
+  const counted = items.filter((i) => i.kind === "counted" || i.kind === "same");
+  const list = show === "all" ? items : items.filter((i) => counted.includes(i) || i.kind === "markedStaff" || i.kind === "waiting");
   const urls = await eventPhotos(list.map((i) => i.id)).catch(() => new Map<number, string>());
   const customers = counted.reduce((n, i) => n + i.customers, 0);
   const q = (o: Record<string, string>) => `?${new URLSearchParams({ store, day, ...(show === "all" ? { show } : {}), ...o })}`;
@@ -155,7 +154,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
               {i.kind !== "unusable" && (
                 <WalkinMark
                   id={i.id}
-                  counted={i.kind === "counted" || i.kind === "same" || i.kind === "waiting"}
+                  counted={i.kind === "counted" || i.kind === "same"}
                   mark={(() => {
                     const m = marks.get(i.id);
                     return m ? { verdict: m.verdict === "customer" ? "customer" : "staff", note: m.note, by: m.by_name } : null;

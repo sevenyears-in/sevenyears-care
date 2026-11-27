@@ -405,22 +405,24 @@ export async function cameraAiTick(): Promise<string> {
       .filter("raw->sub_type", "cs", `[${watch.walkinCode}]`)
       .gte("event_at", dayStart) // today's photos only (oldest first, so a backlog catches up)
       .order("event_at")
-      .limit(8);
+      .limit(16);
     const rows = (data ?? []) as { id: number; store: string; channel: number | null; event_at: string; photo_path: string }[];
     if (!rows.length) return "";
     const people = (await listWatch().catch(() => [])).filter((p) => p.active);
     const refs = await refPhotos(people);
     let done = 0;
-    for (const r of rows) {
+    let failed = false;
+    const one = async (r: (typeof rows)[number]) => {
+      if (failed) return;
       const link = links.find((l) => l.store === r.store);
       if (!link || (link.channels.length && r.channel !== null && !link.channels.includes(r.channel))) {
         await supabaseAdmin.from("cctv_events").update({ ai_at: new Date().toISOString(), ai: { skipped: true } }).eq("id", r.id);
-        continue;
+        return;
       }
       const { data: blob } = await supabaseAdmin.storage.from(CCTV_BUCKET).download(r.photo_path);
       if (!blob) {
         await supabaseAdmin.from("cctv_events").update({ ai_at: new Date().toISOString(), ai: { error: "photo missing" } }).eq("id", r.id);
-        continue;
+        return;
       }
       const storeRefs = people.filter((p) => p.store === r.store).map((p) => refs.get(p.id)).filter((x): x is Img & { id: string } => Boolean(x));
       try {
@@ -433,9 +435,11 @@ export async function cameraAiTick(): Promise<string> {
         done++;
       } catch (e) {
         g.__syAiError = e instanceof Error ? e.message : String(e);
-        break; // try again next minute (key missing, limit, network…)
+        failed = true; // try again next minute (key missing, limit, network…)
       }
-    }
+    };
+    // 4 at a time (a backlog of the day's photos catches up in minutes).
+    for (let i = 0; i < rows.length && !failed; i += 4) await Promise.all(rows.slice(i, i + 4).map(one));
     return done ? `${done} doorway photo(s) checked` : g.__syAiError ? `AI error: ${g.__syAiError}` : "";
   } finally {
     g.__syAiBusy = false;
