@@ -104,7 +104,7 @@ export async function cameraWalkins(
   const to = new Date(Date.parse(`${day}T00:00:00+05:30`) + 86_400_000).toISOString();
   const { data } = await supabaseAdmin
     .from("cctv_events")
-    .select("event_at, ai")
+    .select("id, event_at, ai")
     .eq("store", store)
     .in("channel", link.channels)
     .gte("event_at", from)
@@ -113,7 +113,10 @@ export async function cameraWalkins(
     .order("event_at")
     .limit(5000);
   type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string } | null;
-  const rows = (data ?? []) as { event_at: string; ai: Ai }[];
+  const rows = (data ?? []) as { id: number; event_at: string; ai: Ai }[];
+  // A manager's mark ("Not a customer — staff" / "This is a customer") overrides the AI.
+  const { loadMarks } = await import("@/lib/camera-ai");
+  const marks = await loadMarks(rows.map((r) => r.id)).catch(() => new Map<number, { verdict: string }>());
   let walkins = 0;
   let people = 0;
   let staff = 0;
@@ -122,9 +125,17 @@ export async function cameraWalkins(
   let burst = 0;
   for (const r of rows) {
     const t = Date.parse(r.event_at);
+    const mark = marks.get(r.id)?.verdict;
     // A photo the AI could not use (missing photo, other camera) is left out, not counted as waiting.
-    if (r.ai && typeof r.ai.people !== "number") continue;
-    const ai = r.ai && typeof r.ai.people === "number" ? r.ai : null;
+    if (!mark && r.ai && typeof r.ai.people !== "number") continue;
+    const ai: Ai =
+      mark === "staff"
+        ? { people: 1, staff: 1, customers: 0, groups: 0, direction: "in" }
+        : mark === "customer"
+          ? { people: 1, staff: 0, customers: Math.max(1, r.ai?.customers ?? 1), groups: Math.max(1, r.ai?.groups ?? 1), direction: "in" }
+          : r.ai && typeof r.ai.people === "number"
+            ? r.ai
+            : null;
     let w: number;
     if (!ai) {
       w = 1;

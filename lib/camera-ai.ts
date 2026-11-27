@@ -70,7 +70,7 @@ const defaultModel = (p: "anthropic" | "openai") => (p === "anthropic" ? "claude
 // The call
 // ------------------------------------------------------------------
 
-type Img = { b64: string; label?: string };
+type Img = { b64: string; label?: string; detail?: "low" | "high" };
 
 async function visionJson(prompt: string, images: Img[], model: string): Promise<Record<string, unknown>> {
   const provider = aiProvider();
@@ -96,7 +96,7 @@ async function visionJson(prompt: string, images: Img[], model: string): Promise
     const content: unknown[] = [];
     for (const im of images) {
       if (im.label) content.push({ type: "text", text: im.label });
-      content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${im.b64}`, detail: "high" } });
+      content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${im.b64}`, detail: im.detail ?? "high" } });
     }
     content.push({ type: "text", text: prompt });
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -193,7 +193,12 @@ export type DoorCheck = {
   watched: string[];
 };
 
-const g = globalThis as unknown as { __syAiBusy?: boolean; __syAiError?: string; __syAiRefs?: { at: number; refs: Map<string, Img & { id: string }> } };
+const g = globalThis as unknown as {
+  __syAiBusy?: boolean;
+  __syAiError?: string;
+  __syAiRefs?: { at: number; refs: Map<string, Img & { id: string }> };
+  __syAiExamples?: Map<string, { at: number; images: Img[]; notes: string[] }>;
+};
 
 export const aiLastError = () => g.__syAiError ?? null;
 
@@ -210,7 +215,17 @@ async function refPhotos(people: WatchPerson[]) {
 }
 
 /** Ask the AI about one doorway photo. It first describes every person, then we count. */
-export async function checkDoorPhoto(photo: Blob, s: CameraAiSettings, refs: (Img & { id: string })[], model?: string): Promise<DoorCheck & { persons?: unknown[] }> {
+export async function checkDoorPhoto(
+  photo: Blob,
+  s: CameraAiSettings,
+  refs: (Img & { id: string })[],
+  model?: string,
+  store?: string
+): Promise<DoorCheck & { persons?: unknown[] }> {
+  const learned = store ? await storeExamples(store).catch(() => ({ images: [] as Img[], notes: [] as string[] })) : { images: [] as Img[], notes: [] as string[] };
+  const lessons = learned.images.length || learned.notes.length
+    ? `\nLEARN FROM THE MANAGER'S CORRECTIONS AT THIS STORE: ${learned.images.length ? "the example photos above were checked by the manager and labelled. People who look or act like those marked STAFF are staff; do not repeat those mistakes." : ""}${learned.notes.length ? `\nManager's notes:\n${learned.notes.map((n) => `- ${n}`).join("\n")}` : ""}\n`
+    : "";
   const prompt = `This is a CCTV snapshot from the entrance camera of a Seven Years baby and kids store in Kerala, India. It was taken when someone crossed a line drawn on the floor near the entrance.
 
 STAFF: ${s.uniform}
@@ -219,14 +234,14 @@ Cleaning staff wear their own clothes: anyone holding or near a mop, broom, buck
 Women staff may also wear a long black dress / abaya with a scarf. A person dressed all in black counts as a customer ONLY if they are clearly a shopper: coming in through the entrance from outside, with family or children, or carrying a handbag / shopping bag.
 CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children).
 IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
-${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
+${lessons}${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
 Describe EVERY real person you can see in the store, then decide for each one:
 - "staff": true if they wear the staff uniform or fit the staff rules above. If you are not sure, answer true.
 - "moving": "in" if they are coming in through the entrance from outside, "out" if they are leaving through the entrance, "inside" if they are walking around inside the store, "still" if standing, sitting or working.
 
 Answer with JSON only:
 {"persons": [{"where": "<where in the picture>", "clothes": "<short description>", "staff": true|false, "moving": "in"|"out"|"inside"|"still"}], "parties": <how many separate customer parties are coming in: a family, a couple or friends walking in together are ONE party>, "watched": [<ids of the reference people in this photo>]}`;
-  const images: Img[] = [...refs, { b64: await toB64(photo), label: "CCTV snapshot to check:" }];
+  const images: Img[] = [...learned.images, ...refs, { b64: await toB64(photo), label: "CCTV snapshot to check:" }];
   const r = await visionJson(prompt, images, model || s.model);
   type P = { staff?: unknown; moving?: unknown };
   const persons = (Array.isArray(r.persons) ? r.persons : []).filter((x): x is P => Boolean(x) && typeof x === "object").slice(0, 50);
@@ -245,6 +260,127 @@ Answer with JSON only:
     watched: Array.isArray(r.watched) ? r.watched.map(String).filter((x) => ids.has(x)) : [],
     persons,
   };
+}
+
+// ------------------------------------------------------------------
+// Learning from the manager's marks (Walk-in photos → "Not a customer — staff" / "This is a customer")
+// ------------------------------------------------------------------
+
+const EXAMPLE_BUCKET = "camera-ai-examples";
+export type MarkVerdict = "staff" | "customer";
+export type Mark = { event_id: number; store: string; verdict: MarkVerdict; note: string | null; by_name: string | null; created_at: string };
+
+/** Marks of these photos (the walk-in count follows them). */
+export async function loadMarks(eventIds: number[]): Promise<Map<number, Mark>> {
+  const out = new Map<number, Mark>();
+  const ids = [...new Set(eventIds)];
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error } = await supabaseAdmin.from("camera_ai_marks").select("event_id, store, verdict, note, by_name, created_at").in("event_id", ids.slice(i, i + 300));
+    if (error) return out; // table not created yet
+    for (const m of (data ?? []) as Mark[]) out.set(Number(m.event_id), m);
+  }
+  return out;
+}
+
+/** Mark a doorway photo; a copy of the photo is kept so the AI keeps learning after CCTV photos are deleted. */
+export async function markEvent(eventId: number, verdict: MarkVerdict, note: string, by: string) {
+  const { data: ev } = await supabaseAdmin.from("cctv_events").select("id, store, photo_path").eq("id", eventId).maybeSingle();
+  const e = ev as { id: number; store: string; photo_path: string | null } | null;
+  if (!e) throw new Error("That photo was not found.");
+  let examplePath: string | null = null;
+  if (e.photo_path) {
+    const { CCTV_BUCKET } = await import("@/lib/cctv");
+    const { data: blob } = await supabaseAdmin.storage.from(CCTV_BUCKET).download(e.photo_path);
+    if (blob) {
+      examplePath = `${e.store}/${e.id}.jpg`;
+      const { error } = await supabaseAdmin.storage.from(EXAMPLE_BUCKET).upload(examplePath, Buffer.from(await blob.arrayBuffer()), { contentType: "image/jpeg", upsert: true });
+      if (error) examplePath = null;
+    }
+  }
+  const { error } = await supabaseAdmin.from("camera_ai_marks").upsert({
+    event_id: e.id,
+    store: e.store,
+    verdict,
+    note: note.trim().slice(0, 200) || null,
+    example_path: examplePath,
+    by_name: by,
+    created_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  g.__syAiExamples?.delete(e.store);
+}
+
+export async function unmarkEvent(eventId: number) {
+  const { data } = await supabaseAdmin.from("camera_ai_marks").select("store, example_path").eq("event_id", eventId).maybeSingle();
+  const m = data as { store: string; example_path: string | null } | null;
+  if (!m) return;
+  if (m.example_path) await supabaseAdmin.storage.from(EXAMPLE_BUCKET).remove([m.example_path]);
+  const { error } = await supabaseAdmin.from("camera_ai_marks").delete().eq("event_id", eventId);
+  if (error) throw error;
+  g.__syAiExamples?.delete(m.store);
+}
+
+/** How many marks the AI learns from (per store). */
+export async function markCounts(): Promise<Record<string, { staff: number; customer: number }>> {
+  const { data, error } = await supabaseAdmin.from("camera_ai_marks").select("store, verdict").limit(5000);
+  if (error) return {};
+  const out: Record<string, { staff: number; customer: number }> = {};
+  for (const m of (data ?? []) as { store: string; verdict: MarkVerdict }[]) {
+    out[m.store] ??= { staff: 0, customer: 0 };
+    out[m.store][m.verdict]++;
+  }
+  return out;
+}
+
+/** The latest marked photos of a store (shown to the AI as labelled examples) and the manager's notes. */
+async function storeExamples(store: string): Promise<{ images: Img[]; notes: string[] }> {
+  g.__syAiExamples ??= new Map();
+  const hit = g.__syAiExamples.get(store);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit;
+  const { data, error } = await supabaseAdmin
+    .from("camera_ai_marks")
+    .select("verdict, note, example_path, created_at")
+    .eq("store", store)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (error) return { images: [], notes: [] };
+  const marks = (data ?? []) as { verdict: MarkVerdict; note: string | null; example_path: string | null }[];
+  // A few photos of each kind (cost), the most recent first; all notes (short text).
+  const pick = [...marks.filter((m) => m.verdict === "staff" && m.example_path).slice(0, 4), ...marks.filter((m) => m.verdict === "customer" && m.example_path).slice(0, 2)];
+  const images: Img[] = [];
+  for (const m of pick) {
+    const { data: blob } = await supabaseAdmin.storage.from(EXAMPLE_BUCKET).download(m.example_path!);
+    if (!blob) continue;
+    images.push({
+      b64: await toB64(blob),
+      detail: "low",
+      label:
+        m.verdict === "staff"
+          ? `EXAMPLE checked by the manager: the people in this photo are STAFF, not customers${m.note ? ` (${m.note})` : ""}. Do not count people like them.`
+          : `EXAMPLE checked by the manager: this photo shows a CUSTOMER coming in${m.note ? ` (${m.note})` : ""}.`,
+    });
+  }
+  const notes = [...new Set(marks.map((m) => m.note?.trim()).filter((n): n is string => Boolean(n)))].slice(0, 20).map((n) => n.slice(0, 200));
+  const out = { at: Date.now(), images, notes };
+  g.__syAiExamples.set(store, out);
+  return out;
+}
+
+/** Check today's photos of a store again (not the marked ones), e.g. after new marks. */
+export async function recheckToday(store: string): Promise<number> {
+  const day = istNow().date;
+  const from = new Date(Date.parse(`${day}T00:00:00+05:30`)).toISOString();
+  const { data } = await supabaseAdmin.from("cctv_events").select("id").eq("store", store).gte("event_at", from).not("ai_at", "is", null).limit(3000);
+  const ids = ((data ?? []) as { id: number }[]).map((r) => r.id);
+  const marked = await loadMarks(ids);
+  const todo = ids.filter((id) => !marked.has(id));
+  for (let i = 0; i < todo.length; i += 300) {
+    const part = todo.slice(i, i + 300);
+    await supabaseAdmin.from("watch_sightings").delete().in("event_id", part);
+    await supabaseAdmin.from("cctv_events").update({ ai: null, ai_at: null }).in("id", part);
+  }
+  g.__syAiExamples?.delete(store);
+  return todo.length;
 }
 
 /** Called every minute: checks up to a few new doorway photos. */
@@ -288,7 +424,7 @@ export async function cameraAiTick(): Promise<string> {
       }
       const storeRefs = people.filter((p) => p.store === r.store).map((p) => refs.get(p.id)).filter((x): x is Img & { id: string } => Boolean(x));
       try {
-        const res = await checkDoorPhoto(blob, s, storeRefs);
+        const res = await checkDoorPhoto(blob, s, storeRefs, undefined, r.store);
         await supabaseAdmin.from("cctv_events").update({ ai_at: new Date().toISOString(), ai: res }).eq("id", r.id);
         for (const id of res.watched) {
           await supabaseAdmin.from("watch_sightings").insert({ watch_id: id, event_id: r.id, store: r.store, at: r.event_at, direction: res.direction, photo_path: r.photo_path });

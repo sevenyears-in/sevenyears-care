@@ -5,6 +5,8 @@ import { formatDate } from "@/lib/helpers";
 import { istNow } from "@/lib/business-day";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { eventPhotos } from "@/lib/cctv";
+import { loadMarks } from "@/lib/camera-ai";
+import { RecheckButton, WalkinMark } from "@/components/WalkinMark";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Walk-in photos" };
@@ -13,7 +15,7 @@ type Person = { where?: string; clothes?: string; staff?: boolean; moving?: stri
 type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string; skipped?: boolean; error?: string; persons?: Person[] } | null;
 const MOVING: Record<string, string> = { in: "coming in", out: "going out", inside: "walking inside", still: "standing / working" };
 type Row = { id: number; event_at: string; ai: Ai };
-type Kind = "counted" | "same" | "waiting" | "staff" | "out" | "nobody" | "unusable";
+type Kind = "counted" | "same" | "waiting" | "staff" | "out" | "nobody" | "unusable" | "markedStaff";
 
 const LABEL: Record<Kind, { text: string; cls: string }> = {
   counted: { text: "Counted", cls: "bg-green-100 text-green-800" },
@@ -23,6 +25,7 @@ const LABEL: Record<Kind, { text: string; cls: string }> = {
   out: { text: "Going out — not counted", cls: "bg-black/5 text-black/60" },
   nobody: { text: "Nobody walking in — not counted", cls: "bg-black/5 text-black/60" },
   unusable: { text: "Photo not usable — not counted", cls: "bg-black/5 text-black/60" },
+  markedStaff: { text: "Marked staff — not counted", cls: "bg-black/5 text-black/60" },
 };
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" });
@@ -58,6 +61,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
     .order("event_at")
     .limit(2000);
   const rows = (data ?? []) as Row[];
+  const marks = await loadMarks(rows.map((r) => r.id)).catch(() => new Map<number, { verdict: string; note: string | null; by_name: string | null }>());
 
   // Same rules as the count (lib/walkins.ts): photos a few seconds apart are one arrival.
   let prev = -Infinity;
@@ -66,14 +70,17 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
   for (const r of rows) {
     const t = Date.parse(r.event_at);
     const ai = r.ai;
+    const mark = marks.get(r.id)?.verdict;
     let kind: Kind;
     let customers = 0;
-    if (ai && typeof ai.people !== "number") kind = "unusable";
+    if (mark === "staff") kind = "markedStaff";
+    else if (mark === "customer") kind = "counted";
+    else if (ai && typeof ai.people !== "number") kind = "unusable";
     else if (!ai) kind = "waiting";
     else if (ai.direction === "out") kind = "out";
     else if (!ai.customers) kind = ai.staff ? "staff" : "nobody";
     else kind = "counted";
-    if (kind === "counted") customers = ai?.customers ?? 0;
+    if (kind === "counted") customers = mark === "customer" ? Math.max(1, ai?.customers ?? 1) : ai?.customers ?? 0;
     if (kind === "waiting") customers = 1;
     const sameBurst = t - prev <= watch.groupSec * 1000;
     if (kind !== "unusable") prev = t;
@@ -84,7 +91,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
     items.push({ ...r, kind, customers, groups: kind === "counted" ? Math.max(1, ai?.groups ?? 1) : 0 });
   }
   const counted = items.filter((i) => i.kind === "counted" || i.kind === "same" || i.kind === "waiting");
-  const list = show === "all" ? items : counted;
+  const list = show === "all" ? items : items.filter((i) => counted.includes(i) || i.kind === "markedStaff");
   const urls = await eventPhotos(list.map((i) => i.id)).catch(() => new Map<number, string>());
   const customers = counted.reduce((n, i) => n + i.customers, 0);
   const q = (o: Record<string, string>) => `?${new URLSearchParams({ store, day, ...(show === "all" ? { show } : {}), ...o })}`;
@@ -99,6 +106,9 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
           </h1>
           <p className="mt-1 text-sm text-black/55">
             {customers} customer(s) in {counted.length} photo(s) · {rows.length} doorway photo(s) in all
+          </p>
+          <p className="mt-1 text-xs text-black/50">
+            Wrong? Use <b>✗ Not a customer — staff</b> (or <b>✓ This is a customer</b> under &ldquo;All doorway photos&rdquo;). The count changes at once, and the AI learns from your marks for this store.
           </p>
         </div>
         <Link href={`/staff/performance?view=team&store=${encodeURIComponent(store)}`} className="rounded-full bg-white px-4 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">
@@ -119,6 +129,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
         <Link href={q({ show: "all" })} className={`rounded-full px-4 py-1.5 text-sm font-bold ${show === "all" ? "bg-black text-white" : "bg-white ring-1 ring-black/10"}`}>
           All doorway photos
         </Link>
+        {day === istNow().date && <RecheckButton store={store} />}
       </div>
 
       {!list.length && <p className="rounded-2xl bg-white p-5 text-sm text-black/60">No photos.</p>}
@@ -141,6 +152,16 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
                   {i.kind === "counted" ? `${i.customers} customer(s)${i.groups > 1 ? ` · ${i.groups} groups` : ""}` : i.kind === "same" && i.customers ? `${i.customers} customer(s) · ${LABEL.same.text.toLowerCase()}` : LABEL[i.kind].text}
                 </span>
               </div>
+              {i.kind !== "unusable" && (
+                <WalkinMark
+                  id={i.id}
+                  counted={i.kind === "counted" || i.kind === "same" || i.kind === "waiting"}
+                  mark={(() => {
+                    const m = marks.get(i.id);
+                    return m ? { verdict: m.verdict === "customer" ? "customer" : "staff", note: m.note, by: m.by_name } : null;
+                  })()}
+                />
+              )}
               {Array.isArray(i.ai?.persons) && i.ai.persons.length > 0 && (
                 <details className="px-3 pb-2 text-[11px] text-black/60">
                   <summary className="cursor-pointer font-semibold">What the AI saw</summary>

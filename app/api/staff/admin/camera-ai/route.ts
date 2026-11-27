@@ -11,6 +11,7 @@ import {
   deleteWatch,
   listWatch,
   loadAiSettings,
+  markCounts,
   saveAiSettings,
   saveWatch,
   sendWatchReports,
@@ -27,17 +28,19 @@ export async function GET() {
   if (auth.response) return auth.response;
   const day = istNow().date;
   const dayStart = new Date(Date.parse(`${day}T00:00:00+05:30`)).toISOString();
-  const [settings, people, staff, checked] = await Promise.all([
+  const [settings, people, staff, checked, learned] = await Promise.all([
     loadAiSettings(),
     listWatch().catch(() => null),
     supabaseAdmin.from("staff_users").select("id, full_name, store_name").eq("is_active", true).order("full_name"),
     supabaseAdmin.from("cctv_events").select("id", { count: "exact", head: true }).gte("ai_at", dayStart),
+    markCounts().catch(() => ({})),
   ]);
   return NextResponse.json({
     settings,
     provider: aiProvider(),
     lastError: aiLastError(),
     checkedToday: checked.count ?? 0,
+    learned,
     ready: people !== null,
     people: people ? await Promise.all(people.map(async (p) => ({ ...p, photoUrl: await watchPhotoUrl(p.photo_path) }))) : [],
     staff: ((staff.data ?? []) as { id: string; full_name: string; store_name: string | null }[]).map((s) => ({ id: s.id, name: s.full_name, store: (s.store_name ?? "").toUpperCase() })),
@@ -88,7 +91,7 @@ export async function POST(request: Request) {
       if (!e) return NextResponse.json({ error: "No doorway photo yet." }, { status: 400 });
       const { data: blob } = await supabaseAdmin.storage.from(CCTV_BUCKET).download(e.photo_path);
       if (!blob) return NextResponse.json({ error: "The photo could not be read." }, { status: 400 });
-      const result = await checkDoorPhoto(blob, await loadAiSettings(), [], typeof body.model === "string" ? body.model.trim().slice(0, 80) : undefined);
+      const result = await checkDoorPhoto(blob, await loadAiSettings(), [], typeof body.model === "string" ? body.model.trim().slice(0, 80) : undefined, e.store);
       const { data: signed } = await supabaseAdmin.storage.from(CCTV_BUCKET).createSignedUrl(e.photo_path, 600);
       return NextResponse.json({ ok: true, store: e.store, at: e.event_at, photoUrl: signed?.signedUrl ?? null, result });
     }

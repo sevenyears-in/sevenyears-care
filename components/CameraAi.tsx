@@ -6,7 +6,7 @@ import { ErrorBox, inputClass } from "@/components/SiteChrome";
 type Settings = { on: boolean; model: string; uniform: string; dailyLimit: number; reportTime: string };
 type Person = { id: string; staff_id: string | null; name: string; store: string; emails: string; active: boolean; photoUrl: string | null };
 type Staff = { id: string; name: string; store: string };
-type Data = { settings: Settings; provider: "anthropic" | "openai" | null; lastError: string | null; checkedToday: number; ready: boolean; people: Person[]; staff: Staff[] };
+type Data = { settings: Settings; provider: "anthropic" | "openai" | null; lastError: string | null; checkedToday: number; learned?: Record<string, { staff: number; customer: number }>; ready: boolean; people: Person[]; staff: Staff[] };
 
 const card = "rounded-3xl bg-white p-6 soft-card ring-1 ring-black/5";
 const btn = "rounded-xl bg-[#161616] px-4 py-2 text-sm font-bold text-white disabled:opacity-40";
@@ -103,7 +103,13 @@ function AiSettings({ data, reload }: { data: Data; reload: () => void }) {
       </p>
       <p className={`mt-3 rounded-2xl px-4 py-3 text-sm font-semibold ${data.provider ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-900"}`}>
         {data.provider
-          ? `Connected to ${data.provider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"} · ${data.checkedToday} photo(s) checked today${data.lastError ? ` · last error: ${data.lastError}` : ""}`
+          ? `Connected to ${data.provider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"} · ${data.checkedToday} photo(s) checked today${
+                Object.keys(data.learned ?? {}).length
+                  ? ` · learning from your marks: ${Object.entries(data.learned ?? {})
+                      .map(([st, n]) => `${st} ${n.staff} staff / ${n.customer} customer`)
+                      .join(", ")}`
+                  : ""
+              }${data.lastError ? ` · last error: ${data.lastError}` : ""}`
           : "Not connected: add ANTHROPIC_API_KEY (or OPENAI_API_KEY) in the hosting's environment variables, then redeploy."}
       </p>
       {!data.ready && <p className="mt-2 text-sm font-semibold text-amber-800">The database update for the AI photo check has not been run yet.</p>}
