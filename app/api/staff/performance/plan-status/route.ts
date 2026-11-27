@@ -3,6 +3,8 @@ import { requireStaff } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { merchStores } from "@/lib/merch-access";
 import { logAudit } from "@/lib/audit";
+import { attendanceCode } from "@/lib/attendance";
+import { performanceAccess } from "@/lib/performance-access";
 
 // POST { store, month, role, key, title, status, note } — follow-up of an action plan point.
 // Store Manager, ASM / Floor Manager of that store, and management.
@@ -19,8 +21,10 @@ export async function POST(request: Request) {
   const status = String(b.status ?? "");
   const note = String(b.note ?? "").trim().slice(0, 300) || null;
   if (!store || !/^\d{4}-\d{2}$/.test(month) || !role || !key || !STATUSES.includes(status)) return NextResponse.json({ error: "Missing details." }, { status: 400 });
-  const allowed = await merchStores(auth.staff, [store]);
-  if (!allowed.includes(store)) return NextResponse.json({ error: "You can update plans of your own store only." }, { status: 403 });
+  // Own plan points ("u<code>:…"), the SM / ASM of the store (their team), stock / management access.
+  const own = key.startsWith(`u${attendanceCode(auth.staff.userId)}:`);
+  const allowed = own || (await merchStores(auth.staff, [store])).includes(store) || (await performanceAccess(auth.staff).then((a) => a.teamAll || a.teamStores.includes(store)).catch(() => false));
+  if (!allowed) return NextResponse.json({ error: "You can update plans of your own store only." }, { status: 403 });
   const { data: before } = await supabaseAdmin.from("action_plan_follow").select("status, note").eq("store", store).eq("month", month).eq("role", role).eq("key", key).maybeSingle();
   const row = { store, month, role, key, title: String(b.title ?? "").slice(0, 200), status, note, updated_by: auth.staff.fullName, updated_at: new Date().toISOString() };
   const { error } = await supabaseAdmin.from("action_plan_follow").upsert(row);

@@ -412,7 +412,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     ]);
     // Follow-up of plan points: Store Manager / ASM / Floor Manager of the store and management.
     const follow: FollowCtx | null = fl
-      ? { store: store.store, month, now: Object.fromEntries(fl.now), before: Object.fromEntries(fl.before), canEdit: stockStores.includes(store.store) }
+      ? { store: store.store, month, now: Object.fromEntries(fl.now), before: Object.fromEntries(fl.before), canEdit: stockStores.includes(store.store) || myStores.includes(store.store) }
       : null;
     return (
       <div className="space-y-6">
@@ -464,6 +464,18 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const asmIsFm = report.settings.asmIsFm;
   const planRole: PlanRole = planRoleOf("", found.person.roleLabel, found.person.group, asmIsFm);
   const myPlan = myTrends ? personalPlan(planRole, found.store, myTrends, found.person, asmIsFm) : [];
+  // The person updates their own plan; their SM / ASM and management can too.
+  const myFl = myPlan.length ? await loadFollow(found.store.store, month, shiftMonth(month, -1)).catch(() => null) : null;
+  const myFollow: FollowCtx | null = myFl
+    ? {
+        store: found.store.store,
+        month,
+        now: Object.fromEntries(myFl.now),
+        before: Object.fromEntries(myFl.before),
+        canEdit: month === thisMonth && (wanted === me || stockStores.includes(found.store.store) || myStores.includes(found.store.store)),
+        keyPrefix: `u${wanted}:`,
+      }
+    : null;
   return (
     <div className="space-y-6">
       {header}
@@ -486,7 +498,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       />
       {myPlan.length > 0 && (
         <Panel title={`Action plan — ${planRole === "asm" && asmIsFm ? "ASM / Floor Manager" : PLAN_ROLE_LABEL[planRole]}`} intro="From the store's sales trend and your own numbers. Do the red ones first.">
-          <PlanList items={myPlan} role={planRole} />
+          <PlanList items={myPlan} role={planRole} follow={myFollow} />
         </Panel>
       )}
       {yearly.length > 0 && (
@@ -1279,7 +1291,8 @@ function worthOf(store: StoreReport, salaries: Record<string, number>, salesPerS
 // Action plans
 // ------------------------------------------------------------------
 
-type FollowCtx = { store: string; month: string; now: Record<string, Follow>; before: Record<string, Follow>; canEdit: boolean };
+/** keyPrefix: a person's own plan ("u1005:") so two people's points never share a status. */
+type FollowCtx = { store: string; month: string; now: Record<string, Follow>; before: Record<string, Follow>; canEdit: boolean; keyPrefix?: string };
 
 function PlanList({ items, role, follow }: { items: PlanItem[]; role: PlanRole; follow?: FollowCtx | null }) {
   const order = { high: 0, medium: 1, good: 2 } as const;
@@ -1290,8 +1303,9 @@ function PlanList({ items, role, follow }: { items: PlanItem[]; role: PlanRole; 
         .sort((a, b) => order[a.priority] - order[b.priority])
         .map((it, i) => {
           const v = planView(role, it);
-          const f = follow?.now[v.key];
-          const last = follow?.before[v.key];
+          const fkey = `${follow?.keyPrefix ?? ""}${v.key}`;
+          const f = follow?.now[fkey];
+          const last = follow?.before[fkey];
           return (
             <li key={`${v.key}-${i}`} className="rounded-2xl bg-white p-3 ring-1 ring-black/5">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1323,7 +1337,7 @@ function PlanList({ items, role, follow }: { items: PlanItem[]; role: PlanRole; 
                     store={follow.store}
                     month={follow.month}
                     role={role}
-                    pkey={v.key}
+                    pkey={fkey}
                     title={v.observation}
                     status={f?.status ?? "open"}
                     note={f?.note ?? null}

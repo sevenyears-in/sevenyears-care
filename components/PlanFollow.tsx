@@ -64,8 +64,8 @@ export function PlanFollow({
         {note && <span className="text-black/55">“{note}”</span>}
         {by && at && <span className="text-black/40">{by} · {new Date(at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}</span>}
         {canEdit && (
-          <button className="font-semibold text-[#5b55c9]" onClick={() => setEditing(true)}>
-            Update
+          <button className="rounded-full bg-[#5b55c9] px-3 py-1 font-bold text-white" onClick={() => setEditing(true)}>
+            ✎ Update status
           </button>
         )}
       </div>
