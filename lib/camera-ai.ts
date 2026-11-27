@@ -31,7 +31,7 @@ export const DEFAULT_AI: CameraAiSettings = {
   on: true,
   model: "",
   uniform:
-    "Store Managers wear a maroon shirt with the Seven Years logo; other staff wear a black T-shirt with the Seven Years logo. Anyone dressed like this is staff, not a customer.",
+    "Staff wear BLACK uniform with the Seven Years logo (often a 'V' logo on the back): men a black T-shirt or shirt, women a black top / kurta with black trousers. Store Managers wear a maroon shirt with the Seven Years logo. Anyone dressed like this is staff, not a customer.",
   dailyLimit: 3000,
   reportTime: "23:30",
 };
@@ -87,7 +87,7 @@ async function visionJson(prompt: string, images: Img[], model: string): Promise
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: m, max_tokens: 400, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: m, max_tokens: 1500, messages: [{ role: "user", content }] }),
     });
     const d = (await res.json().catch(() => ({}))) as { content?: { type: string; text?: string }[]; error?: { message?: string } };
     if (!res.ok) throw new Error(`AI (${m}): ${d.error?.message ?? res.status}`);
@@ -96,13 +96,13 @@ async function visionJson(prompt: string, images: Img[], model: string): Promise
     const content: unknown[] = [];
     for (const im of images) {
       if (im.label) content.push({ type: "text", text: im.label });
-      content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${im.b64}` } });
+      content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${im.b64}`, detail: "high" } });
     }
     content.push({ type: "text", text: prompt });
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: m, max_tokens: 400, response_format: { type: "json_object" }, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: m, max_completion_tokens: 3000, response_format: { type: "json_object" }, messages: [{ role: "user", content }] }),
     });
     const d = (await res.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
     if (!res.ok) throw new Error(`AI (${m}): ${d.error?.message ?? res.status}`);
@@ -209,27 +209,39 @@ async function refPhotos(people: WatchPerson[]) {
   return refs;
 }
 
-/** Ask the AI about one doorway photo. */
-export async function checkDoorPhoto(photo: Blob, s: CameraAiSettings, refs: (Img & { id: string })[]): Promise<DoorCheck> {
-  const prompt = `This is a CCTV snapshot from the camera inside the entrance of a Seven Years baby and kids store. It was taken when someone crossed a line drawn on the floor just inside the door.
-Staff uniform: ${s.uniform}
-${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.` : ""}
-Look at the people at or near the door / the line (ignore people far inside the store and anyone outside the glass).
-Count ONLY real people who are walking through the doorway (coming in or going out). Do NOT count: mannequins, dummies or child-size display figures (they stand still and wear the store's clothes on show), toys, pictures or posters; people sitting, standing still or crouching / working on the floor; anyone already well inside the store. If nobody is walking through the door, answer 0 people.
+/** Ask the AI about one doorway photo. It first describes every person, then we count. */
+export async function checkDoorPhoto(photo: Blob, s: CameraAiSettings, refs: (Img & { id: string })[], model?: string): Promise<DoorCheck & { persons?: unknown[] }> {
+  const prompt = `This is a CCTV snapshot from the entrance camera of a Seven Years baby and kids store in Kerala, India. It was taken when someone crossed a line drawn on the floor near the entrance.
+
+STAFF: ${s.uniform}
+Also treat as staff: anyone standing behind the billing counter, arranging, carrying or cleaning stock, and people in matching dark clothes standing together (a staff meeting).
+CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children). A woman in a loose black burqa / abaya with a head scarf and no logo is a customer, not staff.
+IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
+${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
+Describe EVERY real person you can see in the store, then decide for each one:
+- "staff": true if they wear the staff uniform or fit the staff rules above. If you are not sure, answer true.
+- "moving": "in" if they are coming in through the entrance from outside, "out" if they are leaving through the entrance, "inside" if they are walking around inside the store, "still" if standing, sitting or working.
+
 Answer with JSON only:
-{"people": <number of real people walking through the door>, "staff": <how many of them wear the staff uniform>, "customers": <people not in uniform>, "groups": <separate customer parties: people walking in together - a family, a couple, friends walking close - are ONE party; 0 if no customers>, "direction": "in" if they are walking into the store (towards the camera / away from the door), "out" if leaving (towards the door), "unclear" otherwise, "watched": [ids of the reference people who are in this photo]}`;
+{"persons": [{"where": "<where in the picture>", "clothes": "<short description>", "staff": true|false, "moving": "in"|"out"|"inside"|"still"}], "parties": <how many separate customer parties are coming in: a family, a couple or friends walking in together are ONE party>, "watched": [<ids of the reference people in this photo>]}`;
   const images: Img[] = [...refs, { b64: await toB64(photo), label: "CCTV snapshot to check:" }];
-  const r = await visionJson(prompt, images, s.model);
-  const num = (v: unknown) => Math.max(0, Math.min(50, Math.round(Number(v) || 0)));
-  const dir = r.direction === "in" || r.direction === "out" ? r.direction : "unclear";
+  const r = await visionJson(prompt, images, model || s.model);
+  type P = { staff?: unknown; moving?: unknown };
+  const persons = (Array.isArray(r.persons) ? r.persons : []).filter((x): x is P => Boolean(x) && typeof x === "object").slice(0, 50);
+  const isStaff = (p: P) => p.staff !== false; // unsure = staff
+  const customersIn = persons.filter((p) => !isStaff(p) && p.moving === "in").length;
+  const goingOut = persons.filter((p) => p.moving === "out").length;
+  const comingIn = persons.filter((p) => p.moving === "in").length;
+  const parties = Math.round(Number(r.parties) || 0);
   const ids = new Set(refs.map((x) => x.id));
   return {
-    people: num(r.people),
-    staff: num(r.staff),
-    customers: num(r.customers),
-    groups: num(r.groups),
-    direction: dir,
+    people: persons.length,
+    staff: persons.filter(isStaff).length,
+    customers: customersIn,
+    groups: customersIn ? Math.max(1, Math.min(customersIn, parties || 1)) : 0,
+    direction: customersIn || comingIn > goingOut ? "in" : goingOut > comingIn ? "out" : "unclear",
     watched: Array.isArray(r.watched) ? r.watched.map(String).filter((x) => ids.has(x)) : [],
+    persons,
   };
 }
 

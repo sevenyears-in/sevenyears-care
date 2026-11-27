@@ -20,7 +20,7 @@ import {
 // Settings → Attendance → CCTV → AI photo check and People to watch (Super Admin).
 // GET → settings, status, people to watch, staff to choose from.
 // POST { action: "settings", settings } | { action: "save", person } | { action: "delete", id }
-//      | { action: "test" } (check the latest doorway photo now) | { action: "report", id } (send today's e-mail now)
+//      | { action: "test", id?, model? } (check the latest doorway photo, or photo id, now) | { action: "report", id } (send today's e-mail now)
 
 export async function GET() {
   const auth = await requireStaff("super_admin");
@@ -80,19 +80,15 @@ export async function POST(request: Request) {
       const { loadCctv, CCTV_BUCKET } = await import("@/lib/cctv");
       const { watch } = await loadCctv(true);
       if (!watch.walkinCode) return NextResponse.json({ error: "The doorway line code is not set (CCTV → Walk-ins from the camera)." }, { status: 400 });
-      const { data } = await supabaseAdmin
-        .from("cctv_events")
-        .select("id, store, event_at, photo_path")
-        .not("photo_path", "is", null)
-        .filter("raw->sub_type", "cs", `[${watch.walkinCode}]`)
-        .order("event_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // { id } checks that photo; otherwise the latest doorway photo. { model } tries another model (not saved).
+      let q = supabaseAdmin.from("cctv_events").select("id, store, event_at, photo_path").not("photo_path", "is", null);
+      q = typeof body.id === "number" ? q.eq("id", body.id) : q.filter("raw->sub_type", "cs", `[${watch.walkinCode}]`);
+      const { data } = await q.order("event_at", { ascending: false }).limit(1).maybeSingle();
       const e = data as { id: number; store: string; event_at: string; photo_path: string } | null;
       if (!e) return NextResponse.json({ error: "No doorway photo yet." }, { status: 400 });
       const { data: blob } = await supabaseAdmin.storage.from(CCTV_BUCKET).download(e.photo_path);
       if (!blob) return NextResponse.json({ error: "The photo could not be read." }, { status: 400 });
-      const result = await checkDoorPhoto(blob, await loadAiSettings(), []);
+      const result = await checkDoorPhoto(blob, await loadAiSettings(), [], typeof body.model === "string" ? body.model.trim().slice(0, 80) : undefined);
       const { data: signed } = await supabaseAdmin.storage.from(CCTV_BUCKET).createSignedUrl(e.photo_path, 600);
       return NextResponse.json({ ok: true, store: e.store, at: e.event_at, photoUrl: signed?.signedUrl ?? null, result });
     }

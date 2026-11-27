@@ -9,7 +9,9 @@ import { eventPhotos } from "@/lib/cctv";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Walk-in photos" };
 
-type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string; skipped?: boolean; error?: string } | null;
+type Person = { where?: string; clothes?: string; staff?: boolean; moving?: string };
+type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string; skipped?: boolean; error?: string; persons?: Person[] } | null;
+const MOVING: Record<string, string> = { in: "coming in", out: "going out", inside: "walking inside", still: "standing / working" };
 type Row = { id: number; event_at: string; ai: Ai };
 type Kind = "counted" | "same" | "waiting" | "staff" | "out" | "nobody" | "unusable";
 
@@ -139,6 +141,19 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
                   {i.kind === "counted" ? `${i.customers} customer(s)${i.groups > 1 ? ` · ${i.groups} groups` : ""}` : i.kind === "same" && i.customers ? `${i.customers} customer(s) · ${LABEL.same.text.toLowerCase()}` : LABEL[i.kind].text}
                 </span>
               </div>
+              {Array.isArray(i.ai?.persons) && i.ai.persons.length > 0 && (
+                <details className="px-3 pb-2 text-[11px] text-black/60">
+                  <summary className="cursor-pointer font-semibold">What the AI saw</summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {i.ai.persons.map((p, n) => (
+                      <li key={n}>
+                        <b className={p.staff === false ? "text-green-700" : "text-black/70"}>{p.staff === false ? "Customer" : "Staff"}</b> · {MOVING[p.moving ?? ""] ?? p.moving ?? "—"} · {p.clothes ?? ""}
+                        {p.where ? ` (${p.where})` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           );
         })}
