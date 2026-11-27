@@ -214,8 +214,10 @@ export async function checkDoorPhoto(photo: Blob, s: CameraAiSettings, refs: (Im
   const prompt = `This is a CCTV snapshot from the camera inside the entrance of a Seven Years baby and kids store. It was taken when someone crossed a line drawn on the floor just inside the door.
 Staff uniform: ${s.uniform}
 ${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.` : ""}
-Look at the people at or near the door / the line (ignore people far inside the store and anyone outside the glass). Answer with JSON only:
-{"people": <number of people crossing or at the door>, "staff": <how many of them wear the staff uniform>, "customers": <people not in uniform>, "groups": <separate customer parties: people walking in together - a family, a couple, friends walking close - are ONE party; 0 if no customers>, "direction": "in" if they are walking into the store (towards the camera / away from the door), "out" if leaving (towards the door), "unclear" otherwise, "watched": [ids of the reference people who are in this photo]}`;
+Look at the people at or near the door / the line (ignore people far inside the store and anyone outside the glass).
+Count ONLY real people who are walking through the doorway (coming in or going out). Do NOT count: mannequins, dummies or child-size display figures (they stand still and wear the store's clothes on show), toys, pictures or posters; people sitting, standing still or crouching / working on the floor; anyone already well inside the store. If nobody is walking through the door, answer 0 people.
+Answer with JSON only:
+{"people": <number of real people walking through the door>, "staff": <how many of them wear the staff uniform>, "customers": <people not in uniform>, "groups": <separate customer parties: people walking in together - a family, a couple, friends walking close - are ONE party; 0 if no customers>, "direction": "in" if they are walking into the store (towards the camera / away from the door), "out" if leaving (towards the door), "unclear" otherwise, "watched": [ids of the reference people who are in this photo]}`;
   const images: Img[] = [...refs, { b64: await toB64(photo), label: "CCTV snapshot to check:" }];
   const r = await visionJson(prompt, images, s.model);
   const num = (v: unknown) => Math.max(0, Math.min(50, Math.round(Number(v) || 0)));
