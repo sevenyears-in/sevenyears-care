@@ -5,6 +5,7 @@ import { ErrorBox, inputClass, labelClass } from "@/components/SiteChrome";
 import { formatDateTime } from "@/lib/helpers";
 import NotInAppStaff, { type NotInAppPerson } from "@/components/NotInAppStaff";
 import CctvSettings from "@/components/CctvSettings";
+import CameraAi from "@/components/CameraAi";
 import StoreKeyholders from "@/components/StoreKeyholders";
 
 type Status = {
@@ -194,6 +195,8 @@ export default function AttendanceSetupPage() {
       {status?.devices && <StoreKeyholders />}
 
       {status?.devices && <CctvSettings />}
+
+      {status?.devices && <CameraAi />}
 
       {status?.devices && (
         <div className={card}>

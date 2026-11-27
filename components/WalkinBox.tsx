@@ -14,7 +14,7 @@ export function WalkinBox({
   canEdit,
   camera = null,
 }: {
-  camera?: { walkins: number; people: number } | null;
+  camera?: { walkins: number; people: number; staff?: number; pending?: number } | null;
   store: string;
   bills: number;
   count: number | null;
@@ -67,7 +67,8 @@ export function WalkinBox({
           <p className="text-[11px] font-bold uppercase tracking-wide text-black/45">📷 Camera count (trial)</p>
           <p className="text-2xl font-bold tabular-nums">{camera.walkins}</p>
           <p className="text-xs text-black/50">
-            {camera.people} people came in · conversion {camera.walkins > 0 ? `${Math.round((bills / camera.walkins) * 100)}%` : "—"}
+            {camera.people} customer(s) came in{camera.staff ? ` · ${camera.staff} staff left out` : ""}{camera.pending ? ` · ${camera.pending} photo(s) not checked yet` : ""} · conversion{" "}
+            {camera.walkins > 0 ? `${Math.round((bills / camera.walkins) * 100)}%` : "—"}
           </p>
         </div>
       )}

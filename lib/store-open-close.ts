@@ -684,7 +684,14 @@ const nameOf = (staff: Map<string, Person>, code: string) => staff.get(code)?.na
 const mins = (ms: number) => Math.max(1, Math.round(ms / 60_000));
 
 /** First (or last) entrance-camera detection of a store in a window. */
-async function edgeEvent(store: string, channels: number[], fromMs: number, toMs: number, last: boolean, humansOnly = true) {
+async function edgeEvent(store: string, channels: number[], fromMs: number, toMs: number, last: boolean, humansOnly = true, lineCode = 0): Promise<{ id: number; at: number } | null> {
+  // With a doorway line on the entrance camera, only real crossings of the line (inside the door)
+  // count: people seen through the glass outside never cross it. Falls back to any detection when
+  // the line has not been crossed in the window (camera without a line).
+  if (lineCode) {
+    const viaLine = await edgeEvent(store, channels, fromMs, toMs, last, humansOnly, 0 - lineCode);
+    if (viaLine) return viaLine;
+  }
   let q = supabaseAdmin
     .from("cctv_events")
     .select("id, event_at, photo_path")
@@ -696,6 +703,11 @@ async function edgeEvent(store: string, channels: number[], fromMs: number, toMs
   if (channels.length) q = q.in("channel", channels);
   // Leave out what the recorder marks as a vehicle (VIGI: 101 = person, 102 = vehicle).
   if (humansOnly) q = q.or("raw->sub_type.is.null,raw->sub_type.not.cs.[102]");
+  // lineCode < 0: only crossings of the doorway line (the AI may mark one as going out).
+  if (lineCode < 0) {
+    q = q.filter("raw->sub_type", "cs", `[${-lineCode}]`);
+    q = q.or(`ai.is.null,ai->>direction.neq.${last ? "in" : "out"}`);
+  }
   const { data } = await q;
   const e = (data ?? [])[0] as { id: number; event_at: string; photo_path: string | null } | undefined;
   return e ? { id: e.id, at: Date.parse(e.event_at) } : null;
@@ -765,7 +777,7 @@ export async function cameraCheckTick(at = new Date(), staffIn?: Map<string, Per
     // Opening: judged once, 10 minutes after the first entry (punches synced past it).
     if (!r.open_cam_flag && r.day === now.date) {
       const openEnd = start + win.openTo * 60_000;
-      const entry = await edgeEvent(r.store, link.channels, start + win.openFrom * 60_000, openEnd, false, watch.humansOnly);
+      const entry = await edgeEvent(r.store, link.channels, start + win.openFrom * 60_000, openEnd, false, watch.humansOnly, watch.walkinCode);
       if (!entry) {
         if (at.getTime() > openEnd) await supabaseAdmin.from("store_open_close").update({ open_cam_flag: "none" }).eq("day", r.day).eq("store", r.store);
       } else if (at.getTime() >= entry.at + CAM_OPEN_WAIT_MIN * 60_000 && syncedTo >= entry.at + (CAM_MATCH_MIN + 1) * 60_000) {

@@ -31,7 +31,7 @@ export function WalkinCounter({
   bills,
   camera = null,
 }: {
-  camera?: { walkins: number; people: number } | null;
+  camera?: { walkins: number; people: number; staff?: number; pending?: number } | null;
   store: string;
   stores: string[];
   day: string;
@@ -214,7 +214,7 @@ export function WalkinCounter({
         </p>
         {camera && (
           <p className="mt-2 text-xs text-black/50">
-            📷 Camera count (trial): <b className="text-black">{camera.walkins}</b> walk-ins ({camera.people} people came in)
+            📷 Camera count (trial): <b className="text-black">{camera.walkins}</b> walk-ins ({camera.people} customer(s) came in{camera.staff ? `, ${camera.staff} staff left out` : ""})
           </p>
         )}
         {pending.length > 0 && (

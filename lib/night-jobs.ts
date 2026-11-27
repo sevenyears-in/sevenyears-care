@@ -50,6 +50,12 @@ async function dayTick() {
     return [m?.open, m?.close].filter((x): x is number => typeof x === "number");
   }).catch((e) => `cctv clean-up error: ${e instanceof Error ? e.message : e}`);
   if (cam) console.log(cam);
+  // AI photo check of the doorway photos, and the daily e-mail about the people to watch.
+  const ai = await import("@/lib/camera-ai");
+  const aiRes = await ai.cameraAiTick().catch((e) => `camera AI error: ${e instanceof Error ? e.message : e}`);
+  if (aiRes) console.log("Camera AI:", aiRes);
+  const rep = await ai.watchReportTick().catch((e) => `watch report error: ${e instanceof Error ? e.message : e}`);
+  if (rep) console.log("Watch report:", rep);
   // Automatic reminders / warnings / PIP (once a day, after 11 am).
   const { disciplineTick } = await import("@/lib/discipline");
   const dis = await disciplineTick().catch((e) => `automatic letters error: ${e instanceof Error ? e.message : e}`);

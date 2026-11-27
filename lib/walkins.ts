@@ -87,11 +87,15 @@ export async function walkinStores(staff: StaffUser, allStores: string[]) {
 }
 
 /**
- * Walk-ins counted by the entrance camera: every crossing of the doorway line (inward) is a person;
- * people crossing within groupSec seconds of the one before are one walk-in (they came together).
- * Null when the camera count is not set up for the store.
+ * Walk-ins counted by the entrance camera: every crossing of the doorway line is a photo. With the AI
+ * photo check (lib/camera-ai.ts), staff in uniform and people going out are left out, and a party
+ * that came together counts once; crossings within groupSec seconds of each other are one walk-in.
+ * Photos not checked yet count as one walk-in each. Null when the camera count is not set up.
  */
-export async function cameraWalkins(store: string, day: string): Promise<{ walkins: number; people: number; lastAt: string | null } | null> {
+export async function cameraWalkins(
+  store: string,
+  day: string
+): Promise<{ walkins: number; people: number; staff: number; pending: number; lastAt: string | null } | null> {
   const { loadCctv } = await import("@/lib/cctv");
   const { links, watch } = await loadCctv();
   const link = links.find((l) => l.store === store);
@@ -100,7 +104,7 @@ export async function cameraWalkins(store: string, day: string): Promise<{ walki
   const to = new Date(Date.parse(`${day}T00:00:00+05:30`) + 86_400_000).toISOString();
   const { data } = await supabaseAdmin
     .from("cctv_events")
-    .select("event_at")
+    .select("event_at, ai")
     .eq("store", store)
     .in("channel", link.channels)
     .gte("event_at", from)
@@ -108,12 +112,36 @@ export async function cameraWalkins(store: string, day: string): Promise<{ walki
     .filter("raw->sub_type", "cs", `[${watch.walkinCode}]`)
     .order("event_at")
     .limit(5000);
-  const times = ((data ?? []) as { event_at: string }[]).map((r) => Date.parse(r.event_at));
+  type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string } | null;
+  const rows = (data ?? []) as { event_at: string; ai: Ai }[];
   let walkins = 0;
+  let people = 0;
+  let staff = 0;
+  let pending = 0;
   let prev = -Infinity;
-  for (const t of times) {
-    if (t - prev > watch.groupSec * 1000) walkins++;
+  let burst = 0;
+  for (const r of rows) {
+    const t = Date.parse(r.event_at);
+    const ai = r.ai && typeof r.ai.people === "number" ? r.ai : null;
+    let w: number;
+    if (!ai) {
+      w = 1;
+      pending++;
+      people++;
+    } else if (ai.direction === "out" || !ai.customers) {
+      w = 0;
+      if (ai.direction !== "out") staff += ai.staff ?? 0;
+    } else {
+      w = Math.max(1, ai.groups ?? 1);
+      people += ai.customers;
+      staff += ai.staff ?? 0;
+    }
+    if (t - prev > watch.groupSec * 1000) {
+      walkins += burst;
+      burst = w;
+    } else burst = Math.max(burst, w);
     prev = t;
   }
-  return { walkins, people: times.length, lastAt: times.length ? new Date(times[times.length - 1]).toISOString() : null };
+  walkins += burst;
+  return { walkins, people, staff, pending, lastAt: rows.length ? rows[rows.length - 1].event_at : null };
 }

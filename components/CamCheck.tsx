@@ -67,7 +67,6 @@ export function CamCheck({
           ))}
         </div>
       )}
-      {missing && !photos.length && <p className="text-[11px] font-semibold text-amber-700">📷 No camera photo at {name}&apos;s punch</p>}
 
       {check?.verdict === "ok" && (
         <p className="text-[11px] font-semibold text-green-700">
