@@ -207,6 +207,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         updatedBy={w?.updated_by_name ?? null}
         updatedAt={w?.updated_at ?? null}
         canEdit={creStore === store || stockStores.includes(store)}
+        photosHref={cam && ["super_admin", "director", "admin", "operations_manager"].includes(staff.role) ? `/staff/performance/walkin-photos?store=${encodeURIComponent(store)}` : null}
       />
     );
   };

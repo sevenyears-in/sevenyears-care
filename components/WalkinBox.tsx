@@ -13,7 +13,9 @@ export function WalkinBox({
   updatedAt,
   canEdit,
   camera = null,
+  photosHref = null,
 }: {
+  photosHref?: string | null;
   camera?: { walkins: number; people: number; staff?: number; pending?: number } | null;
   store: string;
   bills: number;
@@ -70,6 +72,11 @@ export function WalkinBox({
             {camera.pending ? `${camera.people - camera.pending} customer(s) checked by AI + ${camera.pending} photo(s) waiting for the AI (counted as 1 each for now)` : `${camera.people} customer(s) came in`} · conversion{" "}
             {camera.walkins > 0 ? `${Math.round((bills / camera.walkins) * 100)}%` : "—"}
           </p>
+          {photosHref && (
+            <Link href={photosHref} className="text-xs font-bold text-[#8883d7] hover:underline">
+              See the photos →
+            </Link>
+          )}
         </div>
       )}
       {canEdit && (
