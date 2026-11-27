@@ -214,7 +214,7 @@ export function WalkinCounter({
         </p>
         {camera && (
           <p className="mt-2 text-xs text-black/50">
-            📷 Camera count (trial): <b className="text-black">{camera.walkins}</b> walk-ins ({camera.people} customer(s) came in{camera.staff ? `, ${camera.staff} staff left out` : ""})
+            📷 Camera count (trial): <b className="text-black">{camera.walkins}</b> walk-ins ({camera.people} customer(s) came in)
           </p>
         )}
         {pending.length > 0 && (
