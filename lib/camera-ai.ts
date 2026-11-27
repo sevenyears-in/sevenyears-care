@@ -220,8 +220,10 @@ export async function checkDoorPhoto(
   s: CameraAiSettings,
   refs: (Img & { id: string })[],
   model?: string,
-  store?: string
-): Promise<DoorCheck & { persons?: unknown[] }> {
+  store?: string,
+  /** Customers already counted at this store in the last minutes (their descriptions). */
+  recent: string[] = []
+): Promise<DoorCheck & { persons?: unknown[]; newCustomers?: string[] }> {
   const learned = store ? await storeExamples(store).catch(() => ({ images: [] as Img[], notes: [] as string[] })) : { images: [] as Img[], notes: [] as string[] };
   const lessons = learned.images.length || learned.notes.length
     ? `\nLEARN FROM THE MANAGER'S CORRECTIONS AT THIS STORE: ${learned.images.length ? "the example photos above were checked by the manager and labelled. People who look or act like those marked STAFF are staff; do not repeat those mistakes." : ""}${learned.notes.length ? `\nManager's notes:\n${learned.notes.map((n) => `- ${n}`).join("\n")}` : ""}\n`
@@ -235,18 +237,22 @@ Women staff may also wear a long black dress / abaya with a scarf. A person dres
 CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children).
 IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
 ${lessons}${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
+${recent.length ? `CUSTOMERS ALREADY COUNTED in the last ${RECENT_MIN} minutes (they walk around the store and may cross the line again):\n${recent.map((d, n) => `${n + 1}. ${d}`).join("\n")}\n` : ""}
 Describe EVERY real person you can see in the store, then decide for each one:
 - "staff": true if they wear the staff uniform or fit the staff rules above. If you are not sure, answer true.
-- "moving": "in" if they are coming in through the entrance from outside, "out" if they are leaving through the entrance, "inside" if they are walking around inside the store, "still" if standing, sitting or working.
+- "moving": "in" if they are coming in through the entrance, "out" if they are leaving through the entrance, "inside" if they are walking around inside the store, "still" if standing, sitting or working.
+- "new" (customers only): false if this customer is clearly one of the customers already counted above (same person, same clothes), otherwise true.
 
 Answer with JSON only:
-{"persons": [{"where": "<where in the picture>", "clothes": "<short description>", "staff": true|false, "moving": "in"|"out"|"inside"|"still"}], "parties": <how many separate customer parties are coming in: a family, a couple or friends walking in together are ONE party>, "watched": [<ids of the reference people in this photo>]}`;
+{"persons": [{"where": "<where in the picture>", "clothes": "<short description: gender, age group, colours, what they carry>", "staff": true|false, "moving": "in"|"out"|"inside"|"still", "new": true|false}], "parties": <how many separate parties the NEW customers form: a family, a couple or friends together are ONE party>, "watched": [<ids of the reference people in this photo>]}`;
   const images: Img[] = [...learned.images, ...refs, { b64: await toB64(photo), label: "CCTV snapshot to check:" }];
   const r = await visionJson(prompt, images, model || s.model);
-  type P = { staff?: unknown; moving?: unknown };
+  type P = { staff?: unknown; moving?: unknown; new?: unknown; clothes?: unknown };
   const persons = (Array.isArray(r.persons) ? r.persons : []).filter((x): x is P => Boolean(x) && typeof x === "object").slice(0, 50);
   const isStaff = (p: P) => p.staff !== false; // unsure = staff
-  const customersIn = persons.filter((p) => !isStaff(p) && p.moving === "in").length;
+  // A customer is counted once: moving (coming in or walking inside, not leaving) and not already counted.
+  const fresh = persons.filter((p) => !isStaff(p) && (p.moving === "in" || p.moving === "inside") && p.new !== false);
+  const customersIn = fresh.length;
   const goingOut = persons.filter((p) => p.moving === "out").length;
   const comingIn = persons.filter((p) => p.moving === "in").length;
   const parties = Math.round(Number(r.parties) || 0);
@@ -259,7 +265,30 @@ Answer with JSON only:
     direction: customersIn || comingIn > goingOut ? "in" : goingOut > comingIn ? "out" : "unclear",
     watched: Array.isArray(r.watched) ? r.watched.map(String).filter((x) => ids.has(x)) : [],
     persons,
+    newCustomers: fresh.map((p) => String(p.clothes ?? "customer").slice(0, 160)),
   };
+}
+
+/** How far back a customer counts as "already counted" (they walk around and cross the line again). */
+const RECENT_MIN = 45;
+
+/** Descriptions of the customers counted at a store in the minutes before a photo. */
+export async function recentCustomers(store: string, at: string): Promise<string[]> {
+  const t = Date.parse(at);
+  const { data } = await supabaseAdmin
+    .from("cctv_events")
+    .select("ai")
+    .eq("store", store)
+    .gte("event_at", new Date(t - RECENT_MIN * 60_000).toISOString())
+    .lt("event_at", at)
+    .not("ai_at", "is", null)
+    .order("event_at", { ascending: false })
+    .limit(200);
+  const out: string[] = [];
+  for (const r of (data ?? []) as { ai: { newCustomers?: unknown } | null }[]) {
+    if (Array.isArray(r.ai?.newCustomers)) for (const d of r.ai.newCustomers) if (typeof d === "string") out.push(d);
+  }
+  return out.slice(0, 20);
 }
 
 // ------------------------------------------------------------------
@@ -426,7 +455,7 @@ export async function cameraAiTick(): Promise<string> {
       }
       const storeRefs = people.filter((p) => p.store === r.store).map((p) => refs.get(p.id)).filter((x): x is Img & { id: string } => Boolean(x));
       try {
-        const res = await checkDoorPhoto(blob, s, storeRefs, undefined, r.store);
+        const res = await checkDoorPhoto(blob, s, storeRefs, undefined, r.store, await recentCustomers(r.store, r.event_at).catch(() => []));
         await supabaseAdmin.from("cctv_events").update({ ai_at: new Date().toISOString(), ai: res }).eq("id", r.id);
         for (const id of res.watched) {
           await supabaseAdmin.from("watch_sightings").insert({ watch_id: id, event_id: r.id, store: r.store, at: r.event_at, direction: res.direction, photo_path: r.photo_path });
@@ -438,8 +467,17 @@ export async function cameraAiTick(): Promise<string> {
         failed = true; // try again next minute (key missing, limit, network…)
       }
     };
-    // 4 at a time (a backlog of the day's photos catches up in minutes).
-    for (let i = 0; i < rows.length && !failed; i += 4) await Promise.all(rows.slice(i, i + 4).map(one));
+    // In time order within a store (so a customer already counted is known), stores side by side.
+    const byStore = new Map<string, typeof rows>();
+    for (const r of rows) byStore.set(r.store, [...(byStore.get(r.store) ?? []), r]);
+    await Promise.all(
+      [...byStore.values()].map(async (list) => {
+        for (const r of list) {
+          if (failed) return;
+          await one(r);
+        }
+      })
+    );
     return done ? `${done} doorway photo(s) checked` : g.__syAiError ? `AI error: ${g.__syAiError}` : "";
   } finally {
     g.__syAiBusy = false;

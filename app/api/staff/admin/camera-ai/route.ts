@@ -12,6 +12,7 @@ import {
   listWatch,
   loadAiSettings,
   markCounts,
+  recentCustomers,
   saveAiSettings,
   saveWatch,
   sendWatchReports,
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
       if (!e) return NextResponse.json({ error: "No doorway photo yet." }, { status: 400 });
       const { data: blob } = await supabaseAdmin.storage.from(CCTV_BUCKET).download(e.photo_path);
       if (!blob) return NextResponse.json({ error: "The photo could not be read." }, { status: 400 });
-      const result = await checkDoorPhoto(blob, await loadAiSettings(), [], typeof body.model === "string" ? body.model.trim().slice(0, 80) : undefined, e.store);
+      const result = await checkDoorPhoto(blob, await loadAiSettings(), [], typeof body.model === "string" ? body.model.trim().slice(0, 80) : undefined, e.store, await recentCustomers(e.store, e.event_at).catch(() => []));
       const { data: signed } = await supabaseAdmin.storage.from(CCTV_BUCKET).createSignedUrl(e.photo_path, 600);
       return NextResponse.json({ ok: true, store: e.store, at: e.event_at, photoUrl: signed?.signedUrl ?? null, result });
     }

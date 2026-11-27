@@ -11,7 +11,7 @@ import { RecheckButton, WalkinMark } from "@/components/WalkinMark";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Walk-in photos" };
 
-type Person = { where?: string; clothes?: string; staff?: boolean; moving?: string };
+type Person = { where?: string; clothes?: string; staff?: boolean; moving?: string; new?: boolean };
 type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string; skipped?: boolean; error?: string; persons?: Person[] } | null;
 const MOVING: Record<string, string> = { in: "coming in", out: "going out", inside: "walking inside", still: "standing / working" };
 type Row = { id: number; event_at: string; ai: Ai };
@@ -167,7 +167,8 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
                   <ul className="mt-1 space-y-0.5">
                     {i.ai.persons.map((p, n) => (
                       <li key={n}>
-                        <b className={p.staff === false ? "text-green-700" : "text-black/70"}>{p.staff === false ? "Customer" : "Staff"}</b> · {MOVING[p.moving ?? ""] ?? p.moving ?? "—"} · {p.clothes ?? ""}
+                        <b className={p.staff === false ? "text-green-700" : "text-black/70"}>{p.staff === false ? "Customer" : "Staff"}</b> · {MOVING[p.moving ?? ""] ?? p.moving ?? "—"}
+                        {p.staff === false && p.new === false ? " · already counted" : ""} · {p.clothes ?? ""}
                         {p.where ? ` (${p.where})` : ""}
                       </li>
                     ))}
