@@ -226,6 +226,7 @@ export async function saveEvents(link: CctvLink, body: unknown, photo: Blob | nu
   const b = (body && typeof body === "object" ? body : {}) as Obj;
   const messages = (Array.isArray(b.messages) ? b.messages : Array.isArray(b.message) ? b.message : [b]).filter((m) => m && typeof m === "object") as Obj[];
   const received = Date.now();
+  const { watch } = await loadCctv();
   const rows: Record<string, unknown>[] = [];
   for (const m of messages.slice(0, 20)) {
     const channel = num(pick(m, ["channel", "cameranumber", "camera", "chn"]));
@@ -234,11 +235,12 @@ export async function saveEvents(link: CctvLink, body: unknown, photo: Blob | nu
     const timeRaw = pick(m, ["localtime", "datetime", "eventtime", "time", "timestamp"]);
     const t = nvrTime(timeRaw);
     const at = t !== null && Math.abs(t - received) <= CLOCK_TOLERANCE_MIN * 60_000 ? t : received;
-    // Plain motion is kept only around opening / closing; smart events (the doorway line used for
-    // walk-ins) are kept all day.
+    // Only the pictures we use: the doorway line (walk-ins, people to watch) all day; anything else only
+    // around opening / closing; vehicles never.
     const codes = subCodes(m);
-    const smart = codes.length > 0 && !codes.includes(2);
-    if (!inKeepWindow(at) && !smart) continue;
+    if (codes.length && codes.every((c) => c === 102)) continue;
+    const doorway = watch.walkinCode > 0 && codes.includes(watch.walkinCode);
+    if (!doorway && !inKeepWindow(at)) continue;
     rows.push({
       store: link.store,
       link_id: link.id,
