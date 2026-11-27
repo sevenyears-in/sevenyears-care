@@ -90,7 +90,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
     items.push({ ...r, kind, customers, groups: kind === "counted" ? Math.max(1, ai?.groups ?? 1) : 0 });
   }
   const counted = items.filter((i) => i.kind === "counted" || i.kind === "same");
-  const list = show === "all" ? items : items.filter((i) => counted.includes(i) || i.kind === "markedStaff" || i.kind === "waiting");
+  const list = show === "all" ? items.filter((i) => i.kind !== "waiting") : items.filter((i) => counted.includes(i) || i.kind === "markedStaff");
   const urls = await eventPhotos(list.map((i) => i.id)).catch(() => new Map<number, string>());
   const customers = counted.reduce((n, i) => n + i.customers, 0);
   const q = (o: Record<string, string>) => `?${new URLSearchParams({ store, day, ...(show === "all" ? { show } : {}), ...o })}`;
@@ -104,7 +104,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
             Walk-in photos · {store} · {formatDate(day)}
           </h1>
           <p className="mt-1 text-sm text-black/55">
-            {customers} customer(s) in {counted.length} photo(s) · {rows.length} doorway photo(s) in all
+            {customers} customer(s) in {counted.length} photo(s) · {items.filter((i) => i.kind !== "waiting").length} doorway photo(s) in all
           </p>
           <p className="mt-1 text-xs text-black/50">
             Wrong? Use <b>✗ Not a customer — staff</b> (or <b>✓ This is a customer</b> under &ldquo;All doorway photos&rdquo;). The count changes at once, and the AI learns from your marks for this store.
