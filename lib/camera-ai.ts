@@ -205,10 +205,22 @@ export const aiLastError = () => g.__syAiError ?? null;
 async function refPhotos(people: WatchPerson[]) {
   if (g.__syAiRefs && Date.now() - g.__syAiRefs.at < 10 * 60_000) return g.__syAiRefs.refs;
   const refs = new Map<string, Img & { id: string }>();
+  // Their role says what they wear at work: on these cameras the uniform is a far surer sign than the face.
+  const ids = people.map((p) => p.staff_id).filter((x): x is string => Boolean(x));
+  const { data: staff } = ids.length ? await supabaseAdmin.from("staff_users").select("id, role, incentive_group").in("id", ids) : { data: [] };
+  const roles = new Map(((staff ?? []) as { id: string; role: string; incentive_group: string | null }[]).map((x) => [x.id, x]));
   for (const p of people) {
     if (!p.photo_path || !p.active) continue;
     const { data } = await supabaseAdmin.storage.from(WATCH_BUCKET).download(p.photo_path);
-    if (data) refs.set(p.id, { id: p.id, b64: await toB64(data), label: `Reference photo of person "${p.id}" (${p.name}):` });
+    if (!data) continue;
+    const r = p.staff_id ? roles.get(p.staff_id) : undefined;
+    const sm = r && (r.role === "store_manager" || r.incentive_group === "sm");
+    const hint = sm
+      ? ` They are the Store Manager here and wear the MAROON Store Manager shirt with the Seven Years logo and black trousers. Only someone in a maroon shirt with the same face, hair and beard can be them; anyone in a black T-shirt, a customer's clothes, or a different face is NOT them.`
+      : r
+        ? ` They are staff here and wear the black staff uniform with the Seven Years logo. Anyone not in the staff uniform is NOT them.`
+        : "";
+    refs.set(p.id, { id: p.id, b64: await toB64(data), label: `Reference photo of person "${p.id}" (${p.name}).${hint}` });
   }
   g.__syAiRefs = { at: Date.now(), refs };
   return refs;
@@ -236,7 +248,7 @@ Cleaning staff wear their own clothes: anyone holding or near a mop, broom, buck
 Women staff may also wear a long black dress / abaya with a scarf. A person dressed all in black counts as a customer ONLY if they are clearly a shopper: coming in through the entrance from outside, with family or children, or carrying a handbag / shopping bag.
 CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children).
 IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
-${lessons}${refs.length ? `Reference photos of people to look for were given above, each with its id. A person matches only if face, build and clothes clearly fit; if unsure, do not list them.\n` : ""}
+${lessons}${refs.length ? `Reference photos of people to look for were given above, each with its id and what they wear at work. List an id in "watched" ONLY if you are sure: the clothes match what they wear at work AND the face, hair and build match. If you are not sure, leave it out — a wrong match is worse than a missed one.\n` : ""}
 ${recent.length ? `CUSTOMERS ALREADY COUNTED in the last ${RECENT_MIN} minutes (they walk around the store and may cross the line again):\n${recent.map((d, n) => `${n + 1}. ${d}`).join("\n")}\n` : ""}
 Describe EVERY real person you can see in the store, then decide for each one:
 - "staff": true if they wear the staff uniform or fit the staff rules above. If you are not sure, answer true.
