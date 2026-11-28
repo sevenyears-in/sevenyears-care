@@ -701,12 +701,14 @@ async function edgeEvent(store: string, channels: number[], fromMs: number, toMs
     .order("event_at", { ascending: !last })
     .limit(1);
   if (channels.length) q = q.in("channel", channels);
-  // Leave out what the recorder marks as a vehicle (VIGI: 101 = person, 102 = vehicle).
-  if (humansOnly) q = q.or("raw->sub_type.is.null,raw->sub_type.not.cs.[102]");
-  // lineCode < 0: only crossings of the doorway line (the AI may mark one as going out).
   if (lineCode < 0) {
-    q = q.filter("raw->sub_type", "cs", `[${-lineCode}]`);
-    q = q.or(`ai.is.null,ai->>direction.neq.${last ? "in" : "out"}`);
+    // Only crossings of the doorway line, with a photo. The first crossing of the morning is the first
+    // person in and the last at night the last out, whatever way the AI guesses from the still photo.
+    q = q.filter("raw->sub_type", "cs", `[${-lineCode}]`).not("photo_path", "is", null);
+    if (humansOnly) q = q.not("raw->sub_type", "cs", "[102]");
+  } else if (humansOnly) {
+    // Leave out what the recorder marks as a vehicle (VIGI: 101 = person, 102 = vehicle).
+    q = q.or("raw->sub_type.is.null,raw->sub_type.not.cs.[102]");
   }
   const { data } = await q;
   const e = (data ?? [])[0] as { id: number; event_at: string; photo_path: string | null } | undefined;
