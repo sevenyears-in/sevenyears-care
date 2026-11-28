@@ -240,13 +240,13 @@ export async function checkDoorPhoto(
   const lessons = learned.images.length || learned.notes.length
     ? `\nLEARN FROM THE MANAGER'S CORRECTIONS AT THIS STORE: ${learned.images.length ? "the example photos above were checked by the manager and labelled. People who look or act like those marked STAFF are staff; do not repeat those mistakes." : ""}${learned.notes.length ? `\nManager's notes:\n${learned.notes.map((n) => `- ${n}`).join("\n")}` : ""}\n`
     : "";
-  const prompt = `This is a CCTV snapshot from the entrance camera of a Seven Years baby and kids store in Kerala, India. It was taken when someone crossed a line drawn on the floor near the entrance.
+  const prompt = `This is a CCTV snapshot from the entrance camera of a Seven Years baby and kids store in Kerala, India. It was taken when someone walked IN through the entrance door (the camera sends a photo only for people coming in), so look first at the person at or just inside the entrance door.
 
 STAFF: ${s.uniform}
 Also treat as staff: anyone standing behind the billing counter, arranging or carrying stock, and people in matching dark clothes standing together (a staff meeting).
 Cleaning staff wear their own clothes: anyone holding or near a mop, broom, bucket, cleaning cloth or cleaning trolley is staff.
 Women staff may also wear a long black dress / abaya with a scarf. A person dressed all in black counts as a customer ONLY if they are clearly a shopper: coming in through the entrance from outside, with family or children, or carrying a handbag / shopping bag.
-CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children).
+CUSTOMERS: shoppers in their own everyday clothes (coloured saree, churidar / kurta, shirt, jeans, children). People standing IN FRONT of the billing counter being served or paying are customers; people BEHIND the counter are staff.
 IGNORE completely: mannequins and display figures, toys, pictures, posters, and anyone outside the glass.
 ${lessons}${refs.length ? `Reference photos of people to look for were given above, each with its id and what they wear at work. List an id in "watched" ONLY if you are sure: the clothes match what they wear at work AND the face, hair and build match. If you are not sure, leave it out — a wrong match is worse than a missed one.\n` : ""}
 ${recent.length ? `CUSTOMERS ALREADY COUNTED in the last ${RECENT_MIN} minutes (they walk around the store and may cross the line again):\n${recent.map((d, n) => `${n + 1}. ${d}`).join("\n")}\n` : ""}
