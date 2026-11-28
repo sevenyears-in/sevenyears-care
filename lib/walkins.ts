@@ -114,7 +114,7 @@ export async function cameraWalkins(
     .limit(5000);
   type Ai = { people?: number; staff?: number; customers?: number; groups?: number; direction?: string } | null;
   const rows = (data ?? []) as { id: number; event_at: string; ai: Ai }[];
-  // A manager's mark ("Not a customer — staff" / "This is a customer") overrides the AI.
+  // A manager's mark ("Not a walk-in" / "This is a customer") overrides the AI.
   const { loadMarks } = await import("@/lib/camera-ai");
   const marks = await loadMarks(rows.map((r) => r.id)).catch(() => new Map<number, { verdict: string }>());
   let walkins = 0;

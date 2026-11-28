@@ -304,7 +304,7 @@ export async function recentCustomers(store: string, at: string): Promise<string
 }
 
 // ------------------------------------------------------------------
-// Learning from the manager's marks (Walk-in photos → "Not a customer — staff" / "This is a customer")
+// Learning from the manager's marks (Walk-in photos → "Not a walk-in" / "This is a customer")
 // ------------------------------------------------------------------
 
 const EXAMPLE_BUCKET = "camera-ai-examples";
@@ -397,7 +397,7 @@ async function storeExamples(store: string): Promise<{ images: Img[]; notes: str
       detail: "low",
       label:
         m.verdict === "staff"
-          ? `EXAMPLE checked by the manager: the people in this photo are STAFF, not customers${m.note ? ` (${m.note})` : ""}. Do not count people like them.`
+          ? `EXAMPLE checked by the manager: NOT a walk-in — nobody in this photo is a customer coming in (staff, a mannequin or similar)${m.note ? ` (${m.note})` : ""}. Do not count people or figures like these.`
           : `EXAMPLE checked by the manager: this photo shows a CUSTOMER coming in${m.note ? ` (${m.note})` : ""}.`,
     });
   }

@@ -10,7 +10,7 @@ async function post(body: Record<string, unknown>) {
   return d as { photos?: number };
 }
 
-/** On a walk-in photo: "Not a customer — staff" / "This is a customer", with a short note; the AI learns from it. */
+/** On a walk-in photo: "Not a walk-in" / "This is a customer", with a short note; the AI learns from it. */
 export function WalkinMark({
   id,
   counted,
@@ -46,7 +46,7 @@ export function WalkinMark({
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/5 px-3 py-2 text-[11px]">
         <p className={`font-bold ${mark.verdict === "staff" ? "text-black/70" : "text-green-700"}`}>
-          ✓ Marked: {mark.verdict === "staff" ? "staff, not a customer" : "customer"}
+          ✓ Marked: {mark.verdict === "staff" ? "not a walk-in" : "customer"}
           {mark.note ? ` · ${mark.note}` : ""}
           <span className="font-normal text-black/45">{mark.by ? ` · by ${mark.by}` : ""} · the AI learns from this</span>
         </p>
@@ -63,12 +63,12 @@ export function WalkinMark({
     <div className="border-t border-black/5 px-3 py-2 text-[11px]">
       {open ? (
         <div className="space-y-1.5">
-          <p className="font-semibold">{open === "staff" ? "Not a customer — it is staff" : "This is a customer coming in"}</p>
+          <p className="font-semibold">{open === "staff" ? "Not a walk-in" : "This is a customer coming in"}</p>
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
             maxLength={200}
-            placeholder={open === "staff" ? "Why? e.g. HK staff with a bucket, black uniform (optional)" : "e.g. lady in black burqa with child (optional)"}
+            placeholder={open === "staff" ? "Why? e.g. staff in black uniform, HK staff, mannequin (optional)" : "e.g. lady in black burqa with child (optional)"}
             className="w-full rounded-lg border border-black/15 px-2 py-1.5 text-xs"
           />
           <div className="flex gap-2">
@@ -86,7 +86,7 @@ export function WalkinMark({
           onClick={() => setOpen(verdict)}
           className={`rounded-full px-3 py-1 font-bold ring-1 ${verdict === "staff" ? "text-red-700 ring-red-200 hover:bg-red-50" : "text-green-700 ring-green-200 hover:bg-green-50"}`}
         >
-          {verdict === "staff" ? "✗ Not a customer — staff" : "✓ This is a customer"}
+          {verdict === "staff" ? "✗ Not a walk-in" : "✓ This is a customer"}
         </button>
       )}
       {error && <p className="mt-1 text-red-700">{error}</p>}

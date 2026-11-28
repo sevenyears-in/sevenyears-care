@@ -25,7 +25,7 @@ const LABEL: Record<Kind, { text: string; cls: string }> = {
   out: { text: "Going out — not counted", cls: "bg-black/5 text-black/60" },
   nobody: { text: "Nobody walking in — not counted", cls: "bg-black/5 text-black/60" },
   unusable: { text: "Photo not usable — not counted", cls: "bg-black/5 text-black/60" },
-  markedStaff: { text: "Marked staff — not counted", cls: "bg-black/5 text-black/60" },
+  markedStaff: { text: "Marked not a walk-in — not counted", cls: "bg-black/5 text-black/60" },
 };
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" });
@@ -107,7 +107,7 @@ export default async function WalkinPhotosPage({ searchParams }: { searchParams:
             {customers} customer(s) in {counted.length} photo(s) · {items.filter((i) => i.kind !== "waiting").length} doorway photo(s) in all
           </p>
           <p className="mt-1 text-xs text-black/50">
-            Wrong? Use <b>✗ Not a customer — staff</b> (or <b>✓ This is a customer</b> under &ldquo;All doorway photos&rdquo;). The count changes at once, and the AI learns from your marks for this store.
+            Wrong? Use <b>✗ Not a walk-in</b> (or <b>✓ This is a customer</b> under &ldquo;All doorway photos&rdquo;). The count changes at once, and the AI learns from your marks for this store.
           </p>
         </div>
         <Link href={`/staff/performance?view=team&store=${encodeURIComponent(store)}`} className="rounded-full bg-white px-4 py-2 text-sm font-semibold ring-1 ring-black/10 hover:bg-black/5">
